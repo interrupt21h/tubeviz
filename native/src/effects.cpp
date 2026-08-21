@@ -325,48 +325,100 @@ void draw_native_contours(std::vector<std::uint8_t>& rgb, int width, int height,
                           const VectorEffect& e, double amount, bool semantic) {
     if (amount <= .01) return;
     const auto src = rgb;
-    const int stride = std::max(2, std::min(width, height) / 260);
-    const double threshold = semantic ? 165.0 : 125.0;
-    int drawn = 0;
-    for (int y = stride; y < height - stride && drawn < e.count * 4; y += stride) {
-        for (int x = stride; x < width - stride && drawn < e.count * 4; x += stride) {
-            const double gx =
-                -luminance(src,width,x-stride,y-stride)-2*luminance(src,width,x-stride,y)-luminance(src,width,x-stride,y+stride)
-                +luminance(src,width,x+stride,y-stride)+2*luminance(src,width,x+stride,y)+luminance(src,width,x+stride,y+stride);
-            const double gy =
-                -luminance(src,width,x-stride,y-stride)-2*luminance(src,width,x,y-stride)-luminance(src,width,x+stride,y-stride)
-                +luminance(src,width,x-stride,y+stride)+2*luminance(src,width,x,y+stride)+luminance(src,width,x+stride,y+stride);
-            const double mag = std::sqrt(gx*gx+gy*gy);
-            if (mag < threshold) continue;
-            if (semantic) {
-                const double nx=(x-width*.5)/(width*.5), ny=(y-height*.5)/(height*.5);
-                if (nx*nx+ny*ny > 1.25 && mag < threshold*1.5) continue;
+    const int step = std::max(3, std::min(width, height) / 210);
+    const int gw = std::max(3, width / step), gh = std::max(3, height / step);
+    std::vector<double> mags(static_cast<std::size_t>(gw) * gh, 0.0);
+    std::vector<std::uint8_t> edge(mags.size(), 0), visited(mags.size(), 0);
+    const double threshold = semantic ? 150.0 : 115.0;
+    auto sample = [&](int gx, int gy) {
+        return luminance(src, width, std::clamp(gx * step, 0, width - 1), std::clamp(gy * step, 0, height - 1));
+    };
+    for (int gy = 1; gy < gh - 1; ++gy) {
+        for (int gx = 1; gx < gw - 1; ++gx) {
+            const double sx = -sample(gx-1,gy-1)-2*sample(gx-1,gy)-sample(gx-1,gy+1)
+                              +sample(gx+1,gy-1)+2*sample(gx+1,gy)+sample(gx+1,gy+1);
+            const double sy = -sample(gx-1,gy-1)-2*sample(gx,gy-1)-sample(gx+1,gy-1)
+                              +sample(gx-1,gy+1)+2*sample(gx,gy+1)+sample(gx+1,gy+1);
+            const auto i = static_cast<std::size_t>(gy * gw + gx);
+            mags[i] = std::hypot(sx, sy);
+            if (mags[i] >= threshold) edge[i] = 1;
+        }
+    }
+
+    struct Component { std::vector<int> cells; double score{0.0}; };
+    std::vector<Component> components;
+    constexpr int dx8[8] = {-1,0,1,-1,1,-1,0,1};
+    constexpr int dy8[8] = {-1,-1,-1,0,0,1,1,1};
+    for (int gy = 1; gy < gh - 1; ++gy) for (int gx = 1; gx < gw - 1; ++gx) {
+        const int start = gy * gw + gx;
+        if (!edge[start] || visited[start]) continue;
+        Component c; std::vector<int> stack{start}; visited[start] = 1;
+        while (!stack.empty()) {
+            const int cur = stack.back(); stack.pop_back(); c.cells.push_back(cur); c.score += mags[cur];
+            const int x = cur % gw, y = cur / gw;
+            for (int k = 0; k < 8; ++k) {
+                const int nx=x+dx8[k], ny=y+dy8[k];
+                if(nx<=0||nx>=gw-1||ny<=0||ny>=gh-1) continue;
+                const int n=ny*gw+nx;
+                if(edge[n]&&!visited[n]){visited[n]=1;stack.push_back(n);}
             }
-            const double angle=std::atan2(gy,gx)+1.57079632679;
-            const int len=std::max(2,static_cast<int>((4+10*amount)*e.line_width));
-            const int x0=x-static_cast<int>(std::cos(angle)*len), y0=y-static_cast<int>(std::sin(angle)*len);
-            const int x1=x+static_cast<int>(std::cos(angle)*len), y1=y+static_cast<int>(std::sin(angle)*len);
-            const double hue = std::fmod(185.0 + drawn*3.0 + 80.0*amount, 360.0);
-            const double rr=128+127*std::sin((hue+0)*.0174533);
-            const double gg=128+127*std::sin((hue+120)*.0174533);
-            const double bb=128+127*std::sin((hue+240)*.0174533);
-            draw_line(rgb,width,height,x0,y0,x1,y1,rr,gg,bb,e.opacity*amount,std::max(1,static_cast<int>(e.line_width)));
-            ++drawn;
+        }
+        if (c.cells.size() >= 7) {
+            c.score *= std::sqrt(static_cast<double>(c.cells.size()));
+            components.push_back(std::move(c));
+        }
+    }
+    std::sort(components.begin(), components.end(), [](const Component& a,const Component& b){return a.score>b.score;});
+    const int max_paths = std::min<int>(semantic ? 5 : 9, std::min<int>(e.count, components.size()));
+    for (int ci=0; ci<max_paths; ++ci) {
+        const auto& comp=components[ci];
+        std::vector<std::uint8_t> remaining(mags.size(),0);
+        for(int cell:comp.cells) remaining[cell]=1;
+        auto degree=[&](int cell){int d=0,x=cell%gw,y=cell/gw;for(int k=0;k<8;k++){int nx=x+dx8[k],ny=y+dy8[k];if(nx>0&&nx<gw-1&&ny>0&&ny<gh-1&&remaining[ny*gw+nx])++d;}return d;};
+        int cur=comp.cells.front();
+        for(int cell:comp.cells) if(degree(cell)<=1){cur=cell;break;}
+        double last_angle=0.0; bool have_angle=false; std::vector<std::pair<int,int>> path;
+        while(cur>=0&&remaining[cur]){
+            remaining[cur]=0;const int x=cur%gw,y=cur/gw;path.emplace_back(x*step,y*step);
+            int best=-1;double best_score=1e9,best_angle=last_angle;
+            for(int k=0;k<8;k++){const int nx=x+dx8[k],ny=y+dy8[k];if(nx<=0||nx>=gw-1||ny<=0||ny>=gh-1)continue;const int n=ny*gw+nx;if(!remaining[n])continue;const double a=std::atan2(static_cast<double>(ny-y),static_cast<double>(nx-x));const double turn=have_angle?std::abs(std::atan2(std::sin(a-last_angle),std::cos(a-last_angle))):0.0;const double score=turn-.0007*mags[n];if(score<best_score){best_score=score;best=n;best_angle=a;}}
+            if (best < 0) break;
+            cur = best;
+            last_angle = best_angle;
+            have_angle = true;
+        }
+        if(path.size()<5)continue;
+        const double hue=std::fmod(185.0+ci*17.0+70.0*amount,360.0),rr=128+127*std::sin(hue*.0174533),gg=128+127*std::sin((hue+120)*.0174533),bb=128+127*std::sin((hue+240)*.0174533);
+        for(std::size_t i=1;i<path.size();++i){
+            draw_line(rgb,width,height,path[i-1].first,path[i-1].second,path[i].first,path[i].second,rr,gg,bb,e.opacity*amount*(semantic?.40:.34),std::max(1,static_cast<int>(e.line_width)));
         }
     }
 }
 
 void draw_native_flow(std::vector<std::uint8_t>& rgb, int width, int height,
                       const VectorEffect& e, double amount, double phase, bool particles) {
-    const int count=std::min(e.count,particles?180:64);
-    double base=std::atan2(e.motion_y,e.motion_x==0?1e-6:e.motion_x);
+    const auto src=rgb;
+    struct Seed { int x; int y; double mag; };
+    std::vector<Seed> seeds;
+    const int step=std::max(8,std::min(width,height)/90);
+    for(int y=step;y<height-step;y+=step)for(int x=step;x<width-step;x+=step){
+        const double gx=luminance(src,width,x+step/2,y)-luminance(src,width,x-step/2,y);
+        const double gy=luminance(src,width,x,y+step/2)-luminance(src,width,x,y-step/2);
+        const double mag=std::hypot(gx,gy);if(mag>18)seeds.push_back({x,y,mag});
+    }
+    std::sort(seeds.begin(),seeds.end(),[](const Seed&a,const Seed&b){return a.mag>b.mag;});
+    const int count=std::min<int>(particles?24:12,std::min<int>(e.count,seeds.size()));
+    const double base=std::atan2(e.motion_y,e.motion_x==0?1e-6:e.motion_x);
     for(int i=0;i<count;i++){
-        const double rx=unit_rand(e.seed,i*3), ry=unit_rand(e.seed,i*3+1), rz=unit_rand(e.seed,i*3+2);
-        const int x0=static_cast<int>(rx*width),y0=static_cast<int>(ry*height);
-        const double angle=base+std::sin(phase*(1.2+amount)+rz*6.283+i*.17)*(.3+.8*amount);
-        const double len=(particles?18.0:85.0)*(0.4+1.5*amount);
-        const int x1=x0+static_cast<int>(std::cos(angle)*len),y1=y0+static_cast<int>(std::sin(angle)*len);
-        draw_line(rgb,width,height,x0,y0,x1,y1,80+120*rz,150+90*rx,255,e.opacity*amount*(particles?.55:.85),std::max(1,static_cast<int>(e.line_width)));
+        const auto& seed=seeds[i];double x=seed.x,y=seed.y,angle=base+std::sin(phase*.7+i*.61)*(.12+.28*amount);const int segments=particles?2:7;
+        const double ds=(particles?8.0:18.0)*(0.55+amount);
+        const double hue=190+i*8,rr=128+110*std::sin(hue*.0174533),gg=150+90*std::sin((hue+120)*.0174533),bb=240;
+        for(int seg=0;seg<segments;seg++){
+            const double bend=std::sin(phase*.55+i*.43+seg*.7)*(.05+.14*amount);angle+=bend;
+            const int nx=static_cast<int>(x+std::cos(angle)*ds),ny=static_cast<int>(y+std::sin(angle)*ds);
+            draw_line(rgb,width,height,static_cast<int>(x),static_cast<int>(y),nx,ny,rr,gg,bb,e.opacity*amount*(particles?.32:.46),std::max(1,static_cast<int>(e.line_width)));
+            x=nx;y=ny;if(x<0||x>=width||y<0||y>=height)break;
+        }
     }
 }
 

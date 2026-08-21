@@ -137,10 +137,44 @@
 </main>
 
 <div id="videoModal" class="modal hidden">
-  <div class="modal-box">
+  <div class="modal-box trim-modal">
     <button id="closeModal" class="modal-close">×</button>
-    <h3 id="modalTitle"></h3>
+    <div class="trim-heading">
+      <div>
+        <h3 id="modalTitle"></h3>
+        <div id="trimStatus" class="clip-meta">Loading clip…</div>
+      </div>
+      <span class="badge">Non-destructive library trim</span>
+    </div>
     <video id="modalVideo" controls autoplay></video>
+
+    <div class="trim-editor">
+      <div class="trim-readout">
+        <span>In <b id="trimInLabel">0:00.000</b></span>
+        <span>Kept <b id="trimDurationLabel">0:00.000</b></span>
+        <span>Out <b id="trimOutLabel">0:00.000</b></span>
+      </div>
+      <div class="trim-track-wrap" id="trimTrackWrap">
+        <div id="trimTrackBase" class="trim-track-base"></div>
+        <div id="trimTrackKeep" class="trim-track-keep"></div>
+        <div id="trimSceneMarkers" class="trim-scene-markers"></div>
+        <div id="trimPlayhead" class="trim-playhead"></div>
+        <input id="trimIn" class="trim-range trim-range-in" type="range" min="0" max="1" value="0" step="0.01">
+        <input id="trimOut" class="trim-range trim-range-out" type="range" min="0" max="1" value="1" step="0.01">
+      </div>
+      <div class="trim-actions">
+        <button id="setTrimIn">Set In to Playhead</button>
+        <button id="setTrimOut">Set Out to Playhead</button>
+        <button id="jumpTrimIn">▶ In</button>
+        <button id="jumpTrimOut">▶ Out</button>
+        <label class="check trim-loop"><input id="loopTrim" type="checkbox" checked> Loop kept range</label>
+      </div>
+      <div class="trim-actions trim-save-row">
+        <button id="clearTrim">Clear Trim</button>
+        <button id="saveTrim" class="primary">Save In / Out</button>
+      </div>
+      <p class="trim-help">Only the highlighted range remains eligible for scene selection. The media file itself is not rewritten.</p>
+    </div>
   </div>
 </div>
 

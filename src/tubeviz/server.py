@@ -97,7 +97,7 @@ def create_app(
     package_dir = Path(__file__).resolve().parent
     static_dir = package_dir / "static"
 
-    app = FastAPI(title="tubeviz", version="0.22.0")
+    app = FastAPI(title="tubeviz", version="0.24.0")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     if library is not None:
         # StaticFiles resolves requests beneath this directory and rejects path

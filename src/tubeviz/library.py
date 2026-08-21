@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,8 @@ class ClipRecord:
     normalized_path: str | None
     original_sha256: str | None
     normalized_sha256: str | None
+    usable_start: float | None
+    usable_end: float | None
     status: str
     error: str | None
 
@@ -116,6 +118,8 @@ class ClipLibrary:
                     info_json_path TEXT,
                     original_sha256 TEXT,
                     normalized_sha256 TEXT,
+                    usable_start REAL,
+                    usable_end REAL,
                     status TEXT NOT NULL DEFAULT 'discovered',
                     duplicate_of_clip_id INTEGER REFERENCES clips(id),
                     error TEXT,
@@ -184,6 +188,16 @@ class ClipLibrary:
                     ON scene_visual_features(version, scene_id);
                 """
             )
+            # Forward-compatible in-place migrations for persistent libraries.
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(clips)").fetchall()
+            }
+            if "usable_start" not in columns:
+                db.execute("ALTER TABLE clips ADD COLUMN usable_start REAL")
+            if "usable_end" not in columns:
+                db.execute("ALTER TABLE clips ADD COLUMN usable_end REAL")
+
             db.execute(
                 "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -414,11 +428,20 @@ class ClipLibrary:
         term: str | None = None,
         clip_id: int | None = None,
         min_duration: float = 0.0,
+        respect_trim: bool = True,
     ) -> list[SceneCandidate]:
+        start_expr = (
+            "MAX(s.start_time, COALESCE(c.usable_start, 0.0))"
+            if respect_trim else "s.start_time"
+        )
+        end_expr = (
+            "MIN(s.end_time, COALESCE(c.usable_end, s.end_time))"
+            if respect_trim else "s.end_time"
+        )
         clauses = [
             "c.status='ready'",
             "c.normalized_path IS NOT NULL",
-            "s.duration>=?",
+            f"({end_expr} - {start_expr})>=?",
         ]
         params: list[object] = [max(0.0, min_duration)]
         if term is not None:
@@ -430,8 +453,11 @@ class ClipLibrary:
 
         sql = f"""
             SELECT
-                s.id AS scene_id, s.clip_id, s.scene_index, s.start_time,
-                s.end_time, s.duration, s.thumbnail_path,
+                s.id AS scene_id, s.clip_id, s.scene_index,
+                s.start_time AS original_start_time, s.end_time AS original_end_time,
+                {start_expr} AS effective_start_time,
+                {end_expr} AS effective_end_time,
+                s.thumbnail_path, c.usable_start, c.usable_end,
                 c.source_id, c.title, c.description, c.channel, c.normalized_path,
                 st.term, ct.rank AS term_rank, svf.data_json AS visual_features_json
             FROM scenes s
@@ -456,14 +482,39 @@ class ClipLibrary:
             if scene_id in seen:
                 continue
             seen.add(scene_id)
+            effective_start = float(row["effective_start_time"])
+            effective_end = float(row["effective_end_time"])
+            if effective_end <= effective_start:
+                continue
+            visual_features = (
+                json.loads(row["visual_features_json"])
+                if row["visual_features_json"] else None
+            )
+            # Visual accent times are stored relative to the original indexed
+            # scene. If a trim clips the beginning of that scene, shift/filter
+            # them so rhythm alignment never targets excluded intro footage.
+            if visual_features and visual_features.get("accents"):
+                original_start = float(row["original_start_time"])
+                shift = effective_start - original_start
+                usable_duration = effective_end - effective_start
+                visual_features = dict(visual_features)
+                adjusted = []
+                for accent in visual_features.get("accents", []):
+                    time_value = float(accent.get("time", 0.0)) - shift
+                    if 0.0 <= time_value <= usable_duration:
+                        item = dict(accent)
+                        item["time"] = time_value
+                        adjusted.append(item)
+                visual_features["accents"] = adjusted
+
             result.append(
                 SceneCandidate(
                     scene_id=scene_id,
                     clip_id=int(row["clip_id"]),
                     scene_index=int(row["scene_index"]),
-                    start_time=float(row["start_time"]),
-                    end_time=float(row["end_time"]),
-                    duration=float(row["duration"]),
+                    start_time=effective_start,
+                    end_time=effective_end,
+                    duration=effective_end - effective_start,
                     thumbnail_path=row["thumbnail_path"],
                     source_id=str(row["source_id"]),
                     title=row["title"],
@@ -472,10 +523,7 @@ class ClipLibrary:
                     normalized_path=str(row["normalized_path"]),
                     term=row["term"],
                     term_rank=int(row["term_rank"]) if row["term_rank"] is not None else None,
-                    visual_features=(
-                        json.loads(row["visual_features_json"])
-                        if row["visual_features_json"] else None
-                    ),
+                    visual_features=visual_features,
                 )
             )
         return result
@@ -559,6 +607,7 @@ class ClipLibrary:
                 c.id, c.source, c.source_id, c.title, c.channel, c.duration,
                 c.width, c.height, c.status, c.error,
                 c.original_path, c.normalized_path, c.duplicate_of_clip_id,
+                c.usable_start, c.usable_end,
                 COUNT(DISTINCT sc.id) AS scene_count,
                 COUNT(DISTINCT se.scene_id) AS embedded_scene_count,
                 GROUP_CONCAT(DISTINCT st.term) AS terms
@@ -595,6 +644,13 @@ class ClipLibrary:
                 "original_path": row["original_path"],
                 "normalized_path": row["normalized_path"],
                 "duplicate_of_clip_id": row["duplicate_of_clip_id"],
+                "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
+                "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
+                "usable_duration": max(
+                    0.0,
+                    (float(row["usable_end"]) if row["usable_end"] is not None else float(row["duration"] or 0.0))
+                    - (float(row["usable_start"]) if row["usable_start"] is not None else 0.0),
+                ),
                 "media_available": self.resolve_clip_media_by_id(
                     int(row["id"])
                 ) is not None,
@@ -674,6 +730,13 @@ class ClipLibrary:
             "info_json_path": row["info_json_path"],
             "original_sha256": row["original_sha256"],
             "normalized_sha256": row["normalized_sha256"],
+            "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
+            "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
+            "usable_duration": max(
+                0.0,
+                (float(row["usable_end"]) if row["usable_end"] is not None else float(row["duration"] or 0.0))
+                - (float(row["usable_start"]) if row["usable_start"] is not None else 0.0),
+            ),
             "scene_count": int(row["scene_count"] or 0),
             "embedded_scene_count": int(row["embedded_scene_count"] or 0),
             "metadata": metadata,
@@ -809,6 +872,65 @@ class ClipLibrary:
             "resolved_media": str(resolved) if resolved else None,
             "library": str(self.root),
         }
+
+    def set_clip_trim(
+        self,
+        source: str,
+        source_id: str,
+        *,
+        usable_start: float | None,
+        usable_end: float | None,
+    ) -> dict[str, Any]:
+        """Persist non-destructive usable In/Out points for a source clip."""
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT id, duration FROM clips WHERE source=? AND source_id=?",
+                (source, source_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown clip: {source}:{source_id}")
+
+            duration = float(row["duration"] or 0.0)
+            start = 0.0 if usable_start is None else max(0.0, float(usable_start))
+            end = duration if usable_end is None else float(usable_end)
+            if duration > 0:
+                start = min(start, duration)
+                end = min(max(0.0, end), duration)
+            if end <= start + 0.05:
+                raise ValueError("trim Out point must be at least 0.05s after In point")
+
+            # Store NULL for natural media boundaries so an ingest metadata
+            # refresh can extend the clip without leaving a stale artificial cap.
+            stored_start = None if start <= 1e-6 else start
+            stored_end = None if duration > 0 and abs(end - duration) <= 1e-3 else end
+            db.execute(
+                """
+                UPDATE clips
+                SET usable_start=?, usable_end=?, updated_at=?
+                WHERE id=?
+                """,
+                (stored_start, stored_end, utcnow(), int(row["id"])),
+            )
+
+        details = self.clip_details(source, source_id)
+        assert details is not None
+        return details
+
+    def clear_clip_trim(self, source: str, source_id: str) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT id FROM clips WHERE source=? AND source_id=?",
+                (source, source_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown clip: {source}:{source_id}")
+            db.execute(
+                "UPDATE clips SET usable_start=NULL, usable_end=NULL, updated_at=? WHERE id=?",
+                (utcnow(), int(row["id"])),
+            )
+        details = self.clip_details(source, source_id)
+        assert details is not None
+        return details
 
     def is_manually_rejected(self, source: str, source_id: str) -> bool:
         record = self.get_clip(source, source_id)
@@ -1202,6 +1324,8 @@ class ClipLibrary:
             normalized_path=row["normalized_path"],
             original_sha256=row["original_sha256"],
             normalized_sha256=row["normalized_sha256"],
+            usable_start=float(row["usable_start"]) if row["usable_start"] is not None else None,
+            usable_end=float(row["usable_end"]) if row["usable_end"] is not None else None,
             status=str(row["status"]),
             error=row["error"],
         )

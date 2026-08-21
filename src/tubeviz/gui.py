@@ -38,6 +38,13 @@ class ClipAction(BaseModel):
     keep_original: bool = False
 
 
+class ClipTrimAction(BaseModel):
+    library: str = "./library"
+    source: str = "youtube"
+    usable_start: float | None = None
+    usable_end: float | None = None
+
+
 @dataclass
 class GuiJob:
     id: str
@@ -279,7 +286,7 @@ def create_gui_app(
     static_dir = package_dir / "static"
     jobs = JobManager()
 
-    app = FastAPI(title="tubeviz studio", version="0.22.0")
+    app = FastAPI(title="tubeviz studio", version="0.24.0")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/")
@@ -350,6 +357,31 @@ def create_gui_app(
             )
         return FileResponse(path)
 
+    @app.post("/api/gui/clip/{source_id}/trim")
+    async def save_clip_trim(source_id: str, action: ClipTrimAction) -> dict[str, Any]:
+        lib = ClipLibrary(action.library)
+        lib.initialize()
+        try:
+            return lib.set_clip_trim(
+                action.source,
+                source_id,
+                usable_start=action.usable_start,
+                usable_end=action.usable_end,
+            )
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/gui/clip/{source_id}/trim/clear")
+    async def clear_clip_trim(source_id: str, action: ClipTrimAction) -> dict[str, Any]:
+        lib = ClipLibrary(action.library)
+        lib.initialize()
+        try:
+            return lib.clear_clip_trim(action.source, source_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @app.get("/api/gui/clip/{source_id}/thumbnail")
     async def clip_thumbnail(
         source_id: str,
@@ -361,7 +393,16 @@ def create_gui_app(
         details = lib.clip_details(source, source_id)
         if details is None:
             raise HTTPException(404, "clip not found")
+        trim_start = float(details.get("usable_start") or 0.0)
+        trim_end = details.get("usable_end")
+        trim_end_value = float(trim_end) if trim_end is not None else float("inf")
         for scene in details.get("scenes", []):
+            # Prefer a thumbnail from a scene that remains selectable after
+            # non-destructive trim, rather than showing an excluded title card.
+            if float(scene.get("end", 0.0)) <= trim_start:
+                continue
+            if float(scene.get("start", 0.0)) >= trim_end_value:
+                continue
             rel = scene.get("thumbnail_path")
             if rel:
                 path = (lib.root / rel).resolve()

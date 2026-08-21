@@ -50,10 +50,14 @@ const [vectorSample,vectorSampleCtx]=offscreen(false);
 const [vectorScratch,vectorScratchCtx]=offscreen(true);
 const [motionProbe,motionProbeCtx]=offscreen(false);
 const [motionPrev,motionPrevCtx]=offscreen(false);
+const [flowProbe,flowProbeCtx]=offscreen(false);
+const [flowPrev,flowPrevCtx]=offscreen(false);
 const delayBuffers=[delayA,delayB,delayC];
 const vectorGeometryCache=new Map();
 const vectorEchoHistory=[];
-let vectorEdgeCache={frame:-1,points:[],salient:[]};
+let vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
+let vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
+let vectorFlowInitialized=false;
 const delayCtx=[delayACtx,delayBCtx,delayCCtx];
 let delayWrite=0;
 
@@ -67,7 +71,11 @@ function resize(){
   vectorScratch.width=width;vectorScratch.height=height;
   motionProbe.width=64;motionProbe.height=36;motionPrev.width=64;motionPrev.height=36;
   motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,64,36);
-  vectorGeometryCache.clear();vectorEchoHistory.length=0;vectorEdgeCache={frame:-1,points:[],salient:[]};
+  flowProbe.width=64;flowProbe.height=36;flowPrev.width=64;flowPrev.height=36;
+  flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,64,36);
+  vectorGeometryCache.clear();vectorEchoHistory.length=0;
+  vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
+  vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
   posterCanvas.width=Math.max(96,Math.min(320,Math.floor(width/5)));
   posterCanvas.height=Math.max(54,Math.min(180,Math.floor(height/5)));
 }
@@ -136,7 +144,7 @@ async function activateScene(scene,{immediate=false}={}){
     const duration=immediate?0:Math.max(0,scene.crossfade_seconds??1.25);
     transition=activeBank<0?null:{from:activeBank,to:next,start:clockNowMs(),duration:duration*1000};
     if(activeBank<0||duration===0){if(activeBank>=0)banks[activeBank].forEach(v=>v.pause());activeBank=next;transition=null;}
-    activeScene={...scene};focusLayer=0;
+    activeScene={...scene};focusLayer=0;resetVectorMotionState();
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
     const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';const vectors=d.vector_effects?.length?` · ${d.vector_effects.length} vector fx`:'';
@@ -677,6 +685,11 @@ function applyPrismaticShift(amount){
   fx.drawImage(scratch,-dx,-dy,width,height);
   fx.restore();
 }
+function resetVectorMotionState(){
+  vectorFlowInitialized=false;vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
+  flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,flowPrev.width,flowPrev.height);
+  motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,motionPrev.width,motionPrev.height);
+}
 function vectorRand(seed,index=0){
   let x=(Number(seed||1)+index*0x9e3779b9)>>>0;
   x^=x<<13;x^=x>>>17;x^=x<<5;
@@ -703,98 +716,195 @@ function vectorColor(effect,alpha=1,hueOffset=0){
   const light=55+20*Math.min(1,sectionEnergy);
   return `hsla(${hue},${sat}%,${light}%,${Math.max(0,Math.min(1,alpha))})`;
 }
+function percentile(values,q){
+  if(!values.length)return 0;
+  const sorted=[...values].sort((a,b)=>a-b),i=Math.max(0,Math.min(sorted.length-1,Math.floor((sorted.length-1)*q)));
+  return sorted[i];
+}
+function rdp(points,epsilon){
+  if(points.length<3)return points.slice();
+  const a=points[0],b=points[points.length-1],dx=b.x-a.x,dy=b.y-a.y,den=Math.hypot(dx,dy)||1;
+  let max=0,index=0;
+  for(let i=1;i<points.length-1;i++){
+    const p=points[i],d=Math.abs(dy*p.x-dx*p.y+b.x*a.y-b.y*a.x)/den;
+    if(d>max){max=d;index=i;}
+  }
+  if(max<=epsilon)return[a,b];
+  const left=rdp(points.slice(0,index+1),epsilon),right=rdp(points.slice(index),epsilon);
+  return left.slice(0,-1).concat(right);
+}
+function chaikin(points,iterations=1){
+  let out=points.slice();
+  for(let k=0;k<iterations;k++){
+    if(out.length<3)break;
+    const next=[out[0]];
+    for(let i=0;i<out.length-1;i++){
+      const a=out[i],b=out[i+1];
+      next.push({x:.75*a.x+.25*b.x,y:.75*a.y+.25*b.y,mag:(a.mag+b.mag)*.5,sal:(a.sal+b.sal)*.5});
+      next.push({x:.25*a.x+.75*b.x,y:.25*a.y+.75*b.y,mag:(a.mag+b.mag)*.5,sal:(a.sal+b.sal)*.5});
+    }
+    next.push(out[out.length-1]);out=next;
+  }
+  return out;
+}
+function pathArcLength(path){let d=0;for(let i=1;i<path.length;i++)d+=Math.hypot(path[i].x-path[i-1].x,path[i].y-path[i-1].y);return d;}
+function pathCentroid(path){let x=0,y=0;for(const p of path){x+=p.x;y+=p.y;}return{x:x/Math.max(1,path.length),y:y/Math.max(1,path.length)};}
+function resamplePath(path,count){
+  if(path.length<=1||count<=2)return path.slice();const dist=[0];for(let i=1;i<path.length;i++)dist.push(dist[i-1]+Math.hypot(path[i].x-path[i-1].x,path[i].y-path[i-1].y));const total=dist[dist.length-1]||1,out=[];
+  for(let k=0;k<count;k++){const target=total*k/(count-1);let i=1;while(i<dist.length&&dist[i]<target)i++;if(i>=dist.length){out.push({...path[path.length-1]});continue;}const a=path[i-1],b=path[i],q=(target-dist[i-1])/Math.max(1e-6,dist[i]-dist[i-1]);out.push({x:a.x+(b.x-a.x)*q,y:a.y+(b.y-a.y)*q,mag:(a.mag??0)+((b.mag??0)-(a.mag??0))*q,sal:(a.sal??0)+((b.sal??0)-(a.sal??0))*q});}
+  return out;
+}
+function stabilizeContourPaths(current,previous){
+  if(!previous?.length)return current;
+  const used=new Set();
+  return current.map(path=>{
+    const c=pathCentroid(path.points);let best=-1,score=1e9;
+    for(let i=0;i<previous.length;i++){if(used.has(i))continue;const old=previous[i],oc=pathCentroid(old.points),d=Math.hypot(c.x-oc.x,c.y-oc.y),ratio=Math.abs(Math.log((path.arc+1)/(old.arc+1)));const s=d*3+ratio;if(s<score){score=s;best=i;}}
+    if(best<0||score>.38)return path;used.add(best);let old=previous[best].points;
+    const n=Math.min(path.points.length,old.length);if(n<3)return path;let cur=resamplePath(path.points,n),prev=resamplePath(old,n);
+    const same=Math.hypot(cur[0].x-prev[0].x,cur[0].y-prev[0].y)+Math.hypot(cur[n-1].x-prev[n-1].x,cur[n-1].y-prev[n-1].y),rev=Math.hypot(cur[0].x-prev[n-1].x,cur[0].y-prev[n-1].y)+Math.hypot(cur[n-1].x-prev[0].x,cur[n-1].y-prev[0].y);if(rev<same)prev=prev.reverse();
+    cur=cur.map((p,i)=>({...p,x:p.x*.72+prev[i].x*.28,y:p.y*.72+prev[i].y*.28}));return{...path,points:cur};
+  });
+}
+function orderedComponentPaths(binary,mags,w,h){
+  const visited=new Uint8Array(w*h),paths=[],dirs=[[-1,-1],[0,-1],[1,-1],[-1,0],[1,0],[-1,1],[0,1],[1,1]];
+  const neighbors=i=>{const x=i%w,y=(i/w)|0,out=[];for(const[dX,dY]of dirs){const nx=x+dX,ny=y+dY;if(nx>0&&nx<w-1&&ny>0&&ny<h-1){const n=ny*w+nx;if(binary[n])out.push(n);}}return out;};
+  const starts=[];
+  for(let i=0;i<binary.length;i++)if(binary[i]){const degree=neighbors(i).length;if(degree<=1)starts.push(i);}
+  for(let i=0;i<binary.length;i++)if(binary[i])starts.push(i);
+  for(const start of starts){
+    if(visited[start]||!binary[start])continue;
+    const component=[],queue=[start];visited[start]=1;
+    while(queue.length){const cur=queue.pop();component.push(cur);for(const n of neighbors(cur))if(!visited[n]){visited[n]=1;queue.push(n);}}
+    if(component.length<6)continue;
+    const set=new Set(component),degree1=component.filter(i=>neighbors(i).filter(n=>set.has(n)).length===1);
+    let cur=degree1[0]??component.reduce((best,i)=>mags[i]>mags[best]?i:best,component[0]),prev=-1,angle=null;
+    const ordered=[],remaining=new Set(component);
+    while(cur>=0&&remaining.has(cur)){
+      remaining.delete(cur);const x=cur%w,y=(cur/w)|0;ordered.push({x,y,mag:mags[cur],sal:mags[cur]});
+      const options=neighbors(cur).filter(n=>remaining.has(n));if(!options.length)break;
+      let best=options[0],bestScore=1e9;
+      for(const n of options){const nx=n%w,ny=(n/w)|0,a=Math.atan2(ny-y,nx-x);let turn=angle===null?0:Math.abs(Math.atan2(Math.sin(a-angle),Math.cos(a-angle)));const score=turn*.9-(mags[n]/255)*.25;if(score<bestScore){bestScore=score;best=n;}}
+      const bx=best%w,by=(best/w)|0;angle=Math.atan2(by-y,bx-x);prev=cur;cur=best;
+    }
+    // Branchy components may contain useful leftovers. Trace them separately.
+    if(ordered.length>=6)paths.push(ordered);
+    while(remaining.size>=6){
+      let seed=[...remaining][0],sub=[],last=-1,cur2=seed,a0=null;
+      while(cur2>=0&&remaining.has(cur2)){remaining.delete(cur2);const x=cur2%w,y=(cur2/w)|0;sub.push({x,y,mag:mags[cur2],sal:mags[cur2]});const opts=neighbors(cur2).filter(n=>remaining.has(n));if(!opts.length)break;let best=opts[0],score=1e9;for(const n of opts){const nx=n%w,ny=(n/w)|0,a=Math.atan2(ny-y,nx-x);const turn=a0===null?0:Math.abs(Math.atan2(Math.sin(a-a0),Math.cos(a-a0)));if(turn<score){score=turn;best=n;}}const bx=best%w,by=(best/w)|0;a0=Math.atan2(by-y,bx-x);last=cur2;cur2=best;}
+      if(sub.length>=6)paths.push(sub);
+    }
+  }
+  return paths;
+}
 function extractVectorEdges(force=false){
-  if(!force&&vectorEdgeCache.frame>=0&&frameCounter-vectorEdgeCache.frame<3)return vectorEdgeCache;
+  if(!force&&vectorEdgeCache.frame>=0&&frameCounter-vectorEdgeCache.frame<4)return vectorEdgeCache;
   const w=vectorSample.width,h=vectorSample.height;
   vectorSampleCtx.drawImage(videoFx,0,0,w,h);
-  let data;
-  try{data=vectorSampleCtx.getImageData(0,0,w,h).data;}catch{return vectorEdgeCache;}
-  const lum=new Float32Array(w*h);
-  let mean=0;
-  for(let i=0,p=0;i<lum.length;i++,p+=4){
-    const y=.2126*data[p]+.7152*data[p+1]+.0722*data[p+2];lum[i]=y;mean+=y;
+  let data;try{data=vectorSampleCtx.getImageData(0,0,w,h).data;}catch{return vectorEdgeCache;}
+  const lum=new Float32Array(w*h),mag=new Float32Array(w*h),ang=new Float32Array(w*h);let mean=0;
+  for(let i=0,p=0;i<lum.length;i++,p+=4){const y=.2126*data[p]+.7152*data[p+1]+.0722*data[p+2];lum[i]=y;mean+=y;}mean/=lum.length;
+  const candidates=[];
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const i=y*w+x,gx=-lum[i-w-1]-2*lum[i-1]-lum[i+w-1]+lum[i-w+1]+2*lum[i+1]+lum[i+w+1],gy=-lum[i-w-1]-2*lum[i-w]-lum[i-w+1]+lum[i+w-1]+2*lum[i+w]+lum[i+w+1];
+    const m=Math.hypot(gx,gy);mag[i]=m;ang[i]=Math.atan2(gy,gx);if(m>25)candidates.push(m);
   }
-  mean/=lum.length;
-  const raw=[];
-  for(let y=1;y<h-1;y+=1)for(let x=1;x<w-1;x+=1){
-    const i=y*w+x;
-    const gx=-lum[i-w-1]-2*lum[i-1]-lum[i+w-1]+lum[i-w+1]+2*lum[i+1]+lum[i+w+1];
-    const gy=-lum[i-w-1]-2*lum[i-w]-lum[i-w+1]+lum[i+w-1]+2*lum[i+w]+lum[i+w+1];
-    const mag=Math.sqrt(gx*gx+gy*gy);
-    if(mag>105)raw.push({x:x/(w-1),y:y/(h-1),mag,angle:Math.atan2(gy,gx),l:lum[i],sal:mag*(.7+.3*Math.abs(lum[i]-mean)/128)});
+  const high=Math.max(95,percentile(candidates,.82)),low=high*.46,nms=new Float32Array(w*h);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const i=y*w+x,m=mag[i];if(m<low)continue;let deg=(ang[i]*180/Math.PI+180)%180,a=i-1,b=i+1;
+    if(deg>=22.5&&deg<67.5){a=i-w-1;b=i+w+1;}else if(deg>=67.5&&deg<112.5){a=i-w;b=i+w;}else if(deg>=112.5&&deg<157.5){a=i-w+1;b=i+w-1;}
+    if(m>=mag[a]&&m>=mag[b])nms[i]=m;
   }
-  raw.sort((a,b)=>b.mag-a.mag);
-  const points=[];const occupied=new Set();
-  for(const point of raw){
-    const gx=Math.floor(point.x*32),gy=Math.floor(point.y*18),key=`${gx}:${gy}`;
-    if(occupied.has(key))continue;occupied.add(key);points.push(point);
-    if(points.length>=180)break;
+  const binary=new Uint8Array(w*h),stack=[];
+  for(let i=0;i<nms.length;i++)if(nms[i]>=high){binary[i]=1;stack.push(i);}
+  const dirs=[-w-1,-w,-w+1,-1,1,w-1,w,w+1];
+  while(stack.length){const i=stack.pop(),x=i%w;for(const d of dirs){const n=i+d;if(n<=0||n>=nms.length-1)continue;const nx=n%w;if(Math.abs(nx-x)>1)continue;if(!binary[n]&&nms[n]>=low){binary[n]=1;stack.push(n);}}}
+  const rawPaths=orderedComponentPaths(binary,nms,w,h),paths=[];
+  for(const raw of rawPaths){
+    const arc=pathArcLength(raw),xs=raw.map(p=>p.x),ys=raw.map(p=>p.y),bw=Math.max(...xs)-Math.min(...xs),bh=Math.max(...ys)-Math.min(...ys);
+    if(arc<10||Math.max(bw, bh)<5)continue;
+    let path=rdp(raw,1.25);if(path.length<3)continue;path=chaikin(path,1);
+    const score=arc*(raw.reduce((a,p)=>a+p.mag,0)/raw.length)/high;
+    paths.push({points:path.map(p=>({x:p.x/(w-1),y:p.y/(h-1),mag:p.mag,sal:p.sal})),score,arc,bboxArea:(bw*bh)/(w*h)});
   }
-  const salient=[...points].sort((a,b)=>b.sal-a.sal).slice(0,70);
-  vectorEdgeCache={frame:frameCounter,points,salient};
-  if(frameCounter%8===0){
-    vectorEchoHistory.unshift(points.slice(0,90).map(p=>({...p})));
-    if(vectorEchoHistory.length>8)vectorEchoHistory.pop();
-  }
+  paths.sort((a,b)=>b.score-a.score);
+  // Keep a small number of long, meaningful contours. This is the main anti-hair gate.
+  let kept=paths.filter(p=>p.arc>=12&&p.bboxArea>.0015).slice(0,22);
+  kept=stabilizeContourPaths(kept,vectorEdgeCache.paths);
+  const salientPaths=kept.filter(p=>p.bboxArea>.008||p.arc>22).slice(0,10);
+  const points=[];for(const path of kept)for(let i=0;i<path.points.length;i+=Math.max(1,Math.floor(path.points.length/6)))points.push(path.points[i]);
+  const salient=[];for(const path of salientPaths)for(let i=0;i<path.points.length;i+=Math.max(1,Math.floor(path.points.length/4)))salient.push(path.points[i]);
+  vectorEdgeCache={frame:frameCounter,paths:kept,salientPaths,points,salient};
+  if(frameCounter%7===0&&kept.length){vectorEchoHistory.unshift(kept.slice(0,9).map(path=>path.points.map(p=>({...p}))));if(vectorEchoHistory.length>6)vectorEchoHistory.pop();}
   return vectorEdgeCache;
 }
+function strokeSmoothPath(path,effect,alpha,hueOffset=0,driftX=0,driftY=0){
+  if(!path||path.length<2)return;
+  fx.strokeStyle=vectorColor(effect,alpha,hueOffset);fx.beginPath();
+  const p0=path[0];fx.moveTo(p0.x*width+driftX,p0.y*height+driftY);
+  for(let i=1;i<path.length-1;i++){const p=path[i],n=path[i+1],mx=(p.x+n.x)*.5*width+driftX,my=(p.y+n.y)*.5*height+driftY;fx.quadraticCurveTo(p.x*width+driftX,p.y*height+driftY,mx,my);}
+  const last=path[path.length-1];fx.lineTo(last.x*width+driftX,last.y*height+driftY);fx.stroke();
+}
 function drawContours(effect,semantic=false){
-  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));
-  if(amount<.015)return;
-  const edges=extractVectorEdges(),pts=semantic?edges.salient:edges.points;
-  const max=Math.min(pts.length,Math.floor(effect.count*(.45+.75*amount)));
-  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';
-  fx.lineCap='round';fx.lineWidth=(effect.line_width??1.2)*devicePixelRatio;
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const edges=extractVectorEdges(),paths=semantic?edges.salientPaths:edges.paths;
+  const max=Math.min(paths.length,Math.max(1,Math.round((semantic?5:9)*(.45+.65*amount))));
+  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.2))*devicePixelRatio;
   for(let i=0;i<max;i++){
-    const p=pts[i],alpha=(effect.opacity??.3)*amount*(semantic?(.35+.65*p.sal/Math.max(1,pts[0]?.sal||1)):.55);
-    const len=(semantic?18:11)*devicePixelRatio*(.5+amount)*(.5+Math.min(2,p.mag/220));
-    const tangent=p.angle+Math.PI/2,x=p.x*width,y=p.y*height;
-    fx.strokeStyle=vectorColor(effect,alpha,semantic?35:0);
-    fx.beginPath();fx.moveTo(x-Math.cos(tangent)*len,y-Math.sin(tangent)*len);fx.lineTo(x+Math.cos(tangent)*len,y+Math.sin(tangent)*len);fx.stroke();
+    const path=paths[i],quality=Math.min(1,path.arc/32),alpha=(effect.opacity??.22)*amount*(semantic?.48:.38)*(.55+.45*quality);
+    strokeSmoothPath(path.points,effect,alpha,semantic?28:0);
   }
   fx.restore();
 }
+function luminanceImage(imageData){const d=imageData.data,out=new Float32Array(imageData.width*imageData.height);for(let i=0,p=0;i<out.length;i++,p+=4)out[i]=.2126*d[p]+.7152*d[p+1]+.0722*d[p+2];return out;}
+function updateOpticalFlow(force=false){
+  if(!force&&vectorFlowCache.frame>=0&&frameCounter-vectorFlowCache.frame<2)return vectorFlowCache;
+  const w=flowProbe.width,h=flowProbe.height;flowProbeCtx.drawImage(videoFx,0,0,w,h);
+  let curImg,prevImg;try{curImg=flowProbeCtx.getImageData(0,0,w,h);prevImg=flowPrevCtx.getImageData(0,0,w,h);}catch{return vectorFlowCache;}
+  if(!vectorFlowInitialized){flowPrevCtx.putImageData(curImg,0,0);vectorFlowInitialized=true;vectorFlowCache={frame:frameCounter,field:[],cols:0,rows:0,ready:false};return vectorFlowCache;}
+  const cur=luminanceImage(curImg),prev=luminanceImage(prevImg),field=[],step=6,patch=2,search=3;
+  let totalDelta=0;for(let i=0;i<cur.length;i++)totalDelta+=Math.abs(cur[i]-prev[i]);
+  if(totalDelta/cur.length<1.2){flowPrevCtx.putImageData(curImg,0,0);vectorFlowCache={frame:frameCounter,field:[],cols:0,rows:0,ready:false};return vectorFlowCache;}
+  for(let y=patch+search;y<h-patch-search;y+=step)for(let x=patch+search;x<w-patch-search;x+=step){
+    let zero=0;for(let py=-patch;py<=patch;py++)for(let px=-patch;px<=patch;px++){const c=cur[(y+py)*w+x+px],q=prev[(y+py)*w+x+px];zero+=(c-q)*(c-q);}
+    let best=zero,bx=0,by=0;
+    for(let sy=-search;sy<=search;sy++)for(let sx=-search;sx<=search;sx++){if(sx===0&&sy===0)continue;let err=0;for(let py=-patch;py<=patch;py++)for(let px=-patch;px<=patch;px++){const c=cur[(y+py)*w+x+px],q=prev[(y+py+sy)*w+x+px+sx];const d=c-q;err+=d*d;}if(err<best){best=err;bx=-sx;by=-sy;}}
+    const improve=zero>1?Math.max(0,(zero-best)/zero):0,speed=Math.hypot(bx,by)/search,strength=Math.min(1,improve*.8+speed*.35);
+    if(strength>.10)field.push({x:x/(w-1),y:y/(h-1),vx:bx/search,vy:by/search,strength});
+  }
+  flowPrevCtx.putImageData(curImg,0,0);field.sort((a,b)=>b.strength-a.strength);vectorFlowCache={frame:frameCounter,field,cols:Math.floor(w/step),rows:Math.floor(h/step),ready:field.length>0};return vectorFlowCache;
+}
+function sampleFlow(field,x,y,fallbackX=0,fallbackY=0){
+  if(!field.length)return{vx:fallbackX,vy:fallbackY,strength:.18};let best=null,bd=1e9;
+  for(const v of field){const dx=v.x-x,dy=v.y-y,d=dx*dx+dy*dy;if(d<bd){bd=d;best=v;}}
+  if(!best||bd>.08)return{vx:fallbackX,vy:fallbackY,strength:.15};return best;
+}
 function drawFlowRibbons(effect,particles=false){
   const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
-  const p=effect.parameters??{},mx=Number(p.motion_x??0),my=Number(p.motion_y??0);
-  const curl=effectCurveValue(effect,'curl',.25),count=Math.min(effect.count,particles?180:48);
-  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineCap='round';
+  const params=effect.parameters??{},mx=Number(params.motion_x??0),my=Number(params.motion_y??0),flow=updateOpticalFlow().field;
+  const curl=effectCurveValue(effect,'curl',.18),maxCount=particles?28:12,count=Math.min(maxCount,Math.max(1,Math.round(effect.count*(particles?.22:.34))));
+  const seeds=flow.length?flow.slice(0,Math.min(flow.length,count*2)):[];
+  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineCap='round';fx.lineJoin='round';
   for(let i=0;i<count;i++){
-    const r1=vectorRand(effect.seed,i*3),r2=vectorRand(effect.seed,i*3+1),r3=vectorRand(effect.seed,i*3+2);
-    let x=r1*width,y=r2*height;
-    const localPhase=phase*(.7+amount*1.8)+r3*Math.PI*2;
-    const length=(particles?28:100)*devicePixelRatio*(.45+1.4*amount);
-    const angle=Math.atan2(my,mx||.001)+Math.sin(localPhase+r1*5)*curl*2.4+(mx===0&&my===0?(r3-.5)*2.4:0);
-    const dx=Math.cos(angle)*length,dy=Math.sin(angle)*length;
-    const alpha=(effect.opacity??.25)*amount*(particles?.55:.8);
-    fx.strokeStyle=vectorColor(effect,alpha,i*3.7);
-    fx.lineWidth=(effect.line_width??1.4)*devicePixelRatio*(particles?.65:1);
-    fx.beginPath();fx.moveTo(x,y);
-    if(particles){
-      fx.lineTo(x+dx*.25,y+dy*.25);
-    }else{
-      const bend=length*curl*.65;
-      fx.bezierCurveTo(x+dx*.28-Math.sin(angle)*bend,y+dy*.28+Math.cos(angle)*bend,x+dx*.72+Math.sin(angle)*bend*.5,y+dy*.72-Math.cos(angle)*bend*.5,x+dx,y+dy);
+    const seed=seeds[i%Math.max(1,seeds.length)]??{x:vectorRand(effect.seed,i*2),y:vectorRand(effect.seed,i*2+1),strength:.18,vx:mx,vy:my};
+    let x=seed.x,y=seed.y;const pts=[{x,y}],steps=particles?3:Math.max(7,Math.round(8+8*amount));
+    for(let step=0;step<steps;step++){
+      const v=sampleFlow(flow,x,y,mx,my),phaseCurl=Math.sin(phase*.7+i*.9+step*.33)*curl*.32;
+      let vx=v.vx,vy=v.vy,cs=Math.cos(phaseCurl),sn=Math.sin(phaseCurl),rx=vx*cs-vy*sn,ry=vx*sn+vy*cs,norm=Math.hypot(rx,ry)||1;
+      const ds=(particles?.008:.014)*(1+.9*amount)*(.55+.65*v.strength);x+=rx/norm*ds;y+=ry/norm*ds;if(x<0||x>1||y<0||y>1)break;pts.push({x,y});
     }
-    fx.stroke();
+    if(pts.length<2)continue;const alpha=(effect.opacity??.2)*amount*(particles?.38:.55)*(.5+.5*(seed.strength??.2));
+    fx.lineWidth=Math.max(.65,(effect.line_width??1.4)*devicePixelRatio*(particles?.45:.72));strokeSmoothPath(pts,effect,alpha,i*5.5);
   }
   fx.restore();
 }
 function drawVectorEcho(effect){
-  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
-  extractVectorEdges();
-  fx.save();fx.globalCompositeOperation='screen';fx.lineCap='round';
-  const generations=Math.min(vectorEchoHistory.length,Math.max(1,effect.count));
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;extractVectorEdges();
+  fx.save();fx.globalCompositeOperation='screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.1))*devicePixelRatio;
+  const generations=Math.min(vectorEchoHistory.length,Math.max(1,Math.min(4,effect.count)));
   for(let g=0;g<generations;g++){
-    const pts=vectorEchoHistory[g],fade=(1-g/(generations+1))*amount;
-    const drift=(g+1)*width*.003*Math.sin(phase*.9+g);
-    fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*fade,g*12);
-    fx.lineWidth=(effect.line_width??1.2)*devicePixelRatio;
-    for(let i=0;i<Math.min(pts.length,55);i+=2){
-      const p=pts[i],a=p.angle+Math.PI/2,len=6*devicePixelRatio*(1+fade);
-      const x=p.x*width+drift,y=p.y*height+g*height*.0015;
-      fx.beginPath();fx.moveTo(x-Math.cos(a)*len,y-Math.sin(a)*len);fx.lineTo(x+Math.cos(a)*len,y+Math.sin(a)*len);fx.stroke();
-    }
+    const paths=vectorEchoHistory[g],fade=(1-g/(generations+1))*amount,drift=(g+1)*width*.0025*Math.sin(phase*.7+g);
+    for(let i=0;i<Math.min(paths.length,6);i++)strokeSmoothPath(paths[i],effect,(effect.opacity??.16)*fade*.45,g*11,drift,g*height*.0012);
   }
   fx.restore();
 }
@@ -936,7 +1046,15 @@ function applyVectorDisplacement(effect){
   fx.restore();
 }
 function renderVectorSceneGraph(){
-  const effects=activeScene?.direction?.vector_effects;if(!Array.isArray(effects)||!effects.length)return;
+  const allEffects=activeScene?.direction?.vector_effects;if(!Array.isArray(allEffects)||!allEffects.length)return;
+  // Compatibility guard for v0.22/v0.23 timelines: older plans scheduled many
+  // visible vector families simultaneously. Keep all invisible deformation,
+  // but select only the strongest family vocabulary at render time.
+  const family=activeScene?.direction?.effect_family??'cinematic',role=activeScene?.direction?.narrative_role??'develop';
+  const priority={dream:['vector_echo','contours','portal','semantic_outline'],liquid:['flow_ribbons','vector_echo','portal','flow_particles'],analog:['perspective_grid','contours','semantic_outline'],fracture:['delaunay_fracture','voronoi','portal'],hyper:['flow_ribbons','delaunay_fracture','flow_particles','perspective_grid'],prismatic:['portal','voronoi','flow_ribbons'],cinematic:['semantic_outline','contours','perspective_grid','portal']}[family]??['contours'];
+  const hidden=allEffects.filter(e=>e.visible===false),visible=allEffects.filter(e=>e.visible!==false);
+  visible.sort((a,b)=>{const ai=priority.indexOf(a.kind),bi=priority.indexOf(b.kind);return(ai<0?99:ai)-(bi<0?99:bi);});
+  const budget=(role==='payoff'&&sectionEnergy>.76)?2:1,effects=[...visible.slice(0,budget),...hidden];
   // Edge extraction is shared by all geometry derived from the current frame.
   if(effects.some(e=>['contours','semantic_outline','vector_echo','delaunay_fracture','voronoi'].includes(e.kind)))extractVectorEdges();
   for(const effect of effects){
@@ -1255,7 +1373,7 @@ async function prepareOfflineScene(index){
   const current=timeline.scene_plan[index];
   if(index>0)await loadBank(0,timeline.scene_plan[index-1]);
   await loadBank(1,current);
-  activeBank=1;activeScene={...current};focusLayer=0;transition=null;offlineLoadedScene=index;
+  activeBank=1;activeScene={...current};focusLayer=0;transition=null;offlineLoadedScene=index;resetVectorMotionState();
 }
 function processOfflineCues(t){
   while(offlineCueIndex<timeline.cues.length&&timeline.cues[offlineCueIndex].time<=t+1e-9){

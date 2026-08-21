@@ -195,6 +195,28 @@ def _curve_sample(points: list[tuple[float, float]], progress: float, fallback: 
     return pts[-1][1]
 
 
+def _native_vector_effects(scene):
+    effects = list(scene.direction.vector_effects)
+    if not effects:
+        return []
+    family = scene.direction.effect_family or "cinematic"
+    priority = {
+        "dream": ["vector_echo", "contours", "portal", "semantic_outline"],
+        "liquid": ["flow_ribbons", "vector_echo", "portal", "flow_particles"],
+        "analog": ["perspective_grid", "contours", "semantic_outline"],
+        "fracture": ["delaunay_fracture", "voronoi", "portal"],
+        "hyper": ["flow_ribbons", "delaunay_fracture", "flow_particles", "perspective_grid"],
+        "prismatic": ["portal", "voronoi", "flow_ribbons"],
+        "cinematic": ["semantic_outline", "contours", "perspective_grid", "portal"],
+    }.get(family, ["contours"])
+    hidden = [effect for effect in effects if not effect.visible]
+    visible = [effect for effect in effects if effect.visible]
+    order = {kind: index for index, kind in enumerate(priority)}
+    visible.sort(key=lambda effect: order.get(effect.kind, 99))
+    budget = 2 if scene.direction.narrative_role == "payoff" else 1
+    return visible[:budget] + hidden
+
+
 def _vector_fields(effect) -> list[str]:
     amount_curve = effect.automation.get("amount", [])
     samples = [
@@ -310,7 +332,7 @@ def write_native_manifest(
             ]
             lines.append("\t".join(fields))
 
-        for effect in scene.direction.vector_effects:
+        for effect in _native_vector_effects(scene):
             lines.append("\t".join(_vector_fields(effect)))
 
     for cue in timeline.cues:

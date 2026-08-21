@@ -206,7 +206,7 @@ def index_scene_visual_features(
     progress: Callable[[str], None] = print,
 ) -> int:
     cfg = config or VisualFeatureConfig()
-    scenes = library.scene_candidates(clip_id=clip_id)
+    scenes = library.scene_candidates(clip_id=clip_id, respect_trim=False)
     existing = library.scene_visual_feature_ids()
     indexed = 0
     for candidate in scenes:

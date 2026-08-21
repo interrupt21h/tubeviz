@@ -1,8 +1,10 @@
+![tubeviz screenshot](screenshot.png)
+
 # tubeviz
 
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.22.0**
+Current version: **0.24.0**
 
 ## Architecture
 
@@ -950,6 +952,179 @@ motifs therefore return with recognizable vector symbols whose rotation,
 strength, color, and mutation evolve with the musical callback. The vector
 system can function as a persistent visual alphabet instead of unrelated
 generative shapes.
+
+
+
+## Visual clip trimming in Studio
+
+Studio can non-destructively mark the usable portion of any local library
+video. This is intended for footage with title cards, channel intros, credits,
+black leader, talking-head introductions, or any other portion that should
+never enter a generated visualization.
+
+Open **Library**, choose **Play / Trim**, then use the visual editor:
+
+```mermaid
+flowchart LR
+    FULL["Full normalized video"] --> EDIT["Studio Play / Trim"]
+    EDIT --> IN["Set In"]
+    EDIT --> OUT["Set Out"]
+    IN --> KEEP["Highlighted usable range"]
+    OUT --> KEEP
+    KEEP --> DB["usable_start / usable_end in SQLite"]
+    DB --> SCENES["Scene candidate clamp/filter"]
+    SCENES --> SELECT["Semantic + visual + rhythm selector"]
+```
+
+The editor provides:
+
+- two draggable In/Out handles over the clip timeline;
+- detected-scene boundary ticks and a live playhead marker;
+- **Set In to Playhead** and **Set Out to Playhead**;
+- jump-to-In and jump-to-Out controls;
+- automatic looping of the currently kept range;
+- millisecond time readouts for In, Out, and kept duration;
+- **Save In / Out** and **Clear Trim**;
+- a visible trim badge on library cards.
+
+The operation is deliberately non-destructive. tubeviz does **not** rewrite or
+re-encode the normalized video. The saved bounds only define which source times
+are eligible for future scene plans.
+
+For example, a 90-second clip with a 7.5-second intro can remain physically
+unchanged while Studio stores:
+
+```text
+usable_start = 7.500
+usable_end   = 90.000
+```
+
+A detected scene crossing a trim boundary is clipped rather than discarded when
+it still has enough usable duration:
+
+```text
+indexed scene:   4.0 -------- 12.0
+saved usable:        7.5 ----------------
+selector sees:       7.5 ---- 12.0
+```
+
+Scenes entirely before/after the usable range disappear from scene selection.
+`--min-play-scene-seconds` and related minimum-duration checks apply to the
+**remaining** duration after trimming.
+
+Visual motion-accent metadata is also shifted and filtered for a partially
+trimmed scene, so beat/motion alignment cannot accidentally seek back into an
+excluded intro. The persistent full-scene visual fingerprint remains intact,
+which means changing or clearing trim does not require rebuilding the visual
+feature index.
+
+Library thumbnails prefer the first scene still inside the saved usable range,
+so a trimmed title card no longer remains the primary Studio thumbnail when a
+later scene thumbnail is available.
+
+Existing timeline JSON is immutable: a timeline generated before a trim can
+still reference its old source range. Regenerate/replan scenes after curation:
+
+```bash
+tubeviz analyze song.mp3 \
+  --library ./library \
+  --semantic \
+  --output song.timeline.json
+```
+
+or for interactive preview:
+
+```bash
+tubeviz serve song.timeline.json \
+  --audio song.mp3 \
+  --library ./library \
+  --replan-scenes
+```
+
+
+### v0.24 structural vector rendering
+
+Visible vector rendering is intentionally sparse. Earlier vector releases could
+produce a "hair" or "fur" appearance because strong edge samples were rendered
+as many independent tangent strokes and flow ribbons began at pseudo-random
+screen positions. v0.24 replaces both algorithms.
+
+```mermaid
+flowchart LR
+    VIDEO["Composited video"] --> SOBEL["Sobel magnitude + direction"]
+    SOBEL --> NMS["Non-maximum suppression"]
+    NMS --> HYST["Hysteresis threshold"]
+    HYST --> COMP["Connected edge components"]
+    COMP --> TRACE["Ordered contour tracing"]
+    TRACE --> RDP["RDP simplification"]
+    RDP --> SMOOTH["Chaikin smoothing"]
+    SMOOTH --> STABLE["Temporal path stabilization"]
+    STABLE --> PATHS["Long continuous vector paths"]
+```
+
+The browser vector renderer now:
+
+- performs non-maximum-suppressed, hysteresis-connected edge extraction;
+- traces connected components into whole contour paths instead of drawing one
+  tiny line per edge sample;
+- rejects short/noisy components using arc-length and bounding-area gates;
+- simplifies paths with Ramer-Douglas-Peucker and smooths them before drawing;
+- temporally matches/stabilizes contours against the previous extraction;
+- stores complete paths in vector echo history rather than collections of short
+  tangent marks;
+- limits ordinary contour rendering to a handful of long paths;
+- uses lower default opacity/line density.
+
+Flow ribbons now use a local low-resolution block-matched motion field:
+
+```mermaid
+flowchart LR
+    PREV["Previous 64×36 frame"] --> MATCH["Patch block matching"]
+    CUR["Current 64×36 frame"] --> MATCH
+    MATCH --> FIELD["Sparse local optical-flow field"]
+    FIELD --> SEED["Strong motion seeds"]
+    SEED --> INTEGRATE["Integrate streamlines through field"]
+    INTEGRATE --> RIBBON["Smooth ribbons / short particles"]
+```
+
+This means ribbons originate in areas that are actually moving and bend through
+local motion instead of being pseudo-random tendrils biased only by one global
+motion direction.
+
+The Visual Director also applies a visible-vector budget. Non-peak shots use at
+most one visible vector family; strong peaks may use two. A deterministic share
+of non-peak shots deliberately has no visible vector geometry at all. Invisible
+video displacement and motion-transplant effects may remain active because they
+change the footage without covering it in lines.
+
+Typical family vocabulary is now:
+
+| Effect family | Preferred visible vectors |
+|---|---|
+| `dream` | contour echo or sparse connected contours |
+| `liquid` | local-flow ribbons, occasional echo/portal |
+| `analog` | perspective grid or sparse contours |
+| `fracture` | Delaunay fracture and, at peaks, Voronoi |
+| `hyper` | local-flow ribbons and impact fracture |
+| `prismatic` | companion portal and Voronoi |
+| `cinematic` | salient connected outline or restrained grid |
+
+Motif glyphs are no longer continuously overlaid. They are reserved for
+returning motif callbacks or peak punctuation. This preserves the visual
+alphabet without making it look like a persistent logo.
+
+The native CPU renderer was corrected in the same direction: its contour path
+now groups strong edges into connected components and renders ordered paths,
+while its flow approximation seeds from strong image structure rather than
+random screen locations.
+
+The browser renderer and native manifest writer also prune legacy v0.22/v0.23
+timelines at runtime. Older timelines that contain the original over-dense
+vector stack are reduced to the family-appropriate visible budget while all
+invisible displacement effects remain available. Regenerating a timeline with
+v0.24 is still recommended because the new Visual Director creates cleaner
+shot-level choreography from the start, but it is not required just to remove
+the old hair-like overlay.
 
 
 ## Recommended four-minute EDM workflow

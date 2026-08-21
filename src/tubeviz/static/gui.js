@@ -1,6 +1,7 @@
 const $=id=>document.getElementById(id);
 let activeJob=null;
 let pollTimer=null;
+let activeTrim=null;
 
 function value(id){return $(id).value.trim()}
 function number(id){return Number($(id).value)}
@@ -165,9 +166,10 @@ async function loadClips(){
         <div class="clip-body">
           <div class="clip-title">${escapeHtml(c.title||c.source_id)}</div>
           <div class="clip-meta">${escapeHtml(c.source_id)} · ${c.status} · ${c.scene_count} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"}</div>
+          ${(c.usable_start!=null||c.usable_end!=null)?`<div class="clip-trim-badge">trimmed ${formatTime(c.usable_start??0)} → ${formatTime(c.usable_end??c.duration??0)}</div>`:""}
           <div class="clip-actions">
             ${c.media_available
-              ?`<button onclick="playClip('${jsq(c.source_id)}','${jsq(c.source)}','${jsq(c.title||c.source_id)}')">Play</button>`
+              ?`<button onclick="playClip('${jsq(c.source_id)}','${jsq(c.source)}','${jsq(c.title||c.source_id)}')">Play / Trim</button>`
               :`<button disabled title="No playable local media">No media</button>`}
             ${rejected
               ?`<button onclick="restoreClip('${jsq(c.source_id)}')">Restore</button>`
@@ -183,28 +185,121 @@ async function loadClips(){
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 function jsq(s){return String(s).replaceAll("\\","\\\\").replaceAll("'","\\'")}
 
-window.playClip=(id,source,title)=>{
-  $("modalTitle").textContent=title;
+function formatTime(seconds){
+  const value=Math.max(0,Number(seconds)||0),minutes=Math.floor(value/60),secs=value-minutes*60;
+  return `${minutes}:${secs.toFixed(3).padStart(6,"0")}`;
+}
+function clampTrim(){
+  if(!activeTrim)return;
+  const duration=Math.max(.05,activeTrim.duration||Number($("modalVideo").duration)||0);
+  let tin=Number($("trimIn").value),tout=Number($("trimOut").value);
+  tin=Math.max(0,Math.min(duration-.05,tin));
+  tout=Math.max(.05,Math.min(duration,tout));
+  if(tout<=tin+.05){
+    if(document.activeElement===$("trimIn"))tin=Math.max(0,tout-.05);
+    else tout=Math.min(duration,tin+.05);
+  }
+  $("trimIn").value=tin;$("trimOut").value=tout;
+  activeTrim.in=tin;activeTrim.out=tout;
+  const left=100*tin/duration,right=100*tout/duration;
+  $("trimTrackKeep").style.left=`${left}%`;
+  $("trimTrackKeep").style.width=`${Math.max(0,right-left)}%`;
+  $("trimInLabel").textContent=formatTime(tin);
+  $("trimOutLabel").textContent=formatTime(tout);
+  $("trimDurationLabel").textContent=formatTime(tout-tin);
+  const trimmed=tin>.001||tout<duration-.001;
+  $("trimStatus").textContent=trimmed
+    ?`Visualizer may use only ${formatTime(tin)} – ${formatTime(tout)} (${formatTime(tout-tin)} kept)`
+    :`Entire ${formatTime(duration)} clip is currently usable`;
+}
+function seekTrim(value){
+  const video=$("modalVideo");
+  if(Number.isFinite(value))video.currentTime=Math.max(0,Math.min(video.duration||value,value));
+}
+async function initializeTrimEditor(id,source,title){
   const params=qs({library:value("libraryPath"),source});
-  $("modalVideo").src=`/api/gui/clip/${encodeURIComponent(id)}/media?${params}`;
-  $("modalVideo").onerror=async()=>{
+  const details=await api(`/api/gui/clip/${encodeURIComponent(id)}?${params}`);
+  const video=$("modalVideo");
+  const setup=()=>{
+    const duration=Number.isFinite(video.duration)&&video.duration>0?video.duration:Number(details.duration||0);
+    const tin=details.usable_start==null?0:Number(details.usable_start);
+    const tout=details.usable_end==null?duration:Number(details.usable_end);
+    activeTrim={id,source,title,duration,in:tin,out:tout,scenes:details.scenes||[]};
+    $("trimSceneMarkers").innerHTML=(details.scenes||[]).flatMap(scene=>[scene.start,scene.end]).filter((t,i,a)=>t>0&&t<duration&&a.indexOf(t)===i).map(t=>`<i class="trim-scene-marker" style="left:${(100*Number(t)/duration).toFixed(4)}%" title="scene boundary ${formatTime(t)}"></i>`).join("");
+    for(const range of [$("trimIn"),$("trimOut")]){range.max=duration;range.step=Math.max(.01,Math.min(.05,duration/5000));}
+    $("trimIn").value=tin;$("trimOut").value=tout;
+    clampTrim();seekTrim(tin);
+  };
+  if(video.readyState>=1&&Number.isFinite(video.duration))setup();
+  else video.onloadedmetadata=setup;
+}
+window.playClip=async(id,source,title)=>{
+  $("modalTitle").textContent=title;
+  $("trimStatus").textContent="Loading clip…";
+  activeTrim=null;
+  const params=qs({library:value("libraryPath"),source});
+  const video=$("modalVideo");
+  video.src=`/api/gui/clip/${encodeURIComponent(id)}/media?${params}`;
+  video.onerror=async()=>{
     try{
-      const response=await fetch($("modalVideo").src);
-      const body=await response.json();
-      const detail=body.detail||body;
+      const response=await fetch(video.src),body=await response.json(),detail=body.detail||body;
       $("modalTitle").textContent=`${title} — ${detail.message||"media unavailable"}`;
       console.error("tubeviz media diagnostic",detail);
-    }catch(e){
-      console.error("tubeviz playback error",e);
-    }
+    }catch(e){console.error("tubeviz playback error",e)}
   };
   $("videoModal").classList.remove("hidden");
-  $("modalVideo").load();
-  $("modalVideo").play().catch(()=>{});
+  video.load();
+  try{await initializeTrimEditor(id,source,title)}catch(e){$("trimStatus").textContent=`Trim editor error: ${e.message}`}
+  video.play().catch(()=>{});
+};
+$("trimIn").oninput=()=>{clampTrim();seekTrim(Number($("trimIn").value))};
+$("trimOut").oninput=()=>{clampTrim();seekTrim(Math.max(0,Number($("trimOut").value)-.03))};
+$("setTrimIn").onclick=()=>{if(!activeTrim)return;$("trimIn").value=$("modalVideo").currentTime;clampTrim()};
+$("setTrimOut").onclick=()=>{if(!activeTrim)return;$("trimOut").value=$("modalVideo").currentTime;clampTrim()};
+$("jumpTrimIn").onclick=()=>activeTrim&&seekTrim(activeTrim.in);
+$("jumpTrimOut").onclick=()=>activeTrim&&seekTrim(Math.max(activeTrim.in,activeTrim.out-.05));
+$("modalVideo").ontimeupdate=()=>{
+  if(!activeTrim)return;
+  const video=$("modalVideo"),pct=100*Math.max(0,Math.min(activeTrim.duration,video.currentTime))/Math.max(.05,activeTrim.duration);
+  $("trimPlayhead").style.left=`${pct}%`;
+  if(!checked("loopTrim"))return;
+  if(video.currentTime>=activeTrim.out-.015||video.currentTime<activeTrim.in-.05){
+    video.currentTime=activeTrim.in;
+    if(!video.paused)video.play().catch(()=>{});
+  }
+};
+$("saveTrim").onclick=async()=>{
+  if(!activeTrim)return;
+  clampTrim();
+  try{
+    const result=await api(`/api/gui/clip/${encodeURIComponent(activeTrim.id)}/trim`,{
+      method:"POST",body:JSON.stringify({
+        library:value("libraryPath"),source:activeTrim.source,
+        usable_start:activeTrim.in,usable_end:activeTrim.out
+      })
+    });
+    activeTrim.in=result.usable_start??0;
+    activeTrim.out=result.usable_end??activeTrim.duration;
+    $("trimIn").value=activeTrim.in;$("trimOut").value=activeTrim.out;clampTrim();
+    $("trimStatus").textContent+=` · saved`;
+    loadClips();refreshLibrarySummary();
+  }catch(e){$("trimStatus").textContent=`Save failed: ${e.message}`}
+};
+$("clearTrim").onclick=async()=>{
+  if(!activeTrim)return;
+  try{
+    await api(`/api/gui/clip/${encodeURIComponent(activeTrim.id)}/trim/clear`,{
+      method:"POST",body:JSON.stringify({library:value("libraryPath"),source:activeTrim.source})
+    });
+    activeTrim.in=0;activeTrim.out=activeTrim.duration;
+    $("trimIn").value=0;$("trimOut").value=activeTrim.duration;clampTrim();seekTrim(0);
+    $("trimStatus").textContent+=` · trim cleared`;
+    loadClips();refreshLibrarySummary();
+  }catch(e){$("trimStatus").textContent=`Clear failed: ${e.message}`}
 };
 $("closeModal").onclick=()=>{
-  $("modalVideo").pause();$("modalVideo").removeAttribute("src");$("modalVideo").load();
-  $("videoModal").classList.add("hidden");
+  const video=$("modalVideo");video.pause();video.removeAttribute("src");video.load();video.onloadedmetadata=null;
+  activeTrim=null;$("videoModal").classList.add("hidden");
 };
 
 window.rejectClip=async id=>{

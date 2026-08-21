@@ -198,11 +198,12 @@ def _vector_effects(
     occurrence: int,
     shot_index: int,
 ) -> list[VectorEffect]:
-    """Schedule coherent vector geometry from music + visual fingerprint.
+    """Schedule a sparse, coherent vector scene graph.
 
-    All effects are deterministic from section/scene identity and are designed
-    to either reveal structure already present in the footage or use vector
-    geometry as a mask/displacement source rather than as unrelated decoration.
+    v0.24 deliberately treats visible vector geometry as punctuation rather than
+    a permanent overlay. At most one visible family is normally active and two
+    are allowed only at high-energy peaks. Displacement-only effects do not
+    count against that budget.
     """
     f = candidate.visual_features or {}
     motion = _clamp(float(f.get("motion", 0.0)))
@@ -216,222 +217,219 @@ def _vector_effects(
         + shot_index * 137
         + occurrence * 1009
     ) & 0x7FFFFFFF
+    motion_params = {
+        "motion_x": float(f.get("motion_direction_x", 0.0)),
+        "motion_y": float(f.get("motion_direction_y", 0.0)),
+    }
 
-    out: list[VectorEffect] = []
+    visible: list[VectorEffect] = []
+    hidden: list[VectorEffect] = []
 
-    # Footage-derived edge topology. It is visible at moderate strength and can
-    # become a displacement source during peaks.
-    contour_amount = _clamp(.12 + .45*complexity + .22*energy)
-    out.append(VectorEffect(
+    contour_amount = _clamp(.08 + .30 * complexity + .15 * energy)
+    contour = VectorEffect(
         kind="contours",
         amount=contour_amount,
-        opacity=.12 + .32*contour_amount,
-        count=int(18 + 54*complexity),
-        line_width=.7 + 1.8*(1-complexity),
+        opacity=.055 + .15 * contour_amount,
+        count=int(7 + 11 * complexity),
+        line_width=1.0 + .8 * (1 - complexity),
         seed=seed + 1,
-        source="video_edges",
-        displace=section.label == "peak" and energy > .72,
+        source="connected_video_contours",
+        parameters={"min_arc": 12.0, "max_paths": 10},
         automation={
-            "amount": _curve((0, .18*contour_amount), (.55, .62*contour_amount), (.92, contour_amount), (1, .22*contour_amount)),
-            "opacity": _curve((0, .06), (.65, .22+.24*energy), (1, .08)),
+            "amount": _curve((0, .05 * contour_amount), (.60, .42 * contour_amount), (.91, contour_amount), (1, .10 * contour_amount)),
+            "opacity": _curve((0, .02), (.70, .08 + .10 * energy), (1, .025)),
         },
-    ))
+    )
 
-    # Subject/semantic outline proxy: runtime saliency selects strong contours
-    # near coherent high-contrast regions. This keeps the feature dependency-free
-    # while providing a distinct subject-oriented vector layer; a future
-    # segmentation backend can replace the source without changing the timeline.
-    subject = _clamp(.08 + .28*complexity + .18*(1-entropy) + .18*energy)
-    out.append(VectorEffect(
+    subject = _clamp(.06 + .22 * complexity + .20 * (1 - entropy) + .10 * energy)
+    semantic = VectorEffect(
         kind="semantic_outline",
         amount=subject,
-        opacity=.08 + .24*subject,
-        count=int(12 + 30*subject),
-        line_width=1.1 + 1.8*subject,
+        opacity=.05 + .13 * subject,
+        count=int(4 + 7 * subject),
+        line_width=1.2 + .7 * subject,
         seed=seed + 11,
-        source="saliency_contours",
-        automation={"amount": _curve((0, .12*subject), (.6, subject), (1, .18*subject))},
-    ))
+        source="salient_connected_contours",
+        parameters={"min_arc": 16.0, "max_paths": 6},
+        automation={"amount": _curve((0, .04), (.62, subject), (1, .08))},
+    )
 
-    # Optical-flow-like streamlines/ribbons. The scene fingerprint supplies the
-    # global motion direction; runtime luminance gradients bend the field.
-    flow_amount = _clamp(.08 + .52*motion + .24*energy)
-    if motion > .08 or family in {"liquid", "hyper", "prismatic"}:
-        out.append(VectorEffect(
-            kind="flow_ribbons",
-            amount=flow_amount,
-            opacity=.10 + .30*flow_amount,
-            count=int(10 + 30*(motion+entropy)/2),
-            line_width=1.2 + 4.2*flow_amount,
-            seed=seed + 2,
-            source="motion_field",
-            parameters={
-                "motion_x": float(f.get("motion_direction_x", 0.0)),
-                "motion_y": float(f.get("motion_direction_y", 0.0)),
-            },
-            automation={
-                "amount": _curve((0, .20*flow_amount), (.45, .55*flow_amount), (.88, flow_amount), (1, .28*flow_amount)),
-                "curl": _curve((0, .10), (.55, .25+.42*entropy), (1, .15+.25*energy)),
-            },
-        ))
-        out.append(VectorEffect(
-            kind="flow_particles",
-            amount=_clamp(flow_amount*.82),
-            opacity=.08 + .20*flow_amount,
-            count=int(36 + 110*flow_amount),
-            line_width=.8 + 1.4*flow_amount,
-            seed=seed + 3,
-            source="motion_field",
-            parameters={
-                "motion_x": float(f.get("motion_direction_x", 0.0)),
-                "motion_y": float(f.get("motion_direction_y", 0.0)),
-            },
-            automation={
-                "amount": _curve((0, .15*flow_amount), (.7, .75*flow_amount), (1, .25*flow_amount)),
-            },
-        ))
+    flow_amount = _clamp(.06 + .42 * motion + .20 * energy)
+    flow = VectorEffect(
+        kind="flow_ribbons",
+        amount=flow_amount,
+        opacity=.055 + .18 * flow_amount,
+        count=int(7 + 11 * (motion + entropy) / 2),
+        line_width=1.1 + 2.0 * flow_amount,
+        seed=seed + 2,
+        source="local_optical_flow",
+        parameters=motion_params,
+        automation={
+            "amount": _curve((0, .08 * flow_amount), (.48, .46 * flow_amount), (.88, flow_amount), (1, .12 * flow_amount)),
+            "curl": _curve((0, .06), (.55, .12 + .22 * entropy), (1, .08 + .15 * energy)),
+        },
+    )
+    particles = VectorEffect(
+        kind="flow_particles",
+        amount=_clamp(flow_amount * .68),
+        opacity=.04 + .11 * flow_amount,
+        count=int(18 + 32 * flow_amount),
+        line_width=.7 + .8 * flow_amount,
+        seed=seed + 3,
+        source="local_optical_flow",
+        parameters=motion_params,
+        automation={"amount": _curve((0, .05), (.72, .55 * flow_amount), (1, .10))},
+    )
 
-    # Pose/motion vector echo: actual edge structure from earlier frames is
-    # retained as vector-like contour echoes.
-    if family in {"dream", "liquid", "hyper", "prismatic"} or section.label == "breakdown":
-        echo = _clamp(.10 + .42*(1-percussive) + .22*motion)
-        out.append(VectorEffect(
-            kind="vector_echo",
-            amount=echo,
-            opacity=.08 + .22*echo,
-            count=6,
-            line_width=1.0 + 1.8*echo,
-            seed=seed + 4,
-            source="edge_history",
-            automation={"amount": _curve((0, .15*echo), (.5, echo), (1, .20*echo))},
-        ))
+    echo_amount = _clamp(.07 + .30 * (1 - percussive) + .16 * motion)
+    echo = VectorEffect(
+        kind="vector_echo",
+        amount=echo_amount,
+        opacity=.045 + .12 * echo_amount,
+        count=4,
+        line_width=.9 + .8 * echo_amount,
+        seed=seed + 4,
+        source="connected_contour_history",
+        automation={"amount": _curve((0, .05), (.52, echo_amount), (1, .08))},
+    )
 
-    # Perspective geometry becomes part of the scene by using motion direction
-    # to bias its vanishing point.
-    if family in {"analog", "hyper", "cinematic"}:
-        grid = _clamp(.08 + .32*energy + .20*section.brightness)
-        out.append(VectorEffect(
-            kind="perspective_grid",
-            amount=grid,
-            opacity=.06 + .18*grid,
-            count=int(10 + 20*grid),
-            line_width=.6 + 1.2*grid,
-            seed=seed + 5,
-            source="scene_motion",
-            parameters={
-                "motion_x": float(f.get("motion_direction_x", 0.0)),
-                "motion_y": float(f.get("motion_direction_y", 0.0)),
-            },
-            automation={"amount": _curve((0, .15*grid), (.75, grid), (1, .24*grid))},
-        ))
+    grid_amount = _clamp(.06 + .24 * energy + .12 * section.brightness)
+    grid = VectorEffect(
+        kind="perspective_grid",
+        amount=grid_amount,
+        opacity=.035 + .10 * grid_amount,
+        count=int(8 + 10 * grid_amount),
+        line_width=.65 + .65 * grid_amount,
+        seed=seed + 5,
+        source="scene_motion",
+        parameters=motion_params,
+        automation={"amount": _curve((0, .04), (.78, grid_amount), (1, .08))},
+    )
 
-    # Delaunay-style fracture is a high-impact structural effect and can
-    # displace texture fragments, not just draw triangle lines.
-    if family in {"fracture", "hyper"} or section.label == "peak":
-        fracture = _clamp(.18 + .55*energy + .28*section.noisiness)
-        out.append(VectorEffect(
-            kind="delaunay_fracture",
-            amount=fracture,
-            opacity=.10 + .28*fracture,
-            count=int(18 + 42*fracture),
-            line_width=.8 + 1.6*fracture,
-            seed=seed + 6,
-            source="video_features",
-            displace=True,
-            automation={
-                "amount": _curve((0, .04), (.72, .20*fracture), (.94, fracture), (1, .08)),
-                "explode": _curve((0, 0), (.8, .08), (.96, .75*fracture), (1, .12)),
-            },
-        ))
+    fracture_amount = _clamp(.12 + .48 * energy + .20 * section.noisiness)
+    fracture = VectorEffect(
+        kind="delaunay_fracture",
+        amount=fracture_amount,
+        opacity=.06 + .17 * fracture_amount,
+        count=int(14 + 24 * fracture_amount),
+        line_width=.8 + .8 * fracture_amount,
+        seed=seed + 6,
+        source="video_features",
+        displace=True,
+        automation={
+            "amount": _curve((0, .02), (.76, .12 * fracture_amount), (.95, fracture_amount), (1, .05)),
+            "explode": _curve((0, 0), (.84, .04), (.97, .66 * fracture_amount), (1, .06)),
+        },
+    )
+    voronoi_amount = _clamp(.08 + .34 * energy + .14 * entropy)
+    voronoi = VectorEffect(
+        kind="voronoi",
+        amount=voronoi_amount,
+        opacity=.045 + .12 * voronoi_amount,
+        count=int(11 + 18 * voronoi_amount),
+        line_width=.75 + .55 * voronoi_amount,
+        seed=seed + 7,
+        source="video_features",
+        displace=family == "fracture",
+        automation={"amount": _curve((0, .03), (.60, .32 * voronoi_amount), (.94, voronoi_amount), (1, .06))},
+    )
 
-    # Voronoi cells use generated feature sites as masks/displacement boundaries.
-    if family in {"fracture", "prismatic"}:
-        voronoi = _clamp(.10 + .42*energy + .18*entropy)
-        out.append(VectorEffect(
-            kind="voronoi",
-            amount=voronoi,
-            opacity=.07 + .22*voronoi,
-            count=int(12 + 28*voronoi),
-            line_width=.8 + 1.1*voronoi,
-            seed=seed + 7,
-            source="video_features",
-            displace=family == "fracture",
-            automation={"amount": _curve((0, .12*voronoi), (.55, .48*voronoi), (.92, voronoi), (1, .16*voronoi))},
-        ))
+    portal_amount = _clamp(.06 + .30 * energy + .10 * section.tonal_stability)
+    portal = VectorEffect(
+        kind="portal",
+        amount=portal_amount,
+        opacity=.12 + .22 * portal_amount,
+        count=1,
+        line_width=1.1 + 1.2 * portal_amount,
+        seed=seed + 8,
+        source="companion_video",
+        automation={
+            "amount": _curve((0, .01), (.38, .18 * portal_amount), (.74, portal_amount), (1, .06)),
+            "radius": _curve((0, .05), (.64, .24 + .14 * portal_amount), (1, .08)),
+        },
+    )
 
-    # Portals reveal companion video layers using organic vector masks.
-    if section.energy > .42:
-        portal = _clamp(.08 + .38*energy + .15*section.tonal_stability)
-        out.append(VectorEffect(
-            kind="portal",
-            amount=portal,
-            opacity=.18 + .30*portal,
-            count=1 + int(portal > .72),
-            line_width=1.2 + 2.0*portal,
-            seed=seed + 8,
-            source="companion_video",
-            automation={
-                "amount": _curve((0, .02), (.35, .28*portal), (.72, portal), (1, .10)),
-                "radius": _curve((0, .06), (.62, .28+.18*portal), (1, .10)),
-            },
-        ))
-
-    # Recurring motif glyph is deterministic by motif occurrence/scene identity.
-    # It is an abstract visual alphabet rather than arbitrary text.
-    glyph = _clamp(.08 + .20*energy + .16*max(0, occurrence-1))
-    out.append(VectorEffect(
+    glyph_amount = _clamp(.05 + .14 * energy + .12 * max(0, occurrence - 1))
+    glyph = VectorEffect(
         kind="motif_glyph",
-        amount=glyph,
-        opacity=.06 + .20*glyph,
-        count=5 + (seed % 5),
-        line_width=1.0 + 2.0*glyph,
+        amount=glyph_amount,
+        opacity=.035 + .10 * glyph_amount,
+        count=5 + (seed % 4),
+        line_width=.9 + 1.0 * glyph_amount,
         seed=seed + 9,
         source="motif",
         automation={
-            "amount": _curve((0, .05), (.55, glyph), (1, .12)),
-            "rotation": _curve((0, 0), (1, .4 + .8*energy)),
+            "amount": _curve((0, .02), (.58, glyph_amount), (1, .05)),
+            "rotation": _curve((0, 0), (1, .28 + .52 * energy)),
         },
-    ))
+    )
 
-    # Motion transplantation: when a companion layer is available the renderer
-    # derives a temporal field from it and uses that field to warp the primary.
-    if energy > .48 and (motion > .12 or family in {"hyper", "liquid", "fracture"}):
-        transplant = _clamp(.08 + .38*energy + .25*motion)
-        out.append(VectorEffect(
+    # Family-specific visible vocabulary. This prevents the old situation where
+    # contours, semantic edges, ribbons, particles, grids, portals and glyphs
+    # were all drawn over the same shot.
+    family_candidates: dict[str, list[VectorEffect]] = {
+        "dream": [echo, contour, portal],
+        "liquid": [flow, echo, portal],
+        "analog": [grid, contour],
+        "fracture": [fracture, voronoi],
+        "hyper": [flow, fracture, particles],
+        "prismatic": [portal, voronoi, flow],
+        "cinematic": [semantic if entropy < .62 else contour, grid, portal],
+    }
+    candidates = family_candidates.get(family, [contour])
+
+    # Roughly one quarter of non-peak shots stay completely clean; low-energy
+    # passages stay clean even more often. Visual contrast makes vector moments
+    # feel intentional rather than like a permanent filter.
+    clean_period = 2 if energy < .45 else 4
+    clean_shot = section.label != "peak" and ((seed // 97 + shot_index) % clean_period == 0)
+    visible_budget = 0 if clean_shot else (2 if section.label == "peak" and energy > .76 else 1)
+
+    # A motif glyph is a callback punctuation mark, not a continuously visible
+    # logo. Permit it only at the first shot of a returning motif/peak.
+    if shot_index == 0 and (occurrence > 1 or section.label == "peak") and visible_budget > 0:
+        candidates = [glyph, *candidates]
+
+    for effect in candidates:
+        if len(visible) >= visible_budget:
+            break
+        if effect.kind in {"flow_ribbons", "flow_particles"} and motion < .10 and family not in {"liquid", "hyper"}:
+            continue
+        visible.append(effect)
+
+    # Invisible deformation can remain active underneath clean footage because
+    # it doesn't create a forest of lines.
+    if energy > .45 and (motion > .12 or family in {"hyper", "liquid", "fracture"}):
+        transplant = _clamp(.06 + .30 * energy + .20 * motion)
+        hidden.append(VectorEffect(
             kind="motion_transplant",
             amount=transplant,
             opacity=0.0,
             visible=False,
             displace=True,
-            count=18,
+            count=14,
             line_width=3.0,
             seed=seed + 12,
             source="companion_motion",
-            automation={
-                "amount": _curve((0, .04), (.55, .28*transplant), (.92, transplant), (1, .10))
-            },
+            automation={"amount": _curve((0, .03), (.58, .22 * transplant), (.93, transplant), (1, .07))},
         ))
 
-    # Vector geometry as an invisible displacement field. This is scheduled
-    # separately so the visible vector overlay can remain subtle.
-    if energy > .35:
-        disp = _clamp(.10 + .42*energy + .22*section.bass_weight)
-        out.append(VectorEffect(
+    if energy > .30:
+        disp = _clamp(.06 + .31 * energy + .16 * section.bass_weight)
+        hidden.append(VectorEffect(
             kind="vector_displacement",
             amount=disp,
             opacity=0.0,
             visible=False,
             displace=True,
-            count=8 + int(22*disp),
-            line_width=2.0 + 5.0*disp,
+            count=8 + int(14 * disp),
+            line_width=2.0 + 3.0 * disp,
             seed=seed + 10,
             source="music_field",
-            automation={
-                "amount": _curve((0, .08*disp), (.7, .32*disp), (.94, disp), (1, .12*disp))
-            },
+            automation={"amount": _curve((0, .04 * disp), (.72, .25 * disp), (.95, disp), (1, .07 * disp))},
         ))
 
-    return out
+    return visible + hidden
 
 
 def build_visual_direction(

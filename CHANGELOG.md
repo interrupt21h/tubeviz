@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.24.0
+
+### Changed
+
+- Replaced independent tangent edge strokes with connected contour tracing in the browser vector renderer.
+- Added Sobel non-maximum suppression, hysteresis thresholding, connected components, Ramer-Douglas-Peucker simplification, Chaikin smoothing, and temporal contour stabilization.
+- Vector echoes now retain and redraw complete contour paths instead of short edge hairs.
+- Replaced pseudo-random flow-ribbon origins with a low-resolution local block-matched optical-flow field and streamline integration.
+- Reduced visible contour/ribbon counts and opacity to keep source footage dominant.
+- Added a Visual Director visible-vector budget: one visible family on ordinary shots, at most two on strong peaks, plus deterministic clean shots with no visible vectors.
+- Made vector effect vocabulary family-specific so incompatible visible effects no longer stack on every shot.
+- Restricted motif glyphs to callback/peak punctuation rather than persistent display.
+- Preserved invisible displacement and motion transplantation independently of the visible-vector budget.
+- Reworked native CPU contour rendering into connected component paths and changed native flow seeds from random positions to strong image structure.
+- Added browser-runtime and native-manifest pruning for legacy v0.22/v0.23 timelines so old over-dense vector plans no longer stack every visible family.
+
+## 0.23.0
+
+### Added
+
+- Added a visual, non-destructive In/Out trim editor to Studio library playback.
+- Added draggable In/Out range handles, detected-scene boundary ticks, a live playhead marker, current-playhead In/Out capture, jump controls, kept-range loop preview, and millisecond readouts.
+- Added persistent `usable_start` / `usable_end` clip metadata with an automatic SQLite schema migration.
+- Scene selection now excludes scenes outside saved clip bounds and clamps scenes that cross a trim boundary.
+- Minimum scene-duration filtering now applies after the trim clamp.
+- Visual motion accents are shifted/filtered when a trim cuts into an indexed scene so rhythm alignment cannot use excluded footage.
+- Visual-feature indexing explicitly uses original untrimmed scenes, keeping fingerprints stable when trims are changed or cleared.
+- Library cards display saved trim ranges and thumbnails prefer scenes that remain inside the usable region.
+- Added Studio trim save/clear API endpoints and validation for invalid ranges.
+
 ## 0.22.0
 
 ### Added

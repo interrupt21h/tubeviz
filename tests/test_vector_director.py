@@ -52,25 +52,35 @@ def kinds(direction):
     return {effect.kind for effect in direction.vector_effects}
 
 
-def test_vector_scene_graph_schedules_core_footage_derived_effects():
+def test_vector_scene_graph_is_sparse_and_keeps_hidden_displacement():
     direction = build_visual_direction(
         candidate(), section("driving"), rhythm_alignment=.9,
         source_playback_rate=1.0, transition=.8, occurrence=1,
         shot_index_in_section=0,
     )
-    assert {"contours", "semantic_outline", "flow_ribbons", "flow_particles",
-            "vector_echo", "perspective_grid", "delaunay_fracture",
-            "portal", "motif_glyph", "motion_transplant",
-            "vector_displacement"} <= kinds(direction)
+    visible = [effect for effect in direction.vector_effects if effect.visible]
+    hidden = [effect for effect in direction.vector_effects if not effect.visible]
+    assert len(visible) <= 2
+    assert {"motion_transplant", "vector_displacement"} <= {e.kind for e in hidden}
+    assert all(e.opacity <= .30 for e in visible)
 
 
-def test_prismatic_family_adds_voronoi():
+def test_non_peak_shots_use_at_most_one_visible_vector_family():
+    direction = build_visual_direction(
+        candidate(), section("driving", label="drive", energy=.65),
+        rhythm_alignment=.8, source_playback_rate=1.0, transition=.4,
+        occurrence=1, shot_index_in_section=1,
+    )
+    assert len([effect for effect in direction.vector_effects if effect.visible]) <= 1
+
+def test_prismatic_family_prefers_portal_and_voronoi_at_peak():
     direction = build_visual_direction(
         candidate(), section("euphoric"), rhythm_alignment=.8,
         source_playback_rate=1.0, transition=.8, occurrence=2,
         shot_index_in_section=1,
     )
-    assert "voronoi" in kinds(direction)
+    visible = [effect.kind for effect in direction.vector_effects if effect.visible]
+    assert visible[:2] == ["portal", "voronoi"]
 
 
 def test_vector_effects_have_deterministic_seeds_and_automation():

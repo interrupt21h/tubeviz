@@ -62,3 +62,34 @@ def test_native_manifest_serializes_vector_effects(tmp_path: Path):
     assert fields[4] == "42"
     assert fields[8] == "1"
     assert float(fields[15]) == .7
+
+
+def test_native_manifest_prunes_legacy_visible_vector_stack(tmp_path: Path):
+    library = tmp_path / "library"
+    normalized = library / "normalized"
+    normalized.mkdir(parents=True)
+    (normalized / "a.mp4").write_bytes(b"video")
+    track = TrackAnalysis(
+        source=str(tmp_path / "song.wav"), duration=4.0, sample_rate=22050,
+        hop_length=512, tempo_bpm=120, beats=[0, .5], bars=[0], sections=[], events=[],
+    )
+    direction = VisualDirection(
+        effect_family="hyper",
+        narrative_role="develop",
+        vector_effects=[
+            VectorEffect(kind="contours", amount=.5),
+            VectorEffect(kind="semantic_outline", amount=.5),
+            VectorEffect(kind="flow_ribbons", amount=.5),
+            VectorEffect(kind="delaunay_fracture", amount=.5),
+            VectorEffect(kind="vector_displacement", amount=.5, visible=False, displace=True),
+        ],
+    )
+    scene = SceneSelection(
+        section_index=0, time=0, term="test", clip_id=1, scene_id=1,
+        scene_index=0, source_id="a", media_file="a.mp4", media_url="/media/a.mp4",
+        start=0, end=2, duration=2, direction=direction,
+    )
+    timeline = DirectedTimeline(track=track, cues=[], scene_plan=[scene])
+    text = write_native_manifest(timeline, library, tmp_path / "native.tsv").read_text()
+    kinds = [line.split("\t")[1] for line in text.splitlines() if line.startswith("VEC\t")]
+    assert kinds == ["flow_ribbons", "vector_displacement"]
