@@ -121,6 +121,27 @@ Manifest load_manifest(const std::string& path) {
             layer.blend_mode = f[5];
             layer.transform = parse_transform(f, 6);
             current->companions.push_back(std::move(layer));
+        } else if (f[0] == "VEC") {
+            if (!current) throw std::runtime_error("VEC before SHOT at line " + std::to_string(line_no));
+            if (f.size() < 17) throw std::runtime_error("invalid VEC line " + std::to_string(line_no));
+            VectorEffect effect;
+            effect.kind = f[1];
+            effect.amount = as_double(f, 2);
+            effect.opacity = as_double(f, 3);
+            effect.seed = static_cast<std::uint64_t>(std::stoull(f[4]));
+            effect.count = static_cast<int>(as_double(f, 5));
+            effect.line_width = as_double(f, 6, 1.0);
+            effect.visible = as_bool(f, 7);
+            effect.displace = as_bool(f, 8);
+            effect.motion_x = as_double(f, 9);
+            effect.motion_y = as_double(f, 10);
+            effect.amount_samples[0] = as_double(f, 11, effect.amount);
+            effect.amount_samples[1] = as_double(f, 12, effect.amount);
+            effect.amount_samples[2] = as_double(f, 13, effect.amount);
+            effect.amount_samples[3] = as_double(f, 14, effect.amount);
+            effect.explode = as_double(f, 15);
+            effect.radius = as_double(f, 16);
+            current->vector_effects.push_back(std::move(effect));
         } else if (f[0] == "CUE") {
             if (f.size() < 7) throw std::runtime_error("invalid CUE line " + std::to_string(line_no));
             Cue cue;

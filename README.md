@@ -1,11 +1,8 @@
-![tubeviz](screenshot.png)
-
-
 # tubeviz
 
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.21.0**
+Current version: **0.22.0**
 
 ## Architecture
 
@@ -381,6 +378,7 @@ Key analysis groups:
 | Alternate cuts | `--selection-seed`, `--selection-variation`, `--reshuffle` |
 | Diversity | `--target-unique-clips`, `--novelty-weight`, `--novelty-candidate-fraction`, `--clip-reuse-cooldown`, `--scene-reuse-cooldown` |
 | Dynamic editing | `--dynamic-shots`, `--min-shot-seconds`, `--max-shot-seconds`, `--source-excerpt-max-seconds` |
+| Vector direction | `--vector-effects`, `--vector-intensity` |
 
 ### Variable-BPM and vibe analysis
 
@@ -814,6 +812,144 @@ Visual motif callbacks also acquire narrative roles. A recurring musical motif
 can return to a remembered source family while changing excerpt, transform,
 palette and effect treatment, creating an introduce → mutate → payoff visual
 arc rather than simple clip repetition.
+
+
+
+## Vector scene graph and procedural motion graphics
+
+v0.22 adds a first-class vector scene graph to every directed shot. Vector
+effects are chosen by the Visual Director from the music state, source visual
+fingerprint, narrative role, motif recurrence, and effect family. They are not
+random UI overlays: most primitives are derived from the actual video or are
+used to mask/displace the footage.
+
+```mermaid
+flowchart TD
+    VIDEO["Composited video"] --> EDGES["Live edge / saliency extraction"]
+    VIDEO --> MOTION["Scene motion fingerprint"]
+    COMPANION["Companion video"] --> TRANSPLANT["Temporal motion field"]
+    MUSIC["Beat / vibe / energy"] --> VD["Visual Director"]
+    EDGES --> VD
+    MOTION --> VD
+    VD --> GRAPH["Vector scene graph"]
+
+    GRAPH --> CONTOUR["Contours / subject outlines"]
+    GRAPH --> FLOW["Bezier ribbons / particles"]
+    GRAPH --> ECHO["Vector echoes"]
+    GRAPH --> GRID["Perspective grid"]
+    GRAPH --> MESH["Delaunay / Voronoi"]
+    GRAPH --> PORTAL["Companion portals"]
+    GRAPH --> GLYPH["Motif glyphs"]
+    GRAPH --> DISP["Vector displacement"]
+    GRAPH --> TRANSPLANT
+
+    CONTOUR --> FINAL["Final video"]
+    FLOW --> FINAL
+    ECHO --> FINAL
+    GRID --> FINAL
+    MESH --> FINAL
+    PORTAL --> FINAL
+    GLYPH --> FINAL
+    DISP --> FINAL
+    TRANSPLANT --> FINAL
+```
+
+The scene graph currently contains these primitive kinds:
+
+| Kind | Function |
+|---|---|
+| `contours` | Sobel-derived vector-like topology from the live video frame |
+| `semantic_outline` | saliency-oriented subject contour proxy with a stable semantic-outline abstraction |
+| `flow_ribbons` | Bézier motion ribbons biased by indexed source motion |
+| `flow_particles` | short vector trajectories moving with the same field |
+| `vector_echo` | retained edge geometry from preceding frames |
+| `perspective_grid` | vanishing-point geometry biased by scene motion direction |
+| `delaunay_fracture` | feature-seeded triangulation; triangles can displace/reveal the actual video |
+| `voronoi` | dual geometry generated from the feature-seeded Delaunay mesh |
+| `portal` | animated vector masks that reveal actual companion footage |
+| `motif_glyph` | deterministic recurring symbols forming a visual alphabet for musical motifs |
+| `motion_transplant` | motion extracted from a companion video deforms the primary source |
+| `vector_displacement` | invisible music-driven vector geometry used only as a displacement field |
+
+The browser renderer is the reference vector implementation. It performs
+low-resolution live edge extraction, deterministic geometry caching, true
+Bowyer-Watson-style Delaunay construction, Voronoi dual rendering, temporal
+edge-history echoes, and temporal companion-video motion transplantation.
+
+The native renderer also receives `VEC` records in its manifest and renders CPU
+vector equivalents for contours, subject outlines, flow paths, particles,
+vector echoes, perspective geometry, fracture/Voronoi geometry, motif glyphs,
+displacement, and companion-video portals. The native path intentionally uses
+cheaper geometry for high-throughput final rendering while preserving the same
+Visual Director decisions.
+
+Vector effects are on by default:
+
+```bash
+tubeviz analyze song.mp3 \
+  --library ./library \
+  --semantic \
+  --vector-effects \
+  --vector-intensity 1.0 \
+  --output song.timeline.json
+```
+
+Disable them:
+
+```bash
+--no-vector-effects
+```
+
+Or push them harder:
+
+```bash
+--vector-intensity 1.6
+```
+
+A strongly generative EDM cut:
+
+```bash
+tubeviz analyze song.mp3 \
+  --library ./library \
+  --semantic \
+  --visual-match-weight 1.5 \
+  --transition-weight .9 \
+  --rhythm-alignment \
+  --vector-effects \
+  --vector-intensity 1.4 \
+  --max-video-layers 4 \
+  --composition-intensity 1.35 \
+  --transform-intensity 1.4 \
+  --novelty-weight .75 \
+  --dynamic-shots \
+  --reshuffle \
+  --output song-vector.json
+```
+
+### Motion transplantation
+
+Motion transplantation uses a secondary video as an invisible motion source:
+
+```mermaid
+flowchart LR
+    B["Companion clip B"] --> SAMPLE["64×36 temporal samples"]
+    SAMPLE --> FIELD["Temporal difference + gradient field"]
+    A["Primary clip A"] --> WARP["Local video displacement"]
+    FIELD --> WARP
+    WARP --> OUT["Clip A moving with clip B's motion"]
+```
+
+This makes effects possible such as crowd motion deforming architecture, ocean
+motion deforming machinery, or a dancer's movement perturbing a city scene even
+when the companion itself is mostly hidden.
+
+### Motif glyph memory
+
+`motif_glyph` seeds its geometry from scene/motif identity. Recurring musical
+motifs therefore return with recognizable vector symbols whose rotation,
+strength, color, and mutation evolve with the musical callback. The vector
+system can function as a persistent visual alphabet instead of unrelated
+generative shapes.
 
 
 ## Recommended four-minute EDM workflow

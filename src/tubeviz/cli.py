@@ -414,6 +414,8 @@ def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
         transition_weight=max(0.0, getattr(args, "transition_weight", 0.70)),
         rhythm_alignment=getattr(args, "rhythm_alignment", True),
         visual_auto_index=getattr(args, "visual_auto_index", True),
+        vector_effects=getattr(args, "vector_effects", True),
+        vector_intensity=max(0.0, getattr(args, "vector_intensity", 1.0)),
     )
 
 
@@ -792,6 +794,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--transition-weight", type=float, default=0.70, help="Weight continuity/contrast between adjacent shots based on musical role")
     analyze.add_argument("--rhythm-alignment", action=argparse.BooleanOptionalAction, default=True, help="Phase-align natural visual motion accents to musical beats")
     analyze.add_argument("--visual-auto-index", action=argparse.BooleanOptionalAction, default=True, help="Backfill missing scene visual fingerprints before planning")
+    analyze.add_argument("--vector-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable vector scene-graph effects")
+    analyze.add_argument("--vector-intensity", type=float, default=1.0, help="Global vector-effect strength; 0 disables, 1 normal, >1 aggressive")
     analyze.add_argument("--novelty-candidate-fraction", type=float, default=0.30, help="Only explore unseen clips from this strongest semantic fraction of candidates")
     analyze.add_argument("--clip-reuse-cooldown", type=int, default=20, help="Primary/composite shot uses before a source clip is preferred again")
     analyze.add_argument("--scene-reuse-cooldown", type=int, default=48, help="Shot uses before an exact indexed scene is preferred again")
@@ -908,6 +912,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--transition-weight", type=float, default=0.70)
     serve.add_argument("--rhythm-alignment", action=argparse.BooleanOptionalAction, default=True)
     serve.add_argument("--visual-auto-index", action=argparse.BooleanOptionalAction, default=True)
+    serve.add_argument("--vector-effects", action=argparse.BooleanOptionalAction, default=True)
+    serve.add_argument("--vector-intensity", type=float, default=1.0)
     serve.add_argument("--novelty-candidate-fraction", type=float, default=0.30)
     serve.add_argument("--clip-reuse-cooldown", type=int, default=20)
     serve.add_argument("--scene-reuse-cooldown", type=int, default=48)

@@ -224,6 +224,26 @@ class ColorDirection(BaseModel):
     palette: list[str] = Field(default_factory=list)
 
 
+class VectorEffect(BaseModel):
+    """First-class vector scene-graph primitive scheduled by the Visual Director."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    amount: float = Field(default=0.0, ge=0.0, le=1.0)
+    opacity: float = Field(default=0.5, ge=0.0, le=1.0)
+    blend_mode: str = "screen"
+    seed: int = 0
+    count: int = Field(default=24, ge=1, le=512)
+    line_width: float = Field(default=1.5, ge=0.1, le=32.0)
+    color_role: str = "target"
+    source: str = "video"
+    visible: bool = True
+    displace: bool = False
+    parameters: dict[str, float | int | str | bool] = Field(default_factory=dict)
+    automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
+
+
 class VisualDirection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -239,6 +259,7 @@ class VisualDirection(BaseModel):
     color: ColorDirection = Field(default_factory=ColorDirection)
     # Curve values are normalized to shot progress 0..1.
     automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
+    vector_effects: list[VectorEffect] = Field(default_factory=list)
 
 
 class SceneSelection(BaseModel):

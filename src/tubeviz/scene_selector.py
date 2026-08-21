@@ -59,6 +59,8 @@ class SceneSelectorConfig:
     transition_weight: float = 0.70
     rhythm_alignment: bool = True
     visual_auto_index: bool = True
+    vector_effects: bool = True
+    vector_intensity: float = 1.0
 
 
 _SECTION_DESCRIPTORS = {
@@ -643,6 +645,8 @@ def build_scene_plan(
                 transition=transition_score(previous_primary, selected, section),
                 occurrence=occurrence,
                 shot_index_in_section=local_shot_index,
+                vector_enabled=cfg.vector_effects,
+                vector_intensity=cfg.vector_intensity,
             )
 
             layer_budget = max(1, min(4, int(cfg.max_video_layers)))
@@ -801,6 +805,46 @@ def attach_scene_plan(
                     time=min(shot_end - 1e-4, selection.time + span * peak_progress),
                     action=action,
                     parameters={"amount": float(peak_amount), "directed": True},
+                )
+            )
+        # Native Phase-1 fallback for vector scene-graph effects. Browser
+        # rendering consumes the full vector primitives; native rendering gets
+        # musically equivalent raster deformation pulses until the GPU/vector
+        # native path reaches feature parity.
+        vector_fallback = {
+            "contours": "harmonic_warp",
+            "semantic_outline": "harmonic_warp",
+            "flow_ribbons": "video_edit_vortex",
+            "flow_particles": "video_edit_vortex",
+            "vector_echo": "video_edit_chroma_delay",
+            "perspective_grid": "video_edit_ripple",
+            "delaunay_fracture": "video_edit_ripple",
+            "voronoi": "video_edit_chroma_delay",
+            "portal": "energy_bloom",
+            "motif_glyph": "harmonic_warp",
+            "motion_transplant": "video_edit_vortex",
+            "vector_displacement": "video_edit_ripple",
+        }
+        for effect in selection.direction.vector_effects:
+            action = vector_fallback.get(effect.kind)
+            if not action:
+                continue
+            points = effect.automation.get("amount", [])
+            if points:
+                peak_progress, peak_amount = max(points, key=lambda point: point[1])
+            else:
+                peak_progress, peak_amount = 0.75, effect.amount
+            if peak_amount <= 0.025:
+                continue
+            non_scene_cues.append(
+                VisualCue(
+                    time=min(shot_end - 1e-4, selection.time + span * peak_progress),
+                    action=action,
+                    parameters={
+                        "amount": float(min(1.0, peak_amount * 0.65)),
+                        "directed": True,
+                        "vector_fallback": effect.kind,
+                    },
                 )
             )
     non_scene_cues.sort(key=lambda cue: (cue.time, cue.action))

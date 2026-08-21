@@ -46,7 +46,14 @@ const [delayA,delayACtx]=offscreen(false);
 const [delayB,delayBCtx]=offscreen(false);
 const [delayC,delayCCtx]=offscreen(false);
 const [exportCanvas,exportCtx]=offscreen(false);
+const [vectorSample,vectorSampleCtx]=offscreen(false);
+const [vectorScratch,vectorScratchCtx]=offscreen(true);
+const [motionProbe,motionProbeCtx]=offscreen(false);
+const [motionPrev,motionPrevCtx]=offscreen(false);
 const delayBuffers=[delayA,delayB,delayC];
+const vectorGeometryCache=new Map();
+const vectorEchoHistory=[];
+let vectorEdgeCache={frame:-1,points:[],salient:[]};
 const delayCtx=[delayACtx,delayBCtx,delayCCtx];
 let delayWrite=0;
 
@@ -56,6 +63,11 @@ function resize(){
   for(const c of [history,scratch,freezeCanvas,holdCanvas,edgeCanvas]){c.width=width;c.height=height;}
   for(const c of delayBuffers){c.width=Math.max(1,Math.floor(width/2));c.height=Math.max(1,Math.floor(height/2));}
   exportCanvas.width=width;exportCanvas.height=height;
+  vectorSample.width=128;vectorSample.height=72;
+  vectorScratch.width=width;vectorScratch.height=height;
+  motionProbe.width=64;motionProbe.height=36;motionPrev.width=64;motionPrev.height=36;
+  motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,64,36);
+  vectorGeometryCache.clear();vectorEchoHistory.length=0;vectorEdgeCache={frame:-1,points:[],salient:[]};
   posterCanvas.width=Math.max(96,Math.min(320,Math.floor(width/5)));
   posterCanvas.height=Math.max(54,Math.min(180,Math.floor(height/5)));
 }
@@ -127,8 +139,8 @@ async function activateScene(scene,{immediate=false}={}){
     activeScene={...scene};focusLayer=0;
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
-    const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';
-    clipMeta.textContent=`${scene.term}${scene.motif_id?` · ${scene.motif_id} #${scene.occurrence}`:''} · ${scene.composition_mode} · ${1+(scene.layers?.length??0)} video layers${align}${family} · ${scene.title??scene.source_id}${fxNames?` · fx ${fxNames}`:''}`;
+    const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';const vectors=d.vector_effects?.length?` · ${d.vector_effects.length} vector fx`:'';
+    clipMeta.textContent=`${scene.term}${scene.motif_id?` · ${scene.motif_id} #${scene.occurrence}`:''} · ${scene.composition_mode} · ${1+(scene.layers?.length??0)} video layers${align}${family}${vectors} · ${scene.title??scene.source_id}${fxNames?` · fx ${fxNames}`:''}`;
   }catch(e){console.warn('scene activation failed',e);clipMeta.textContent=`Clip group unavailable: ${scene.title??scene.source_id}`;}
 }
 
@@ -665,6 +677,286 @@ function applyPrismaticShift(amount){
   fx.drawImage(scratch,-dx,-dy,width,height);
   fx.restore();
 }
+function vectorRand(seed,index=0){
+  let x=(Number(seed||1)+index*0x9e3779b9)>>>0;
+  x^=x<<13;x^=x>>>17;x^=x<<5;
+  return (x>>>0)/4294967296;
+}
+function effectCurveValue(effect,name,fallback=null){
+  const points=effect?.automation?.[name];
+  if(!Array.isArray(points)||!points.length)return fallback??effect?.[name]??effect?.amount??0;
+  const p=directedProgress();
+  if(p<=points[0][0])return Number(points[0][1]);
+  for(let i=1;i<points.length;i++){
+    const a=points[i-1],b=points[i];
+    if(p<=b[0]){
+      const q=(p-a[0])/Math.max(1e-6,b[0]-a[0]);
+      return Number(a[1])+(Number(b[1])-Number(a[1]))*q;
+    }
+  }
+  return Number(points[points.length-1][1]);
+}
+function vectorColor(effect,alpha=1,hueOffset=0){
+  const c=activeScene?.direction?.color??{},base=Number(c.target_hue??190);
+  const hue=(base+hueOffset+360)%360;
+  const sat=65+25*Math.min(1,activeScene?.direction?.motion_match??.5);
+  const light=55+20*Math.min(1,sectionEnergy);
+  return `hsla(${hue},${sat}%,${light}%,${Math.max(0,Math.min(1,alpha))})`;
+}
+function extractVectorEdges(force=false){
+  if(!force&&vectorEdgeCache.frame>=0&&frameCounter-vectorEdgeCache.frame<3)return vectorEdgeCache;
+  const w=vectorSample.width,h=vectorSample.height;
+  vectorSampleCtx.drawImage(videoFx,0,0,w,h);
+  let data;
+  try{data=vectorSampleCtx.getImageData(0,0,w,h).data;}catch{return vectorEdgeCache;}
+  const lum=new Float32Array(w*h);
+  let mean=0;
+  for(let i=0,p=0;i<lum.length;i++,p+=4){
+    const y=.2126*data[p]+.7152*data[p+1]+.0722*data[p+2];lum[i]=y;mean+=y;
+  }
+  mean/=lum.length;
+  const raw=[];
+  for(let y=1;y<h-1;y+=1)for(let x=1;x<w-1;x+=1){
+    const i=y*w+x;
+    const gx=-lum[i-w-1]-2*lum[i-1]-lum[i+w-1]+lum[i-w+1]+2*lum[i+1]+lum[i+w+1];
+    const gy=-lum[i-w-1]-2*lum[i-w]-lum[i-w+1]+lum[i+w-1]+2*lum[i+w]+lum[i+w+1];
+    const mag=Math.sqrt(gx*gx+gy*gy);
+    if(mag>105)raw.push({x:x/(w-1),y:y/(h-1),mag,angle:Math.atan2(gy,gx),l:lum[i],sal:mag*(.7+.3*Math.abs(lum[i]-mean)/128)});
+  }
+  raw.sort((a,b)=>b.mag-a.mag);
+  const points=[];const occupied=new Set();
+  for(const point of raw){
+    const gx=Math.floor(point.x*32),gy=Math.floor(point.y*18),key=`${gx}:${gy}`;
+    if(occupied.has(key))continue;occupied.add(key);points.push(point);
+    if(points.length>=180)break;
+  }
+  const salient=[...points].sort((a,b)=>b.sal-a.sal).slice(0,70);
+  vectorEdgeCache={frame:frameCounter,points,salient};
+  if(frameCounter%8===0){
+    vectorEchoHistory.unshift(points.slice(0,90).map(p=>({...p})));
+    if(vectorEchoHistory.length>8)vectorEchoHistory.pop();
+  }
+  return vectorEdgeCache;
+}
+function drawContours(effect,semantic=false){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));
+  if(amount<.015)return;
+  const edges=extractVectorEdges(),pts=semantic?edges.salient:edges.points;
+  const max=Math.min(pts.length,Math.floor(effect.count*(.45+.75*amount)));
+  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';
+  fx.lineCap='round';fx.lineWidth=(effect.line_width??1.2)*devicePixelRatio;
+  for(let i=0;i<max;i++){
+    const p=pts[i],alpha=(effect.opacity??.3)*amount*(semantic?(.35+.65*p.sal/Math.max(1,pts[0]?.sal||1)):.55);
+    const len=(semantic?18:11)*devicePixelRatio*(.5+amount)*(.5+Math.min(2,p.mag/220));
+    const tangent=p.angle+Math.PI/2,x=p.x*width,y=p.y*height;
+    fx.strokeStyle=vectorColor(effect,alpha,semantic?35:0);
+    fx.beginPath();fx.moveTo(x-Math.cos(tangent)*len,y-Math.sin(tangent)*len);fx.lineTo(x+Math.cos(tangent)*len,y+Math.sin(tangent)*len);fx.stroke();
+  }
+  fx.restore();
+}
+function drawFlowRibbons(effect,particles=false){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const p=effect.parameters??{},mx=Number(p.motion_x??0),my=Number(p.motion_y??0);
+  const curl=effectCurveValue(effect,'curl',.25),count=Math.min(effect.count,particles?180:48);
+  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineCap='round';
+  for(let i=0;i<count;i++){
+    const r1=vectorRand(effect.seed,i*3),r2=vectorRand(effect.seed,i*3+1),r3=vectorRand(effect.seed,i*3+2);
+    let x=r1*width,y=r2*height;
+    const localPhase=phase*(.7+amount*1.8)+r3*Math.PI*2;
+    const length=(particles?28:100)*devicePixelRatio*(.45+1.4*amount);
+    const angle=Math.atan2(my,mx||.001)+Math.sin(localPhase+r1*5)*curl*2.4+(mx===0&&my===0?(r3-.5)*2.4:0);
+    const dx=Math.cos(angle)*length,dy=Math.sin(angle)*length;
+    const alpha=(effect.opacity??.25)*amount*(particles?.55:.8);
+    fx.strokeStyle=vectorColor(effect,alpha,i*3.7);
+    fx.lineWidth=(effect.line_width??1.4)*devicePixelRatio*(particles?.65:1);
+    fx.beginPath();fx.moveTo(x,y);
+    if(particles){
+      fx.lineTo(x+dx*.25,y+dy*.25);
+    }else{
+      const bend=length*curl*.65;
+      fx.bezierCurveTo(x+dx*.28-Math.sin(angle)*bend,y+dy*.28+Math.cos(angle)*bend,x+dx*.72+Math.sin(angle)*bend*.5,y+dy*.72-Math.cos(angle)*bend*.5,x+dx,y+dy);
+    }
+    fx.stroke();
+  }
+  fx.restore();
+}
+function drawVectorEcho(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  extractVectorEdges();
+  fx.save();fx.globalCompositeOperation='screen';fx.lineCap='round';
+  const generations=Math.min(vectorEchoHistory.length,Math.max(1,effect.count));
+  for(let g=0;g<generations;g++){
+    const pts=vectorEchoHistory[g],fade=(1-g/(generations+1))*amount;
+    const drift=(g+1)*width*.003*Math.sin(phase*.9+g);
+    fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*fade,g*12);
+    fx.lineWidth=(effect.line_width??1.2)*devicePixelRatio;
+    for(let i=0;i<Math.min(pts.length,55);i+=2){
+      const p=pts[i],a=p.angle+Math.PI/2,len=6*devicePixelRatio*(1+fade);
+      const x=p.x*width+drift,y=p.y*height+g*height*.0015;
+      fx.beginPath();fx.moveTo(x-Math.cos(a)*len,y-Math.sin(a)*len);fx.lineTo(x+Math.cos(a)*len,y+Math.sin(a)*len);fx.stroke();
+    }
+  }
+  fx.restore();
+}
+function drawPerspectiveGrid(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const p=effect.parameters??{},mx=Number(p.motion_x??0),my=Number(p.motion_y??0);
+  const vx=width*(.5+.24*mx+.07*Math.sin(phase*.35)),vy=height*(.38+.18*my+.05*Math.cos(phase*.28));
+  const count=Math.max(6,Math.min(40,effect.count));
+  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.15)*amount);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;
+  for(let i=0;i<=count;i++){
+    const x=i/count*width;fx.beginPath();fx.moveTo(vx,vy);fx.lineTo(x,height);fx.stroke();
+  }
+  for(let j=1;j<=12;j++){
+    const q=j/12,pow=q*q*q,y=vy+(height-vy)*pow;
+    const spread=(width*(.12+.88*pow));fx.beginPath();fx.moveTo(vx-spread*.5,y);fx.lineTo(vx+spread*.5,y);fx.stroke();
+  }
+  fx.restore();
+}
+function geometryKey(effect){return `${activeScene?.scene_id??0}:${effect.kind}:${effect.seed}:${effect.count}:${width}x${height}`;}
+function generatedSites(effect){
+  const key=geometryKey(effect)+':sites';if(vectorGeometryCache.has(key))return vectorGeometryCache.get(key);
+  const edges=extractVectorEdges(true).salient;
+  const sites=[];
+  const desired=Math.max(6,Math.min(70,effect.count));
+  for(let i=0;i<desired;i++){
+    if(i<edges.length&&i<Math.floor(desired*.55))sites.push({x:edges[i].x*width,y:edges[i].y*height});
+    else sites.push({x:vectorRand(effect.seed,i*2)*width,y:vectorRand(effect.seed,i*2+1)*height});
+  }
+  vectorGeometryCache.set(key,sites);return sites;
+}
+function circumcircle(a,b,c){
+  const d=2*(a.x*(b.y-c.y)+b.x*(c.y-a.y)+c.x*(a.y-b.y));if(Math.abs(d)<1e-8)return null;
+  const aa=a.x*a.x+a.y*a.y,bb=b.x*b.x+b.y*b.y,cc=c.x*c.x+c.y*c.y;
+  const x=(aa*(b.y-c.y)+bb*(c.y-a.y)+cc*(a.y-b.y))/d;
+  const y=(aa*(c.x-b.x)+bb*(a.x-c.x)+cc*(b.x-a.x))/d;
+  return{x,y,r2:(x-a.x)**2+(y-a.y)**2};
+}
+function delaunay(effect){
+  const key=geometryKey(effect)+':tri';if(vectorGeometryCache.has(key))return vectorGeometryCache.get(key);
+  const sites=generatedSites(effect);const margin=Math.max(width,height)*8;
+  const pts=[...sites,{x:-margin,y:-margin},{x:width+margin,y:-margin},{x:width/2,y:height+margin}];
+  const n=sites.length;let tris=[[n,n+1,n+2]];
+  for(let pi=0;pi<n;pi++){
+    const p=pts[pi],bad=[];
+    for(let ti=0;ti<tris.length;ti++){const t=tris[ti],c=circumcircle(pts[t[0]],pts[t[1]],pts[t[2]]);if(c&&((p.x-c.x)**2+(p.y-c.y)**2)<=c.r2+1e-5)bad.push(ti);}
+    const edges=[];
+    for(const ti of bad){const t=tris[ti];for(const e of [[t[0],t[1]],[t[1],t[2]],[t[2],t[0]]]){const k=e[0]<e[1]?`${e[0]}:${e[1]}`:`${e[1]}:${e[0]}`;edges.push({e,k});}}
+    const counts=new Map();for(const x of edges)counts.set(x.k,(counts.get(x.k)||0)+1);
+    const boundary=edges.filter(x=>counts.get(x.k)===1).map(x=>x.e);
+    tris=tris.filter((_,i)=>!bad.includes(i));
+    for(const e of boundary)tris.push([e[0],e[1],pi]);
+  }
+  tris=tris.filter(t=>t.every(i=>i<n));
+  const result={sites,pts,tris};vectorGeometryCache.set(key,result);return result;
+}
+function drawDelaunay(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const explode=Math.min(1,effectCurveValue(effect,'explode',0)),geo=delaunay(effect);
+  snapshot();fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';
+  for(let ti=0;ti<geo.tris.length;ti++){
+    const t=geo.tris[ti],a=geo.pts[t[0]],b=geo.pts[t[1]],c=geo.pts[t[2]],cx=(a.x+b.x+c.x)/3,cy=(a.y+b.y+c.y)/3;
+    const angle=Math.atan2(cy-height/2,cx-width/2),push=explode*amount*Math.min(width,height)*.12*(.35+.65*vectorRand(effect.seed,ti));
+    fx.save();fx.beginPath();fx.moveTo(a.x,a.y);fx.lineTo(b.x,b.y);fx.lineTo(c.x,c.y);fx.closePath();fx.clip();
+    if(effect.displace&&explode>.02){fx.globalAlpha=.32+.46*amount;fx.drawImage(scratch,Math.cos(angle)*push,Math.sin(angle)*push,width,height);}
+    fx.restore();
+    if(effect.visible!==false){fx.strokeStyle=vectorColor(effect,(effect.opacity??.25)*amount,ti*2.1);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;fx.beginPath();fx.moveTo(a.x,a.y);fx.lineTo(b.x,b.y);fx.lineTo(c.x,c.y);fx.closePath();fx.stroke();}
+  }
+  fx.restore();
+}
+function drawVoronoi(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const geo=delaunay(effect),edgeMap=new Map();
+  for(let ti=0;ti<geo.tris.length;ti++){const t=geo.tris[ti],cc=circumcircle(geo.pts[t[0]],geo.pts[t[1]],geo.pts[t[2]]);if(!cc)continue;for(const e of [[t[0],t[1]],[t[1],t[2]],[t[2],t[0]]]){const k=e[0]<e[1]?`${e[0]}:${e[1]}`:`${e[1]}:${e[0]}`;if(!edgeMap.has(k))edgeMap.set(k,[]);edgeMap.get(k).push(cc);}}
+  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,35);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;
+  for(const centers of edgeMap.values())if(centers.length===2){fx.beginPath();fx.moveTo(centers[0].x,centers[0].y);fx.lineTo(centers[1].x,centers[1].y);fx.stroke();}
+  fx.restore();
+  if(effect.displace)applyVectorDisplacement({...effect,amount:amount*.45});
+}
+function portalPath(effect,index,amount){
+  const seed=effect.seed+index*7919,cx=width*(.25+.5*vectorRand(seed,1)),cy=height*(.25+.5*vectorRand(seed,2));
+  const radius=Math.min(width,height)*effectCurveValue(effect,'radius',.25)*(.55+.7*amount),vertices=7+(seed%5);
+  fx.beginPath();
+  for(let i=0;i<=vertices;i++){const a=i/vertices*Math.PI*2,r=radius*(.76+.24*Math.sin(a*3+phase*1.7+seed*.001));const x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r;if(i===0)fx.moveTo(x,y);else fx.lineTo(x,y);}
+  fx.closePath();return{cx,cy,radius};
+}
+function drawPortal(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015||activeBank<0)return;
+  const companions=bankState[activeBank]?.slice(1)??[];if(!companions.length)return;
+  const count=Math.min(effect.count,companions.length);
+  for(let i=0;i<count;i++){
+    fx.save();const shape=portalPath(effect,i,amount);fx.clip();drawLayer(fx,companions[i],{x:0,y:0,w:width,h:height},Math.min(.9,(effect.opacity??.5)+amount*.35),'screen');fx.restore();
+    fx.save();fx.strokeStyle=vectorColor(effect,(effect.opacity??.4)*amount,i*55);fx.lineWidth=(effect.line_width??2)*devicePixelRatio;portalPath(effect,i,amount);fx.stroke();fx.restore();
+  }
+}
+function drawMotifGlyph(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  const rotation=effectCurveValue(effect,'rotation',0),arms=Math.max(3,Math.min(12,effect.count)),cx=width*.5,cy=height*.5;
+  const base=Math.min(width,height)*(.055+.08*amount);
+  fx.save();fx.translate(cx,cy);fx.rotate(rotation*Math.PI+phase*.08*(1+amount));fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,70);fx.lineWidth=(effect.line_width??1.5)*devicePixelRatio;
+  for(let arm=0;arm<arms;arm++){fx.save();fx.rotate(arm/arms*Math.PI*2);fx.beginPath();fx.moveTo(0,0);let x=0,y=0;for(let n=1;n<=6;n++){const len=base*(.16+.13*n),bend=Math.sin(effect.seed*.001+n*1.7)*base*.12;x+=len*.38;y+=(n%2?1:-1)*bend;fx.quadraticCurveTo(x-len*.18,y*.6,x,y);}fx.stroke();fx.restore();}
+  fx.restore();
+}
+function applyMotionTransplant(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015||activeBank<0)return;
+  const companion=bankState[activeBank]?.[1]?.video;if(!companion||companion.readyState<2)return;
+  const w=motionProbe.width,h=motionProbe.height;
+  motionProbeCtx.drawImage(companion,0,0,w,h);
+  let cur,prev;
+  try{cur=motionProbeCtx.getImageData(0,0,w,h);prev=motionPrevCtx.getImageData(0,0,w,h);}catch{return;}
+  const field=[];
+  for(let gy=1;gy<h-1;gy+=3)for(let gx=1;gx<w-1;gx+=3){
+    const i=(gy*w+gx)*4;
+    const lum=(d,j)=>.2126*d[j]+.7152*d[j+1]+.0722*d[j+2];
+    const dt=(lum(cur.data,i)-lum(prev.data,i))/255;
+    const dx=(lum(cur.data,i+4)-lum(cur.data,i-4))/255;
+    const dy=(lum(cur.data,i+w*4)-lum(cur.data,i-w*4))/255;
+    const strength=Math.min(1,Math.abs(dt)*2.8);
+    if(strength>.06)field.push({x:gx/w,y:gy/h,dx:dx*Math.sign(dt||1),dy:dy*Math.sign(dt||1),strength});
+  }
+  motionPrevCtx.putImageData(cur,0,0);
+  if(!field.length)return;
+  snapshot();
+  const cellW=width/(w/3),cellH=height/(h/3);
+  fx.save();fx.globalAlpha=.15+.38*amount;
+  for(const v of field.slice(0,70)){
+    const sx=Math.max(0,v.x*width-cellW),sy=Math.max(0,v.y*height-cellH);
+    const sw=Math.min(width-sx,cellW*2),sh=Math.min(height-sy,cellH*2);
+    const mx=(v.dx*width*.11+Math.sin(phase+v.y*9)*width*.004)*amount*v.strength;
+    const my=(v.dy*height*.11+Math.cos(phase*.8+v.x*7)*height*.004)*amount*v.strength;
+    fx.drawImage(scratch,sx,sy,sw,sh,sx+mx,sy+my,sw,sh);
+  }
+  fx.restore();
+}
+function applyVectorDisplacement(effect){
+  const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
+  snapshot();const strips=Math.max(6,Math.min(36,effect.count)),sh=height/strips;
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.18+.34*amount;
+  for(let i=0;i<strips;i++){const y=i*sh,angle=phase*(1.5+amount*2)+i*.73+effect.seed*.0001;const dx=Math.sin(angle)*width*.026*amount,dy=Math.cos(angle*1.31)*height*.008*amount;fx.drawImage(scratch,0,y,width,sh+1,dx,y+dy,width,sh+1);}
+  fx.restore();
+}
+function renderVectorSceneGraph(){
+  const effects=activeScene?.direction?.vector_effects;if(!Array.isArray(effects)||!effects.length)return;
+  // Edge extraction is shared by all geometry derived from the current frame.
+  if(effects.some(e=>['contours','semantic_outline','vector_echo','delaunay_fracture','voronoi'].includes(e.kind)))extractVectorEdges();
+  for(const effect of effects){
+    const amount=effectCurveValue(effect,'amount',effect.amount??0);if(amount<=.012)continue;
+    switch(effect.kind){
+      case'contours':drawContours(effect,false);break;
+      case'semantic_outline':drawContours(effect,true);break;
+      case'flow_ribbons':drawFlowRibbons(effect,false);break;
+      case'flow_particles':drawFlowRibbons(effect,true);break;
+      case'vector_echo':drawVectorEcho(effect);break;
+      case'perspective_grid':drawPerspectiveGrid(effect);break;
+      case'delaunay_fracture':drawDelaunay(effect);break;
+      case'voronoi':drawVoronoi(effect);break;
+      case'portal':drawPortal(effect);break;
+      case'motif_glyph':drawMotifGlyph(effect);break;
+      case'motion_transplant':applyMotionTransplant(effect);break;
+      case'vector_displacement':applyVectorDisplacement(effect);break;
+    }
+  }
+}
 function applyPostFx(){
   if(!activeScene)return;
   const t=activeScene.transform??{},m=liveFx.master;
@@ -739,6 +1031,7 @@ function applyPostFx(){
   applyScanlines(scan);
   applyVignette(vignette);
   applyStrobe(strobe);
+  renderVectorSceneGraph();
 
   historyCtx.globalAlpha=.92;
   historyCtx.drawImage(videoFx,0,0);

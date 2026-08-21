@@ -170,6 +170,9 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--novelty-weight", o.get("novelty_weight", 0.65))
         _flag(command, "--visual-match-weight", o.get("visual_match_weight", 1.25))
         _flag(command, "--transition-weight", o.get("transition_weight", 0.70))
+        _flag(command, "--vector-intensity", o.get("vector_intensity", 1.0))
+        if o.get("vector_effects", True) is False:
+            command.append("--no-vector-effects")
         if o.get("rhythm_alignment", True) is False:
             command.append("--no-rhythm-alignment")
         _flag(command, "--selection-variation", o.get("selection_variation", 0.30))
@@ -276,7 +279,7 @@ def create_gui_app(
     static_dir = package_dir / "static"
     jobs = JobManager()
 
-    app = FastAPI(title="tubeviz studio", version="0.21.0")
+    app = FastAPI(title="tubeviz studio", version="0.22.0")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/")

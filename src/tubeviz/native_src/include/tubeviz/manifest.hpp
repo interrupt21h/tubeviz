@@ -35,12 +35,29 @@ struct Layer {
     Transform transform{};
 };
 
+struct VectorEffect {
+    std::string kind;
+    double amount{0.0};
+    double opacity{0.0};
+    std::uint64_t seed{0};
+    int count{0};
+    double line_width{1.0};
+    bool visible{true};
+    bool displace{false};
+    double motion_x{0.0};
+    double motion_y{0.0};
+    double amount_samples[4]{0.0, 0.0, 0.0, 0.0};
+    double explode{0.0};
+    double radius{0.0};
+};
+
 struct Shot {
     double time{0.0};
     double timeline_end{0.0};
     double crossfade{0.0};
     Layer primary{};
     std::vector<Layer> companions;
+    std::vector<VectorEffect> vector_effects;
 };
 
 struct Cue {

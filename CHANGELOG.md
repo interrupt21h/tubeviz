@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.22.0
+
+### Added
+
+- Added first-class `VectorEffect` scene-graph primitives to the directed timeline.
+- Added video-derived contour topology and saliency-oriented subject outlines.
+- Added motion-field Bézier ribbons and vector particles.
+- Added temporal vector edge echoes.
+- Added motion-biased perspective grids.
+- Added feature-seeded Delaunay fracture geometry and Voronoi dual geometry.
+- Added vector portals that reveal actual companion footage through animated masks.
+- Added deterministic recurring motif glyphs as a visual alphabet.
+- Added invisible vector displacement fields that deform the rendered footage.
+- Added companion-video motion transplantation: temporal motion from one source can deform another.
+- Added per-vector-effect automation, deterministic seeds, count, width, opacity, blend, visibility, displacement and source metadata.
+- Added `--vector-effects` / `--no-vector-effects` and `--vector-intensity`.
+- Added Studio controls for the vector scene graph.
+- Added native-manifest `VEC` records and native CPU rendering for the vector-directed effect set.
+- Added native vector fallback cues for compatibility with music-reactive raster effects.
+
 ## 0.21.0
 
 ### Added

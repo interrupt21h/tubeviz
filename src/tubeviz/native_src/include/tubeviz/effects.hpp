@@ -39,6 +39,17 @@ void apply_reactive_effects(
     double phase
 );
 
+void apply_vector_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* companion,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const std::vector<VectorEffect>& effects,
+    double progress,
+    double phase
+);
+
 void blend_layer(
     std::vector<std::uint8_t>& destination,
     const std::vector<std::uint8_t>& source,

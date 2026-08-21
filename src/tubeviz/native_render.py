@@ -182,6 +182,52 @@ def _cue_fields(cue) -> tuple[float, str, float, float, float, float] | None:
     )
 
 
+def _curve_sample(points: list[tuple[float, float]], progress: float, fallback: float) -> float:
+    if not points:
+        return float(fallback)
+    pts = sorted((float(x), float(y)) for x, y in points)
+    if progress <= pts[0][0]:
+        return pts[0][1]
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        if progress <= bx:
+            q = (progress - ax) / max(1e-9, bx - ax)
+            return ay + (by - ay) * q
+    return pts[-1][1]
+
+
+def _vector_fields(effect) -> list[str]:
+    amount_curve = effect.automation.get("amount", [])
+    samples = [
+        _curve_sample(amount_curve, p, effect.amount)
+        for p in (0.0, 1/3, 2/3, 1.0)
+    ]
+    explode = max(
+        (float(y) for _, y in effect.automation.get("explode", [])),
+        default=0.0,
+    )
+    radius = max(
+        (float(y) for _, y in effect.automation.get("radius", [])),
+        default=0.0,
+    )
+    params = effect.parameters or {}
+    return [
+        "VEC",
+        effect.kind,
+        f"{effect.amount:.9g}",
+        f"{effect.opacity:.9g}",
+        str(int(effect.seed)),
+        str(int(effect.count)),
+        f"{effect.line_width:.9g}",
+        "1" if effect.visible else "0",
+        "1" if effect.displace else "0",
+        f"{float(params.get('motion_x', 0.0)):.9g}",
+        f"{float(params.get('motion_y', 0.0)):.9g}",
+        *(f"{value:.9g}" for value in samples),
+        f"{explode:.9g}",
+        f"{radius:.9g}",
+    ]
+
+
 def write_native_manifest(
     timeline: DirectedTimeline,
     library: str | Path,
@@ -263,6 +309,9 @@ def write_native_manifest(
                 *_transform_fields(layer.transform),
             ]
             lines.append("\t".join(fields))
+
+        for effect in scene.direction.vector_effects:
+            lines.append("\t".join(_vector_fields(effect)))
 
     for cue in timeline.cues:
         fields = _cue_fields(cue)

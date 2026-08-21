@@ -80,6 +80,7 @@ $("analyzeBtn").onclick=()=>{
     transform_intensity:number("transformIntensity"),composition_intensity:number("compositionIntensity"),
     target_unique_clips:number("targetUnique"),novelty_weight:number("noveltyWeight"),
     visual_match_weight:number("visualMatchWeight"),transition_weight:number("transitionWeight"),
+    vector_effects:checked("vectorEffects"),vector_intensity:number("vectorIntensity"),
     rhythm_alignment:checked("rhythmAlignment"),
     selection_variation:.30,min_shot_seconds:number("minShot"),max_shot_seconds:number("maxShot"),
     source_excerpt_max_seconds:number("maxExcerpt"),reshuffle:checked("reshuffle"),

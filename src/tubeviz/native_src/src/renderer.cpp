@@ -104,10 +104,32 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now) {
     if (shot.primary.opacity < 0.999) {
         for (auto& c : output) c = static_cast<std::uint8_t>(c * std::clamp(shot.primary.opacity, 0.0, 1.0));
     }
+
+    std::vector<std::uint8_t> portal_companion;
+    bool have_portal_companion = false;
     for (const auto& layer : shot.companions) {
         auto companion = render_layer(layer, shot.time, now);
+        if (!have_portal_companion) {
+            portal_companion = companion;
+            have_portal_companion = true;
+        }
         blend_layer(output, companion, layer.opacity, layer.blend_mode);
     }
+
+    const double progress = std::clamp(
+        (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time),
+        0.0, 1.0
+    );
+    apply_vector_effects(
+        output,
+        have_portal_companion ? &portal_companion : nullptr,
+        previous_output_.empty() ? nullptr : &previous_output_,
+        width_,
+        height_,
+        shot.vector_effects,
+        progress,
+        now * 0.24
+    );
     return output;
 }
 

@@ -268,6 +268,228 @@ void apply_reactive_effects(
     }
 }
 
+
+namespace {
+
+inline std::uint64_t mix64(std::uint64_t x) {
+    x ^= x >> 30; x *= 0xbf58476d1ce4e5b9ULL;
+    x ^= x >> 27; x *= 0x94d049bb133111ebULL;
+    x ^= x >> 31; return x;
+}
+
+inline double unit_rand(std::uint64_t seed, std::uint64_t index) {
+    return static_cast<double>(mix64(seed + index * 0x9e3779b97f4a7c15ULL) & 0xffffffULL) / 16777216.0;
+}
+
+inline double effect_amount(const VectorEffect& e, double p) {
+    p = std::clamp(p, 0.0, 1.0);
+    const double q = p * 3.0;
+    const int i = std::min(2, static_cast<int>(q));
+    const double f = q - i;
+    return std::clamp(e.amount_samples[i] * (1.0 - f) + e.amount_samples[i + 1] * f, 0.0, 1.0);
+}
+
+inline void blend_pixel(std::vector<std::uint8_t>& rgb, int width, int height, int x, int y,
+                        double r, double g, double b, double alpha) {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const auto i = static_cast<std::size_t>((y * width + x) * 3);
+    const double a = std::clamp(alpha, 0.0, 1.0);
+    rgb[i] = clamp8(rgb[i] * (1.0 - a) + r * a);
+    rgb[i + 1] = clamp8(rgb[i + 1] * (1.0 - a) + g * a);
+    rgb[i + 2] = clamp8(rgb[i + 2] * (1.0 - a) + b * a);
+}
+
+void draw_line(std::vector<std::uint8_t>& rgb, int width, int height,
+               int x0, int y0, int x1, int y1,
+               double r, double g, double b, double alpha, int thickness = 1) {
+    const int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    const int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    int err = dx + dy;
+    while (true) {
+        for (int oy = -thickness/2; oy <= thickness/2; ++oy)
+            for (int ox = -thickness/2; ox <= thickness/2; ++ox)
+                blend_pixel(rgb, width, height, x0 + ox, y0 + oy, r, g, b, alpha);
+        if (x0 == x1 && y0 == y1) break;
+        const int e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+}
+
+inline double luminance(const std::vector<std::uint8_t>& rgb, int width, int x, int y) {
+    const auto i = static_cast<std::size_t>((y * width + x) * 3);
+    return .2126*rgb[i] + .7152*rgb[i+1] + .0722*rgb[i+2];
+}
+
+void draw_native_contours(std::vector<std::uint8_t>& rgb, int width, int height,
+                          const VectorEffect& e, double amount, bool semantic) {
+    if (amount <= .01) return;
+    const auto src = rgb;
+    const int stride = std::max(2, std::min(width, height) / 260);
+    const double threshold = semantic ? 165.0 : 125.0;
+    int drawn = 0;
+    for (int y = stride; y < height - stride && drawn < e.count * 4; y += stride) {
+        for (int x = stride; x < width - stride && drawn < e.count * 4; x += stride) {
+            const double gx =
+                -luminance(src,width,x-stride,y-stride)-2*luminance(src,width,x-stride,y)-luminance(src,width,x-stride,y+stride)
+                +luminance(src,width,x+stride,y-stride)+2*luminance(src,width,x+stride,y)+luminance(src,width,x+stride,y+stride);
+            const double gy =
+                -luminance(src,width,x-stride,y-stride)-2*luminance(src,width,x,y-stride)-luminance(src,width,x+stride,y-stride)
+                +luminance(src,width,x-stride,y+stride)+2*luminance(src,width,x,y+stride)+luminance(src,width,x+stride,y+stride);
+            const double mag = std::sqrt(gx*gx+gy*gy);
+            if (mag < threshold) continue;
+            if (semantic) {
+                const double nx=(x-width*.5)/(width*.5), ny=(y-height*.5)/(height*.5);
+                if (nx*nx+ny*ny > 1.25 && mag < threshold*1.5) continue;
+            }
+            const double angle=std::atan2(gy,gx)+1.57079632679;
+            const int len=std::max(2,static_cast<int>((4+10*amount)*e.line_width));
+            const int x0=x-static_cast<int>(std::cos(angle)*len), y0=y-static_cast<int>(std::sin(angle)*len);
+            const int x1=x+static_cast<int>(std::cos(angle)*len), y1=y+static_cast<int>(std::sin(angle)*len);
+            const double hue = std::fmod(185.0 + drawn*3.0 + 80.0*amount, 360.0);
+            const double rr=128+127*std::sin((hue+0)*.0174533);
+            const double gg=128+127*std::sin((hue+120)*.0174533);
+            const double bb=128+127*std::sin((hue+240)*.0174533);
+            draw_line(rgb,width,height,x0,y0,x1,y1,rr,gg,bb,e.opacity*amount,std::max(1,static_cast<int>(e.line_width)));
+            ++drawn;
+        }
+    }
+}
+
+void draw_native_flow(std::vector<std::uint8_t>& rgb, int width, int height,
+                      const VectorEffect& e, double amount, double phase, bool particles) {
+    const int count=std::min(e.count,particles?180:64);
+    double base=std::atan2(e.motion_y,e.motion_x==0?1e-6:e.motion_x);
+    for(int i=0;i<count;i++){
+        const double rx=unit_rand(e.seed,i*3), ry=unit_rand(e.seed,i*3+1), rz=unit_rand(e.seed,i*3+2);
+        const int x0=static_cast<int>(rx*width),y0=static_cast<int>(ry*height);
+        const double angle=base+std::sin(phase*(1.2+amount)+rz*6.283+i*.17)*(.3+.8*amount);
+        const double len=(particles?18.0:85.0)*(0.4+1.5*amount);
+        const int x1=x0+static_cast<int>(std::cos(angle)*len),y1=y0+static_cast<int>(std::sin(angle)*len);
+        draw_line(rgb,width,height,x0,y0,x1,y1,80+120*rz,150+90*rx,255,e.opacity*amount*(particles?.55:.85),std::max(1,static_cast<int>(e.line_width)));
+    }
+}
+
+void draw_native_grid(std::vector<std::uint8_t>& rgb,int width,int height,const VectorEffect& e,double amount,double phase){
+    const int vx=static_cast<int>(width*(.5+.22*e.motion_x+.04*std::sin(phase*.4)));
+    const int vy=static_cast<int>(height*(.38+.16*e.motion_y));
+    const int count=std::max(6,std::min(40,e.count));
+    for(int i=0;i<=count;i++){
+        const int x=static_cast<int>(static_cast<double>(i)/count*width);
+        draw_line(rgb,width,height,vx,vy,x,height,80,210,255,e.opacity*amount,std::max(1,static_cast<int>(e.line_width)));
+    }
+    for(int j=1;j<=10;j++){
+        const double q=static_cast<double>(j)/10.0, z=q*q*q;
+        const int y=static_cast<int>(vy+(height-vy)*z), spread=static_cast<int>(width*(.12+.88*z));
+        draw_line(rgb,width,height,vx-spread/2,y,vx+spread/2,y,120,180,255,e.opacity*amount*.8,std::max(1,static_cast<int>(e.line_width)));
+    }
+}
+
+void draw_native_fracture(std::vector<std::uint8_t>& rgb,int width,int height,const VectorEffect& e,double amount,bool voronoi){
+    const int n=std::max(8,std::min(64,e.count));
+    std::vector<std::pair<int,int>> pts;pts.reserve(n);
+    for(int i=0;i<n;i++)pts.emplace_back(static_cast<int>(unit_rand(e.seed,i*2)*width),static_cast<int>(unit_rand(e.seed,i*2+1)*height));
+    if(voronoi){
+        const int step=std::max(4,std::min(width,height)/180);
+        for(int y=step;y<height-step;y+=step)for(int x=step;x<width-step;x+=step){
+            int a=-1,b=-1;double da=1e30,db=1e30;
+            for(int i=0;i<n;i++){const double dx=x-pts[i].first,dy=y-pts[i].second,d=dx*dx+dy*dy;if(d<da){db=da;b=a;da=d;a=i;}else if(d<db){db=d;b=i;}}
+            if(a>=0&&b>=0&&std::abs(std::sqrt(db)-std::sqrt(da))<step*1.6)
+                blend_pixel(rgb,width,height,x,y,210,100+120*unit_rand(e.seed,a),255,e.opacity*amount);
+        }
+    }else{
+        const int cx=width/2,cy=height/2;
+        std::sort(pts.begin(),pts.end(),[&](auto&a,auto&b){return std::atan2(a.second-cy,a.first-cx)<std::atan2(b.second-cy,b.first-cx);});
+        for(int i=0;i<n;i++){
+            auto a=pts[i],b=pts[(i+1)%n];
+            draw_line(rgb,width,height,cx,cy,a.first,a.second,255,100+100*unit_rand(e.seed,i),180,e.opacity*amount,std::max(1,static_cast<int>(e.line_width)));
+            draw_line(rgb,width,height,a.first,a.second,b.first,b.second,120,200,255,e.opacity*amount*.8,std::max(1,static_cast<int>(e.line_width)));
+        }
+    }
+}
+
+void draw_native_glyph(std::vector<std::uint8_t>& rgb,int width,int height,const VectorEffect& e,double amount,double phase){
+    const int arms=std::max(3,std::min(12,e.count)),cx=width/2,cy=height/2;
+    const double radius=std::min(width,height)*(.05+.09*amount);
+    for(int a=0;a<arms;a++){
+        double angle=static_cast<double>(a)/arms*6.28318530718+phase*.08;
+        int px=cx,py=cy;
+        for(int n=1;n<=6;n++){
+            angle+=std::sin(e.seed*.001+n*1.7)*.18;
+            const double r=radius*n/6.0;
+            const int x=cx+static_cast<int>(std::cos(angle)*r),y=cy+static_cast<int>(std::sin(angle)*r);
+            draw_line(rgb,width,height,px,py,x,y,170,100+120*unit_rand(e.seed,n+a*7),255,e.opacity*amount,std::max(1,static_cast<int>(e.line_width)));
+            px=x;py=y;
+        }
+    }
+}
+
+void apply_native_displacement(std::vector<std::uint8_t>& rgb,int width,int height,const VectorEffect& e,double amount,double phase){
+    const auto src=rgb;const int strips=std::max(6,std::min(36,e.count));const int sh=std::max(1,height/strips);
+    for(int s=0;s<strips;s++){
+        const int y0=s*sh,y1=std::min(height,y0+sh);
+        const int dx=static_cast<int>(std::sin(phase*(1.4+amount*2)+s*.73+e.seed*.0001)*width*.026*amount);
+        const int dy=static_cast<int>(std::cos(phase*1.31+s*.37)*height*.008*amount);
+        for(int y=y0;y<y1;y++)for(int x=0;x<width;x++){
+            const int sx=std::clamp(x-dx,0,width-1),sy=std::clamp(y-dy,0,height-1);
+            const auto di=static_cast<std::size_t>((y*width+x)*3),si=static_cast<std::size_t>((sy*width+sx)*3);
+            rgb[di]=clamp8(src[di]*(1-.32*amount)+src[si]*.32*amount);
+            rgb[di+1]=clamp8(src[di+1]*(1-.32*amount)+src[si+1]*.32*amount);
+            rgb[di+2]=clamp8(src[di+2]*(1-.32*amount)+src[si+2]*.32*amount);
+        }
+    }
+}
+
+void apply_native_portal(std::vector<std::uint8_t>& rgb,const std::vector<std::uint8_t>* companion,
+                         int width,int height,const VectorEffect& e,double amount,double phase){
+    if(!companion||companion->size()!=rgb.size())return;
+    const double radius=std::min(width,height)*(e.radius>0?e.radius:(.12+.18*amount));
+    const double cx=width*(.5+.18*std::sin(phase*.7+e.seed*.001)),cy=height*(.5+.14*std::cos(phase*.55+e.seed*.002));
+    for(int y=0;y<height;y++)for(int x=0;x<width;x++){
+        const double dx=x-cx,dy=y-cy,rr=std::sqrt(dx*dx+dy*dy);
+        const double wobble=radius*(1+.10*std::sin(std::atan2(dy,dx)*5+phase*1.7));
+        if(rr>wobble)continue;
+        const double edge=std::clamp((wobble-rr)/std::max(1.0,radius*.16),0.0,1.0);
+        const double a=e.opacity*amount*edge;
+        const auto i=static_cast<std::size_t>((y*width+x)*3);
+        rgb[i]=clamp8(rgb[i]*(1-a)+(*companion)[i]*a);
+        rgb[i+1]=clamp8(rgb[i+1]*(1-a)+(*companion)[i+1]*a);
+        rgb[i+2]=clamp8(rgb[i+2]*(1-a)+(*companion)[i+2]*a);
+    }
+}
+
+} // namespace
+
+void apply_vector_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* companion,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const std::vector<VectorEffect>& effects,
+    double progress,
+    double phase
+) {
+    for(const auto& e:effects){
+        const double amount=effect_amount(e,progress);
+        if(amount<=.012)continue;
+        if(e.kind=="contours") draw_native_contours(rgb,width,height,e,amount,false);
+        else if(e.kind=="semantic_outline") draw_native_contours(rgb,width,height,e,amount,true);
+        else if(e.kind=="flow_ribbons") draw_native_flow(rgb,width,height,e,amount,phase,false);
+        else if(e.kind=="flow_particles") draw_native_flow(rgb,width,height,e,amount,phase,true);
+        else if(e.kind=="vector_echo"){
+            draw_native_contours(rgb,width,height,e,amount*.5,false);
+            if(previous&&previous->size()==rgb.size()) blend_layer(rgb,*previous,e.opacity*amount*.16,"screen");
+        }
+        else if(e.kind=="perspective_grid") draw_native_grid(rgb,width,height,e,amount,phase);
+        else if(e.kind=="delaunay_fracture"){ if(e.displace)apply_native_displacement(rgb,width,height,e,amount*e.explode,phase); if(e.visible)draw_native_fracture(rgb,width,height,e,amount,false); }
+        else if(e.kind=="voronoi"){ if(e.displace)apply_native_displacement(rgb,width,height,e,amount*.35,phase); if(e.visible)draw_native_fracture(rgb,width,height,e,amount,true); }
+        else if(e.kind=="portal") apply_native_portal(rgb,companion,width,height,e,amount,phase);
+        else if(e.kind=="motif_glyph") draw_native_glyph(rgb,width,height,e,amount,phase);
+        else if(e.kind=="vector_displacement") apply_native_displacement(rgb,width,height,e,amount,phase);
+    }
+}
+
 void blend_layer(
     std::vector<std::uint8_t>& dst,
     const std::vector<std::uint8_t>& src,
