@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>tubeviz studio</title>
+<link rel="stylesheet" href="/static/gui.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>tubeviz <span>studio</span></h1>
+    <p>AI clip library · music direction · native rendering</p>
+  </div>
+  <div id="nativeBadge" class="badge">native: checking…</div>
+</header>
+
+<nav>
+  <button class="tab active" data-tab="create">Create</button>
+  <button class="tab" data-tab="library">Library</button>
+  <button class="tab" data-tab="jobs">Jobs</button>
+</nav>
+
+<main>
+<section id="create" class="panel active">
+  <div class="grid two">
+    <article class="card">
+      <h2>Project</h2>
+      <label>Library <input id="libraryPath" value="./library"></label>
+      <label>Audio <input id="audioPath" placeholder="audio/connected.mp3"></label>
+      <label>Timeline <input id="timelinePath" placeholder="timelines/connected.json"></label>
+      <label>Output video <input id="outputPath" placeholder="connected-native.mp4"></label>
+      <div class="actions">
+        <button id="refreshLibrary">Refresh library</button>
+        <button id="previewBtn">Start Preview</button>
+      </div>
+      <div id="projectStats" class="stats"></div>
+    </article>
+
+    <article class="card">
+      <h2>Analyze & Cut</h2>
+      <div class="grid two tight">
+        <label>Section bars <input id="sectionBars" type="number" value="8"></label>
+        <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
+        <label>Transform <input id="transformIntensity" type="number" step=".1" value="1.2"></label>
+        <label>Composition <input id="compositionIntensity" type="number" step=".1" value="1.2"></label>
+        <label>Target unique <input id="targetUnique" type="number" value="0"></label>
+        <label>Novelty <input id="noveltyWeight" type="number" step=".05" value=".65"></label>
+        <label>Visual match <input id="visualMatchWeight" type="number" step=".05" value="1.25"></label>
+        <label>Transition intelligence <input id="transitionWeight" type="number" step=".05" value=".70"></label>
+        <label>Min shot <input id="minShot" type="number" step=".05" value=".65"></label>
+        <label>Max shot <input id="maxShot" type="number" step=".25" value="6"></label>
+        <label>Max excerpt <input id="maxExcerpt" type="number" step=".25" value="5"></label>
+        <label>Semantic device <input id="semanticDevice" value="auto"></label>
+      </div>
+      <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
+      <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
+      <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
+      <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
+      <button class="primary" id="analyzeBtn">Analyze + Build Timeline</button>
+    </article>
+
+    <article class="card">
+      <h2>Render</h2>
+      <div class="grid three tight">
+        <label>Backend
+          <select id="backend"><option value="native">native</option><option value="auto">auto</option><option value="browser">browser</option></select>
+        </label>
+        <label>Width <input id="width" type="number" value="1920"></label>
+        <label>Height <input id="height" type="number" value="1080"></label>
+        <label>FPS <input id="fps" type="number" value="30"></label>
+        <label>CRF/CQ <input id="crf" type="number" value="20"></label>
+        <label>Codec
+          <select id="codec"><option>libx264</option><option>h264_nvenc</option><option>hevc_nvenc</option><option>libx265</option></select>
+        </label>
+        <label>Native preset <select id="nativePreset"><option>veryfast</option><option>fast</option><option>medium</option><option>slow</option></select></label>
+        <label>Decoder cache <input id="decoderCache" type="number" value="16"></label>
+        <label>Threads <input id="nativeThreads" type="number" value="0"></label>
+      </div>
+      <label class="check"><input id="buildMissing" type="checkbox" checked> Build native renderer if missing</label>
+      <div class="actions">
+        <button id="nativeBuildBtn">Rebuild Native</button>
+        <button class="primary" id="renderBtn">Render Video</button>
+      </div>
+    </article>
+
+    <article class="card">
+      <h2>AI Ingest</h2>
+      <label>Search terms file <input id="termsPath" placeholder="search_terms.txt"></label>
+      <div class="grid two tight">
+        <label>READY / term <input id="resultsPerTerm" type="number" value="5"></label>
+        <label>Max duration <input id="hardMaxDuration" type="number" value="600"></label>
+        <label>AI device <input id="aiDevice" value="auto"></label>
+        <label>Candidate pool <input id="aiCandidates" type="number" value="100"></label>
+        <label>Queries / seed <input id="aiQueries" type="number" value="8"></label>
+        <label>Browser cookies <input id="cookiesBrowser" placeholder="chrome"></label>
+      </div>
+      <label class="check"><input id="aiDiscovery" type="checkbox" checked> AI pre-download ranking</label>
+      <label class="check"><input id="visualIndexScenes" type="checkbox" checked> Analyze motion, palette and visual accents</label>
+      <button class="primary" id="ingestBtn">Ingest Clips</button>
+    </article>
+  </div>
+
+  <article class="card terminal-card">
+    <div class="row"><h2>Active Job</h2><button id="cancelJob" class="danger" disabled>Cancel</button></div>
+    <pre id="jobLog">No active job.</pre>
+  </article>
+</section>
+
+<section id="library" class="panel">
+  <article class="card">
+    <div class="toolbar">
+      <h2>Clip Library</h2>
+      <select id="statusFilter">
+        <option value="">all statuses</option>
+        <option value="ready">ready</option>
+        <option value="rejected_manual">rejected</option>
+        <option value="download_error">download error</option>
+      </select>
+      <input id="termFilter" placeholder="term filter">
+      <button id="loadClips">Refresh</button>
+      <button id="visualIndexBtn">Rebuild Visual Index</button>
+    </div>
+    <div id="libraryStats" class="stats"></div>
+    <div id="clipGrid" class="clip-grid"></div>
+  </article>
+</section>
+
+<section id="jobs" class="panel">
+  <article class="card">
+    <div class="toolbar"><h2>Jobs</h2><button id="refreshJobs">Refresh</button></div>
+    <div id="jobsList"></div>
+  </article>
+</section>
+</main>
+
+<div id="videoModal" class="modal hidden">
+  <div class="modal-box">
+    <button id="closeModal" class="modal-close">×</button>
+    <h3 id="modalTitle"></h3>
+    <video id="modalVideo" controls autoplay></video>
+  </div>
+</div>
+
+<script src="/static/gui.js"></script>
+</body>
+</html>
