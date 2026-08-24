@@ -4,7 +4,22 @@
 
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.26.5**
+Current version: **0.26.10**
+
+## What’s new in 0.26.10
+
+The current release completes the recent Studio usability, authentication, manual-ingest, and codec-materialization work:
+
+- **Complete GUI/CLI parity:** Studio’s **Command Center** is generated from the live `argparse` tree, exposing every non-GUI leaf command and its current options without maintaining a second option list.
+- **Manual YouTube URL ingestion:** paste one or more explicit YouTube URLs into the full-width Studio editor or use `tubeviz ingest-url`; manually selected footage goes through the same normalization, scene detection, duplicate checks, thumbnails, and visual indexing as discovered clips.
+- **Hugging Face authentication:** Studio inherits `HF_TOKEN` when present or accepts a session-only token under **Project → AI credentials**. A token entered in Studio is passed to child jobs through their environment rather than command-line arguments or job metadata.
+- **Contextual help throughout Studio:** curated controls have tubeviz-specific `?` help, while Command Center help is derived from the current CLI parser, including defaults and choices. Tooltips are rendered in a document-level floating layer so cards and scroll containers cannot crop them.
+- **Reliable Studio upgrades:** HTML/static assets are served with no-cache headers, CSS/JavaScript URLs are versioned, and the running Studio version is visible in the header.
+- **Safer FFglitch materialization:** fractional FFglitch parameters are embedded directly in generated QuickJS rather than sent through FFglitch 0.10.2’s integer-only setup-parameter parser. Codec MP4s are finalized locally and transactionally published to the library, with automatic fallback when FFmpeg `+faststart` cannot reopen/shift an output.
+- **Current CLAP compatibility:** audio-semantic feature extraction supports current Hugging Face `BaseModelOutputWithPooling` returns as well as older tensor/tuple forms.
+- **Single native source tree:** `src/tubeviz/native_src/` is the canonical C++ renderer source; the old duplicate top-level native tree is gone.
+- **Apache-2.0 licensing:** the repository includes `LICENSE`, `NOTICE`, SPDX metadata, and explicit third-party media/dependency guidance.
+
 
 ## Manually add a YouTube clip
 
@@ -256,7 +271,7 @@ FFglitch materialization is unavailable.
 
 ## Studio contextual help
 
-Studio provides inline `?` help affordances for form controls. Hover or focus a help icon to see tubeviz-specific guidance; controls in the Advanced Command Center use the current CLI parser help, defaults, and choices so GUI help stays synchronized with the command line.
+Studio provides inline `?` help affordances for form controls. Hover or focus a help icon to see tubeviz-specific guidance; controls in the Advanced Command Center use the current CLI parser help, defaults, and choices so GUI help stays synchronized with the command line. Since 0.26.10, help bubbles are rendered in a document-level floating layer (`position: fixed`) with viewport clamping and automatic above/below placement, so panel overflow and scrolling cannot crop them. Press **Escape** to dismiss a focused tooltip.
 
 The Manual YouTube URL workflow uses a dedicated multi-line URL editor with one source URL per line and keeps uncommon network/normalization settings under **Advanced ingest settings**.
 
@@ -273,6 +288,20 @@ tubeviz gui \
 ```
 
 It opens `http://127.0.0.1:8090/` by default.
+
+The Studio header displays the running tubeviz version. Studio HTML, CSS, and JavaScript are served with cache-busting/no-cache behavior, so after upgrading and restarting the Studio process the browser should immediately show the new assets. To verify which checkout is running:
+
+```bash
+python - <<'PY'
+import tubeviz
+import tubeviz.gui
+print("version:", tubeviz.__version__)
+print("package:", tubeviz.__file__)
+print("gui:", tubeviz.gui.__file__)
+PY
+```
+
+For this release, the header and `tubeviz.__version__` should report **0.26.10**.
 
 ```mermaid
 flowchart LR
