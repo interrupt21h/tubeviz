@@ -12,7 +12,7 @@ import uvicorn
 
 from .analysis import AnalysisConfig, analyze_track
 from .director import direct
-from .ingest import IngestConfig, ingest_terms, read_search_terms
+from .ingest import IngestConfig, ingest_terms, ingest_urls, read_search_terms
 from .library import ClipLibrary
 from .server import create_app
 from .gui import create_gui_app
@@ -213,6 +213,23 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     )
     print(f"Library: {library.root}")
     print(f"Database: {library.db_path}")
+
+
+def _cmd_ingest_url(args: argparse.Namespace) -> None:
+    library = ClipLibrary(args.library)
+    source = YouTubeSource(quiet=not args.verbose_ytdlp, cookies_from_browser=args.cookies_from_browser,
+        socket_timeout=args.download_socket_timeout, concurrent_fragments=args.concurrent_fragments,
+        retries=args.download_retries, fragment_retries=args.fragment_retries)
+    summary = ingest_urls(args.urls, library, term=args.term, source=source, config=IngestConfig(
+        results_per_term=1, min_duration=args.min_duration, preferred_max_duration=0,
+        hard_max_duration=args.hard_max_duration, min_width=args.min_width, normalize_width=args.width,
+        normalize_height=args.height, normalize_fps=args.fps, scene_threshold=args.scene_threshold,
+        min_scene_seconds=args.min_scene_seconds, keep_audio=args.keep_audio, detect_scenes=not args.no_scenes,
+        force=args.force, visual_index_scenes=not args.no_visual_index))
+    print("Manual ingest complete: " f"urls={len(args.urls)} accepted={summary.accepted} "
+          f"existing={summary.skipped_existing} rejected={summary.rejected} downloaded={summary.downloaded} "
+          f"ready={summary.ready} failed={summary.failed} scenes={summary.scenes}")
+    print(f"Library: {library.root}")
 
 
 def _cmd_library_list(args: argparse.Namespace) -> None:
@@ -888,6 +905,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest.add_argument("--verbose-ytdlp", action="store_true")
     ingest.set_defaults(func=_cmd_ingest)
+
+    ingest_url = sub.add_parser("ingest-url", help="Manually ingest one or more explicit YouTube video URLs")
+    ingest_url.add_argument("urls", nargs="+", metavar="URL", help="YouTube video URL(s) to add")
+    ingest_url.add_argument("--library", default="./library", help="Persistent tubeviz clip library")
+    ingest_url.add_argument("--term", default="manual", help="Library provenance/search-term tag")
+    ingest_url.add_argument("--min-duration", type=float, default=0.0)
+    ingest_url.add_argument("--hard-max-duration", type=float, default=0.0, help="Reject longer videos; 0 disables")
+    ingest_url.add_argument("--min-width", type=int, default=0)
+    ingest_url.add_argument("--width", type=int, default=1280)
+    ingest_url.add_argument("--height", type=int, default=720)
+    ingest_url.add_argument("--fps", type=int, default=30)
+    ingest_url.add_argument("--scene-threshold", type=float, default=0.40)
+    ingest_url.add_argument("--min-scene-seconds", type=float, default=1.5)
+    ingest_url.add_argument("--keep-audio", action="store_true")
+    ingest_url.add_argument("--no-scenes", action="store_true")
+    ingest_url.add_argument("--no-visual-index", action="store_true", help="Skip decoded visual-feature indexing")
+    ingest_url.add_argument("--force", action="store_true")
+    ingest_url.add_argument("--cookies-from-browser", metavar="BROWSER")
+    ingest_url.add_argument("--download-socket-timeout", type=float, default=20.0)
+    ingest_url.add_argument("--concurrent-fragments", type=int, default=4)
+    ingest_url.add_argument("--download-retries", type=int, default=2)
+    ingest_url.add_argument("--fragment-retries", type=int, default=2)
+    ingest_url.add_argument("--verbose-ytdlp", action="store_true")
+    ingest_url.set_defaults(func=_cmd_ingest_url)
 
     library = sub.add_parser("library", help="Inspect the local clip library")
     library_sub = library.add_subparsers(dest="library_command", required=True)

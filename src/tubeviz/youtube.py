@@ -180,6 +180,37 @@ class YouTubeSource:
             )
         return results
 
+    def resolve_url(self, url: str, *, rank: int = 1) -> SearchResult:
+        """Resolve a manually supplied YouTube URL into a normal SearchResult.
+
+        Uses yt-dlp extraction rather than parsing YouTube URL shapes ourselves, so
+        youtu.be, watch, shorts, and other extractor-supported single-video URLs
+        follow the same metadata/download path as discovered candidates.
+        """
+        value = str(url).strip()
+        if not value.startswith(("http://", "https://")):
+            raise DownloadFailure(f"expected an http(s) video URL, got: {url!r}", status="metadata_error")
+        options = self._base_options() | {"skip_download": True, "noplaylist": True}
+        try:
+            with _yt_dlp().YoutubeDL(options) as ydl:
+                raw = ydl.extract_info(value, download=False)
+                metadata = ydl.sanitize_info(raw)
+        except Exception as exc:
+            raise DownloadFailure(str(exc), status="metadata_error") from exc
+        if not isinstance(metadata, dict):
+            raise DownloadFailure("yt-dlp did not return video metadata", status="metadata_error")
+        source_id = str(metadata.get("id") or "").strip()
+        if not source_id:
+            raise DownloadFailure("yt-dlp metadata has no video id", status="metadata_error")
+        webpage_url = str(metadata.get("webpage_url") or value)
+        return SearchResult(
+            source=self.source_name,
+            source_id=source_id,
+            url=webpage_url,
+            rank=max(1, int(rank)),
+            metadata=dict(metadata),
+        )
+
     def hydrate(self, result: SearchResult) -> SearchResult:
         options = self._base_options() | {"skip_download": True}
         try:

@@ -38,11 +38,13 @@ class CodecGlitchConfig:
 
 _FFGLITCH_SCRIPT = r'''// tubeviz deterministic FFglitch motion-vector director.
 let frame_num = 0;
-let params = {};
+let params = (typeof TUBEVIZ_PARAMS !== "undefined") ? TUBEVIZ_PARAMS : {};
 
 export function setup(args) {
   if (!args.features.includes("mv")) args.features.push("mv");
-  params = args.params || {};
+  // Do not rely on ffedit -sp for the effect plan. FFglitch 0.10.2
+  // rejects floating-point literals in its setup-parameter parser, while
+  // the QuickJS script itself supports normal JavaScript numbers.
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -257,27 +259,100 @@ def _prepare_working_clip(
         raise CodecGlitchError(f"FFglitch preparation encode failed: {result.stderr.strip()}")
 
 
+def _javascript_literal(value: Any) -> str:
+    """Serialize JSON-compatible data as a safe JavaScript literal.
+
+    The materialization payload contains only model-generated primitive JSON
+    values. JSON is a strict subset of JavaScript object/array literal syntax,
+    so embedding the serialized object avoids FFglitch's restrictive `-sp`
+    parser without losing floating-point precision. Escape the two Unicode line
+    separators that JavaScript historically treats specially in source text.
+    """
+    return (
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
+def _render_ffglitch_script(effects: list[CodecEffect], *, frames: int, seed: int) -> str:
+    payload = _effect_payload(effects, frames=frames, seed=seed)
+    return "const TUBEVIZ_PARAMS = " + _javascript_literal(payload) + ";\n" + _FFGLITCH_SCRIPT
+
+
 def _transplicate(working: Path, glitched: Path, effects: list[CodecEffect], cfg: CodecGlitchConfig, *, frames: int, seed: int, workdir: Path) -> None:
     script = workdir / "tubeviz_ffglitch.js"
-    script.write_text(_FFGLITCH_SCRIPT)
-    params = json.dumps(_effect_payload(effects, frames=frames, seed=seed), separators=(",", ":"))
-    command = [cfg.ffedit, "-y", "-i", str(working), "-f", "mv", "-s", str(script), "-sp", params, "-o", str(glitched)]
+    script.write_text(_render_ffglitch_script(effects, frames=frames, seed=seed), encoding="utf-8")
+    # Important: do not pass the effect payload through `-sp`. FFglitch 0.10.2
+    # parses that channel with a restricted JSON parser that rejects floating
+    # point numbers. The generated QuickJS source has no such restriction.
+    command = [cfg.ffedit, "-y", "-i", str(working), "-f", "mv", "-s", str(script), "-o", str(glitched)]
     if cfg.threads > 0:
         command += ["-threads", str(cfg.threads)]
     result = _run(command)
     if result.returncode:
-        raise CodecGlitchError(f"ffedit transplication failed: {result.stderr.strip() or result.stdout.strip()}")
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise CodecGlitchError(
+            "ffedit transplication failed: " + detail
+            + f"\nGenerated script: {script}"
+        )
 
 
 def _finalize(glitched: Path, output: Path, cfg: CodecGlitchConfig) -> None:
-    command = [
+    """Convert FFglitch output to a conventional H.264 MP4.
+
+    `+faststart` performs an in-place second pass over the output MP4 to move
+    the moov atom.  Some FUSE/network/mounted filesystems cannot reliably
+    support FFmpeg's reopen/shift operation.  Codec materialization therefore
+    calls this function on a local temporary path and publishes the completed
+    file separately.  Even on local storage, retry without faststart when that
+    optional optimization fails.
+    """
+    base = [
         cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(glitched),
         "-an", "-c:v", "libx264", "-preset", cfg.output_preset, "-crf", str(cfg.output_crf),
-        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output),
+        "-pix_fmt", "yuv420p",
     ]
-    result = _run(command)
+    faststart = [*base, "-movflags", "+faststart", str(output)]
+    result = _run(faststart)
     if result.returncode:
-        raise CodecGlitchError(f"FFglitch output conversion failed: {result.stderr.strip()}")
+        detail = result.stderr.strip() or result.stdout.strip()
+        # faststart is an optimization, not a requirement for local cached
+        # clips.  Retry from scratch without the in-place moov relocation.
+        output.unlink(missing_ok=True)
+        retry = _run([*base, str(output)])
+        if retry.returncode:
+            retry_detail = retry.stderr.strip() or retry.stdout.strip()
+            raise CodecGlitchError(
+                "FFglitch output conversion failed with faststart and fallback: "
+                f"{detail}\nFallback without faststart: {retry_detail}"
+            )
+    if not output.is_file() or output.stat().st_size <= 0:
+        raise CodecGlitchError(
+            f"FFglitch output conversion produced no usable MP4: {output}"
+        )
+
+
+def _publish_cache_file(source: Path, destination: Path) -> None:
+    """Publish a completed local file into the cache transactionally.
+
+    Copy into a same-directory hidden file, fsync it, then use os.replace so
+    readers never observe a half-written cache asset.  This also avoids asking
+    FFmpeg itself to perform seek/rewrite-heavy MP4 finalization on the library
+    filesystem.
+    """
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    partial = destination.parent / f".{destination.name}.partial"
+    try:
+        with source.open("rb") as src, partial.open("wb") as dst:
+            shutil.copyfileobj(src, dst, length=1024 * 1024)
+            dst.flush()
+            os.fsync(dst.fileno())
+        if partial.stat().st_size <= 0:
+            raise CodecGlitchError(f"refusing to publish empty codec cache file: {source}")
+        os.replace(partial, destination)
+    finally:
+        partial.unlink(missing_ok=True)
 
 
 def materialize_codec_selection(
@@ -322,12 +397,13 @@ def materialize_codec_selection(
             glitched = tmpdir / "glitched.avi"
             _prepare_working_clip(source, source_selection, working, cfg)
             _transplicate(working, glitched, effects, cfg, frames=frames, seed=seed, workdir=tmpdir)
-            partial = cache / f".{key}.partial.mp4"
-            try:
-                _finalize(glitched, partial, cfg)
-                os.replace(partial, output)
-            finally:
-                partial.unlink(missing_ok=True)
+            # Finalize on the local temporary filesystem.  In particular, do
+            # not run FFmpeg +faststart directly against /DATA, NFS, FUSE, or
+            # other mounted library storage where the MP4 reopen/shift pass may
+            # fail.
+            finalized = tmpdir / "final.mp4"
+            _finalize(glitched, finalized, cfg)
+            _publish_cache_file(finalized, output)
         sidecar = cache / f"{key}.json"
         sidecar.write_text(json.dumps({
             "cache_key": key, "source": str(source),

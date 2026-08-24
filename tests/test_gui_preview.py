@@ -30,7 +30,7 @@ def test_free_preview_port_is_bindable():
 def test_preview_api_allocates_fresh_port_and_returns_selected_identity(tmp_path: Path, monkeypatch):
     captured = []
 
-    def fake_create(self, kind, command, *, metadata=None):
+    def fake_create(self, kind, command, *, metadata=None, env_overrides=None):
         job = GuiJob(id="preview-test", kind=kind, command=command, metadata=dict(metadata or {}))
         job.status = "running"
         self._jobs[job.id] = job

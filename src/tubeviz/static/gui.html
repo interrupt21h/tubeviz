@@ -5,12 +5,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css">
+<link rel="stylesheet" href="/static/gui.css?v=0.26.10">
 </head>
 <body>
 <header>
   <div>
-    <h1>tubeviz <span>studio</span></h1>
+    <h1>tubeviz <span>studio</span> <small class="studio-version">v0.26.10</small></h1>
     <p>AI clip library · music direction · native rendering</p>
   </div>
   <div id="nativeBadge" class="badge">native: checking…</div>
@@ -19,12 +19,13 @@
 <nav>
   <button class="tab active" data-tab="create">Create</button>
   <button class="tab" data-tab="library">Library</button>
+  <button class="tab" data-tab="command">Command Center</button>
   <button class="tab" data-tab="jobs">Jobs</button>
 </nav>
 
 <main>
 <section id="create" class="panel active">
-  <div class="grid two">
+  <div class="create-layout">
     <article class="card">
       <h2>Project</h2>
       <label>Library <input id="libraryPath" value="./library"></label>
@@ -36,10 +37,24 @@
         <button id="previewBtn">Start Preview</button>
       </div>
       <div id="projectStats" class="stats"></div>
+      <details class="settings-group">
+        <summary>AI credentials</summary>
+        <div class="settings-body">
+          <label class="field-label" for="hfToken">Hugging Face token</label>
+          <div class="secret-input-row">
+            <input id="hfToken" type="password" autocomplete="off" spellcheck="false" placeholder="Optional session token; blank uses HF_TOKEN from environment">
+            <button id="toggleHfToken" type="button" class="secret-toggle" aria-pressed="false">Show typed token</button>
+          </div>
+          <div class="credential-row">
+            <span id="hfTokenStatus" class="credential-status">Checking environment…</span>
+          </div>
+          <p class="card-note">The server-side <code>HF_TOKEN</code> value is never sent to the browser and cannot be revealed here. The Show button only reveals a token you typed into this field. A typed token is passed only to jobs launched from this Studio session.</p>
+        </div>
+      </details>
     </article>
 
-    <article class="card">
-      <h2>Analyze & Cut</h2>
+    <article class="card workflow-card analyze-card">
+      <div class="card-kicker">02 · DIRECT</div><h2>Analyze & Cut</h2>
       <div class="grid two tight">
         <label>Section bars <input id="sectionBars" type="number" value="8"></label>
         <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
@@ -78,8 +93,8 @@
       <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
     </article>
 
-    <article class="card">
-      <h2>Render</h2>
+    <article class="card workflow-card render-card">
+      <div class="card-kicker">03 · OUTPUT</div><h2>Render</h2>
       <div class="grid three tight">
         <label>Backend
           <select id="backend"><option value="native">native</option><option value="auto">auto</option><option value="browser">browser</option></select>
@@ -105,8 +120,8 @@
       </div>
     </article>
 
-    <article class="card">
-      <h2>AI Ingest</h2>
+    <article class="card workflow-card ingest-card">
+      <div class="card-kicker">01 · SOURCE</div><h2>AI Ingest</h2>
       <label>Search terms file <input id="termsPath" placeholder="search_terms.txt"></label>
       <div class="grid two tight">
         <label>READY / term <input id="resultsPerTerm" type="number" value="5"></label>
@@ -119,6 +134,51 @@
       <label class="check"><input id="aiDiscovery" type="checkbox" checked> AI pre-download ranking</label>
       <label class="check"><input id="visualIndexScenes" type="checkbox" checked> Analyze motion, palette and visual accents</label>
       <button class="primary" id="ingestBtn">Ingest Clips</button>
+      <p class="card-note">This streamlined panel exposes common ingest settings. Every ingest option is available in Command Center.</p>
+    </article>
+
+    <article class="card workflow-card manual-card">
+      <div class="card-kicker">01B · CURATE</div>
+      <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Hand-pick source footage and run it through the same normalization, scene detection, visual indexing, and duplicate checks as searched clips.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
+      <div class="url-editor">
+        <label class="field-label" for="manualUrls">YouTube URLs</label>
+        <textarea id="manualUrls" rows="7" spellcheck="false" placeholder="Paste one YouTube URL per line
+
+https://www.youtube.com/watch?v=...
+https://youtu.be/..."></textarea>
+        <div class="url-editor-footer"><span>One URL per line · standard watch, youtu.be, Shorts, and other yt-dlp-supported YouTube URLs are accepted.</span><button id="clearManualUrls" type="button" class="quiet-button">Clear</button></div>
+      </div>
+      <div class="grid two tight manual-primary-options">
+        <label>Provenance term <input id="manualTerm" value="manual"></label>
+        <label>Browser cookies <input id="manualCookies" placeholder="chrome"></label>
+      </div>
+      <details class="settings-group manual-advanced">
+        <summary>Advanced ingest settings</summary>
+        <div class="settings-body">
+          <div class="grid three tight">
+            <label>Min duration <input id="manualMinDuration" type="number" step=".1" value="0"></label>
+            <label>Hard max duration <input id="manualHardMaxDuration" type="number" step="1" value="0"></label>
+            <label>Min width <input id="manualMinWidth" type="number" value="0"></label>
+            <label>Normalize width <input id="manualWidth" type="number" value="1280"></label>
+            <label>Normalize height <input id="manualHeight" type="number" value="720"></label>
+            <label>FPS <input id="manualFps" type="number" value="30"></label>
+            <label>Scene threshold <input id="manualSceneThreshold" type="number" step=".01" value="0.40"></label>
+            <label>Min scene seconds <input id="manualMinScene" type="number" step=".1" value="1.5"></label>
+            <label>Socket timeout <input id="manualSocketTimeout" type="number" step="1" value="20"></label>
+            <label>Concurrent fragments <input id="manualFragments" type="number" value="4"></label>
+            <label>Download retries <input id="manualRetries" type="number" value="2"></label>
+            <label>Fragment retries <input id="manualFragmentRetries" type="number" value="2"></label>
+          </div>
+          <div class="option-grid manual-checks">
+            <label class="check"><input id="manualKeepAudio" type="checkbox"> Keep source audio</label>
+            <label class="check"><input id="manualNoScenes" type="checkbox"> Skip scene detection/thumbnails</label>
+            <label class="check"><input id="manualNoVisualIndex" type="checkbox"> Skip visual-feature indexing</label>
+            <label class="check"><input id="manualForce" type="checkbox"> Force redownload/reprocess</label>
+            <label class="check"><input id="manualVerbose" type="checkbox"> Verbose yt-dlp logging</label>
+          </div>
+        </div>
+      </details>
+      <div class="actions manual-actions"><button class="primary" id="manualIngestBtn">Ingest URL(s)</button></div>
     </article>
   </div>
 
@@ -145,6 +205,40 @@
     </div>
     <div id="libraryStats" class="stats"></div>
     <div id="clipGrid" class="clip-grid"></div>
+  </article>
+</section>
+
+<section id="command" class="panel">
+  <article class="card command-card">
+    <div class="toolbar">
+      <div>
+        <h2>Advanced Command Center</h2>
+        <p class="card-note">Generated from tubeviz's current argparse tree. This is the GUI parity layer: every non-GUI CLI command and option is exposed here and launched as an argument vector, never through a shell.</p>
+      </div>
+      <button id="reloadCliSchema">Reload CLI schema</button>
+    </div>
+    <div class="command-layout">
+      <aside class="command-sidebar">
+        <label>Command
+          <select id="cliCommand"></select>
+        </label>
+        <input id="cliCommandFilter" placeholder="filter commands…">
+        <div id="cliCommandDescription" class="card-note"></div>
+        <div class="actions stack-actions">
+          <button id="syncCliProject">Use current Project paths</button>
+          <button class="primary" id="runCliCommand">Run Command</button>
+        </div>
+      </aside>
+      <div>
+        <div id="cliArguments" class="cli-arguments"></div>
+        <h3 class="subhead">Argument-vector preview</h3>
+        <pre id="cliPreview" class="command-preview"></pre>
+      </div>
+    </div>
+  </article>
+  <article class="card terminal-card">
+    <div class="row"><h2>Command Job Log</h2><button id="cancelCommandJob" class="danger" disabled>Cancel</button></div>
+    <pre id="commandJobLog">No command job.</pre>
   </article>
 </section>
 
@@ -198,6 +292,6 @@
   </div>
 </div>
 
-<script src="/static/gui.js"></script>
+<script src="/static/gui.js?v=0.26.10"></script>
 </body>
 </html>

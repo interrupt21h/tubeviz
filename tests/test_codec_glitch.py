@@ -121,7 +121,7 @@ def test_materialize_codec_selection_caches_and_rewrites_media(tmp_path: Path, m
     assert (library / "codec-glitch" / result.media_file).is_file()
     ffedit_call = next(c for c in calls if c[0] == "ffedit")
     assert "-f" in ffedit_call and "mv" in ffedit_call
-    assert "-s" in ffedit_call and "-sp" in ffedit_call
+    assert "-s" in ffedit_call and "-sp" not in ffedit_call
 
 
 def test_codec_timeline_updates_scene_cues(tmp_path: Path, monkeypatch):
@@ -162,3 +162,80 @@ def test_generated_ffglitch_script_handles_overflow_and_four_mv_macroblocks():
     assert 'frame.mv.overflow = "truncate"' in cg._FFGLITCH_SCRIPT
     assert 'typeof cell[0] === "number"' in cg._FFGLITCH_SCRIPT
     assert 'for (let k=0; k<cell.length; k++)' in cg._FFGLITCH_SCRIPT
+
+
+
+def test_generated_ffglitch_script_embeds_fractional_payload_without_sp_parser():
+    effects = [
+        cg.CodecEffect(
+            kind="mv_wave",
+            amount=0.07678046181634314,
+            start=0.3,
+            end=0.91,
+            seed=17,
+        )
+    ]
+    script = cg._render_ffglitch_script(effects, frames=73, seed=42)
+    assert script.startswith("const TUBEVIZ_PARAMS = ")
+    assert '"amount":0.07678046181634314' in script
+    assert '"start":0.3' in script
+    assert '"frames":73' in script
+    assert '"seed":42' in script
+    assert 'params = (typeof TUBEVIZ_PARAMS !== "undefined")' in script
+
+
+def test_transplicate_never_passes_effect_payload_via_sp(tmp_path: Path, monkeypatch):
+    working = tmp_path / "in.avi"
+    working.write_bytes(b"avi")
+    glitched = tmp_path / "out.avi"
+    effect = cg.CodecEffect(kind="mv_wave", amount=.12345, start=.2, end=.8, seed=9)
+    calls = []
+
+    def fake_run(command, timeout=None):
+        calls.append(command)
+        glitched.write_bytes(b"out")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cg, "_run", fake_run)
+    cg._transplicate(
+        working, glitched, [effect], CodecGlitchConfig(),
+        frames=60, seed=123, workdir=tmp_path,
+    )
+    command = calls[0]
+    assert "-sp" not in command
+    script_path = Path(command[command.index("-s") + 1])
+    text = script_path.read_text()
+    assert '"amount":0.12345' in text
+
+
+def test_finalize_retries_without_faststart(tmp_path: Path, monkeypatch):
+    glitched = tmp_path / "glitched.avi"
+    glitched.write_bytes(b"avi")
+    output = tmp_path / "final.mp4"
+    calls = []
+
+    def fake_run(command, timeout=None):
+        calls.append(command)
+        if "+faststart" in command:
+            return SimpleNamespace(
+                returncode=1, stdout="",
+                stderr="Unable to re-open output file for shifting data",
+            )
+        Path(command[-1]).write_bytes(b"valid-mp4")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(cg, "_run", fake_run)
+    cg._finalize(glitched, output, CodecGlitchConfig())
+    assert output.read_bytes() == b"valid-mp4"
+    assert len(calls) == 2
+    assert "+faststart" in calls[0]
+    assert "+faststart" not in calls[1]
+
+
+def test_publish_cache_file_is_atomic_and_cleans_partial(tmp_path: Path):
+    source = tmp_path / "local-final.mp4"
+    source.write_bytes(b"codec-cache")
+    cache = tmp_path / "library" / "codec-glitch" / "abc.mp4"
+    cg._publish_cache_file(source, cache)
+    assert cache.read_bytes() == b"codec-cache"
+    assert not (cache.parent / ".abc.mp4.partial").exists()

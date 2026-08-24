@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.26.10
+
+### Fixed
+
+- Replaced card-local CSS pseudo-element help bubbles with a document-level floating tooltip layer.
+- Tooltips now escape card/section overflow clipping, remain above Studio panels, flip below controls near the top edge, and clamp to the viewport horizontally and vertically.
+- Help remains keyboard accessible and can be dismissed with Escape.
+
+## 0.26.9
+
+### Fixed
+
+- Added versioned Studio CSS/JavaScript URLs to prevent stale browser assets after upgrades.
+- Added no-cache/no-store headers for Studio HTML and static assets.
+- Added a visible Studio version badge so the running UI version can be verified immediately.
+- Preserved the v0.26.8 credential reveal, full-width manual URL editor, and contextual help/tooltips.
+
+## 0.26.8
+
+### Fixed
+
+- Fixed the Studio Hugging Face credential reveal control so a token typed into the session field can be reliably shown/hidden.
+- Clarified that a server-side `HF_TOKEN` is intentionally never exposed to the browser; the reveal control applies only to a token entered in Studio.
+
+### Changed
+
+- Redesigned Manual YouTube URL Ingest around a full-width monospaced URL editor with live URL count, clear action, primary provenance/cookie settings, and collapsible advanced ingestion controls.
+- Added contextual help/tooltips across Studio controls. Curated controls include detailed tubeviz-specific guidance and Command Center controls inherit the live `argparse` help/default/choice metadata.
+- Added native browser `title`/accessibility descriptions in addition to visible `?` help affordances for keyboard and pointer users.
+
+## 0.26.7
+
+- Refreshed Studio Create UI into a cleaner source → direct → output workflow layout.
+- Added an optional Hugging Face token field with environment-status detection.
+- GUI-supplied Hugging Face tokens are injected only into child-process environment (`HF_TOKEN` and compatibility `HUGGING_FACE_HUB_TOKEN`), never command argv, metadata, or job logs.
+- Blank token fields continue to inherit `HF_TOKEN`/`HUGGING_FACE_HUB_TOKEN` from the Studio server environment.
+
+## 0.26.6
+
+### Fixed
+
+- Codec-glitch MP4 finalization now occurs on the local temporary filesystem rather than directly inside the library cache.
+- Added automatic retry without `+faststart` when FFmpeg cannot reopen/shift the MP4 during moov-atom relocation.
+- Codec cache publication now copies to a same-directory hidden file, fsyncs it, and atomically replaces the final cache path.
+- Existing completed codec-glitch cache assets remain reusable when a later shot fails.
+
+## 0.26.5
+
+### Added
+
+- Added a complete Studio **Command Center** generated directly from the current `argparse` command tree.
+- Every non-GUI leaf CLI command and option is now configurable and launchable from Studio, eliminating drift between newly added CLI functionality and the GUI.
+- Added safe generic GUI command execution using validated argument vectors; Studio never interpolates advanced commands through a shell.
+- Added a full Manual YouTube URL Ingest card with multi-URL input, provenance tags, normalization controls, scene/index controls, cookies, network tuning, retries, force mode, and verbose yt-dlp support.
+- Added Command Center project-path synchronization and exact argument-vector preview.
+- Added independent live logging/cancellation for Command Center jobs.
+- Added regression coverage ensuring every current non-GUI CLI leaf command is present in the generated GUI schema and representative advanced options remain exposed.
+
+## 0.26.4
+
+- Added `tubeviz ingest-url` for manually adding one or more explicit YouTube video URLs to an existing clip library without search or AI discovery.
+- Manual URL ingestion uses the normal yt-dlp metadata, download, normalization, scene detection, visual-feature indexing, duplicate detection, cookie, retry, and persistent-library paths.
+- Manual imports default to the `manual` provenance term and support `--term` for user-defined grouping.
+
+
+## 0.26.3
+
+### Fixed
+
+- Fixed FFglitch 0.10.2 materialization failing when `ffedit -sp` receives fractional effect amounts/timing. FFglitch's setup-parameter parser rejects floating-point JSON literals.
+- Codec effect payloads are now embedded as a JavaScript literal in the generated QuickJS transplication script instead of being passed through `-sp`, preserving full floating-point effect precision.
+- Added diagnostics that retain the generated FFglitch script path when transplication fails.
+- Added regression tests ensuring fractional codec parameters never use the restricted `-sp` parser.
+
 ## 0.26.2
 
 ### Fixed

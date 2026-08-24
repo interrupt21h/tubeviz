@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import signal
@@ -32,7 +33,9 @@ class JobRequest(BaseModel):
     timeline: str | None = None
     output: str | None = None
     terms: str | None = None
+    urls: list[str] = Field(default_factory=list)
     options: dict[str, Any] = Field(default_factory=dict)
+    hf_token: str | None = Field(default=None, exclude=True)
 
 
 class ClipAction(BaseModel):
@@ -61,6 +64,7 @@ class GuiJob:
     log: deque[str] = field(default_factory=lambda: deque(maxlen=4000))
     process: subprocess.Popen[str] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    env_overrides: dict[str, str] = field(default_factory=dict, repr=False)
 
     def payload(self, *, tail: int = 250) -> dict[str, Any]:
         lines = list(self.log)
@@ -92,12 +96,14 @@ class JobManager:
         command: list[str],
         *,
         metadata: dict[str, Any] | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> GuiJob:
         job = GuiJob(
             id=uuid.uuid4().hex[:12],
             kind=kind,
             command=command,
             metadata=dict(metadata or {}),
+            env_overrides=dict(env_overrides or {}),
         )
         with self._lock:
             self._jobs[job.id] = job
@@ -113,6 +119,7 @@ class JobManager:
         job.log.append("$ " + " ".join(job.command))
         env = os.environ.copy()
         env.setdefault("PYTHONUNBUFFERED", "1")
+        env.update(job.env_overrides)
         try:
             proc = subprocess.Popen(
                 job.command,
@@ -201,10 +208,156 @@ def _flag(command: list[str], name: str, value: Any, *, boolean: bool = False) -
     command += [name, str(value)]
 
 
+_GUI_CLI_ALLOWED_TOP_LEVEL = {
+    "ingest", "ingest-url", "library", "audio-ai", "analyze", "materialize",
+    "render", "codec", "native", "serve",
+}
+
+
+def _jsonable_default(value: Any) -> Any:
+    if value is argparse.SUPPRESS:
+        return None
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_jsonable_default(item) for item in value]
+    return str(value)
+
+
+def _action_schema(action: argparse.Action) -> dict[str, Any]:
+    flags = list(action.option_strings)
+    positive_flag = next((flag for flag in flags if not flag.startswith("--no-")), flags[0] if flags else None)
+    negative_flag = next((flag for flag in flags if flag.startswith("--no-")), None)
+    action_name = action.__class__.__name__
+    value_type = None
+    if getattr(action, "type", None) is int:
+        value_type = "int"
+    elif getattr(action, "type", None) is float:
+        value_type = "float"
+    elif getattr(action, "type", None) is not None:
+        value_type = getattr(action.type, "__name__", "string")
+    else:
+        value_type = "string"
+    choices = getattr(action, "choices", None)
+    return {
+        "dest": action.dest,
+        "flags": flags,
+        "positive_flag": positive_flag,
+        "negative_flag": negative_flag,
+        "positional": not bool(flags),
+        "required": bool(getattr(action, "required", False)) or (not flags and action.nargs not in ("?", "*")),
+        "nargs": action.nargs,
+        "default": _jsonable_default(getattr(action, "default", None)),
+        "choices": list(choices) if choices is not None else None,
+        "type": value_type,
+        "action": action_name,
+        "help": action.help if action.help is not argparse.SUPPRESS else None,
+        "metavar": action.metavar,
+    }
+
+
+def cli_schema() -> dict[str, Any]:
+    """Return the current argparse command tree for Studio's parity UI.
+
+    Importing cli lazily avoids the cli -> gui import cycle during module load.
+    The GUI command itself is deliberately excluded: Studio should operate the
+    current Studio process rather than recursively launching another one.
+    """
+    from .cli import build_parser
+
+    root = build_parser()
+    commands: list[dict[str, Any]] = []
+
+    def walk(parser: argparse.ArgumentParser, path: list[str]) -> None:
+        subparsers = [
+            action for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        ]
+        normal = [
+            action for action in parser._actions
+            if not isinstance(action, (argparse._HelpAction, argparse._SubParsersAction))
+        ]
+        if path and not subparsers:
+            if path[0] in _GUI_CLI_ALLOWED_TOP_LEVEL:
+                commands.append({
+                    "path": path,
+                    "name": " ".join(path),
+                    "description": parser.description or "",
+                    "arguments": [_action_schema(action) for action in normal],
+                })
+            return
+        for sub in subparsers:
+            for name, child in sub.choices.items():
+                if not path and name == "gui":
+                    continue
+                walk(child, [*path, name])
+
+    walk(root, [])
+    commands.sort(key=lambda item: item["name"])
+    return {"commands": commands}
+
+
+def _validated_cli_command(argv: Any) -> list[str]:
+    if not isinstance(argv, list) or not argv:
+        raise ValueError("CLI argv must be a non-empty list")
+    clean: list[str] = []
+    for token in argv:
+        if not isinstance(token, str):
+            raise ValueError("CLI argv entries must be strings")
+        if "\\x00" in token:
+            raise ValueError("CLI argv entries may not contain NUL bytes")
+        if len(token) > 32768:
+            raise ValueError("CLI argv entry is unreasonably large")
+        clean.append(token)
+    if clean[0] not in _GUI_CLI_ALLOWED_TOP_LEVEL:
+        raise ValueError(f"unsupported GUI CLI command: {clean[0]}")
+
+    # Parse against the actual current CLI. This catches unknown/removed flags
+    # while preserving argument-vector execution (no shell interpolation).
+    from .cli import build_parser
+    parser = build_parser()
+    try:
+        namespace = parser.parse_args(clean)
+    except SystemExit as exc:
+        raise ValueError("invalid tubeviz CLI arguments") from exc
+    if not callable(getattr(namespace, "func", None)):
+        raise ValueError("incomplete tubeviz CLI command")
+    return _tubeviz_command(*clean)
+
+
 def _job_command(request: JobRequest) -> list[str]:
     kind = request.kind
     o = request.options
     library = str(Path(request.library).expanduser())
+
+    if kind == "cli":
+        return _validated_cli_command(o.get("argv"))
+
+    if kind == "ingest-url":
+        urls = [url.strip() for url in request.urls if url and url.strip()]
+        if not urls:
+            raise ValueError("at least one YouTube URL is required")
+        command = _tubeviz_command("ingest-url", *urls, "--library", library)
+        _flag(command, "--term", o.get("term", "manual"))
+        _flag(command, "--min-duration", o.get("min_duration", 0.0))
+        _flag(command, "--hard-max-duration", o.get("hard_max_duration", 0.0))
+        _flag(command, "--min-width", o.get("min_width", 0))
+        _flag(command, "--width", o.get("width", 1280))
+        _flag(command, "--height", o.get("height", 720))
+        _flag(command, "--fps", o.get("fps", 30))
+        _flag(command, "--scene-threshold", o.get("scene_threshold", 0.40))
+        _flag(command, "--min-scene-seconds", o.get("min_scene_seconds", 1.5))
+        _flag(command, "--keep-audio", o.get("keep_audio", False), boolean=True)
+        _flag(command, "--no-scenes", o.get("no_scenes", False), boolean=True)
+        _flag(command, "--no-visual-index", o.get("no_visual_index", False), boolean=True)
+        _flag(command, "--force", o.get("force", False), boolean=True)
+        _flag(command, "--cookies-from-browser", o.get("cookies_from_browser"))
+        _flag(command, "--download-socket-timeout", o.get("download_socket_timeout", 20.0))
+        _flag(command, "--concurrent-fragments", o.get("concurrent_fragments", 4))
+        _flag(command, "--download-retries", o.get("download_retries", 2))
+        _flag(command, "--fragment-retries", o.get("fragment_retries", 2))
+        _flag(command, "--verbose-ytdlp", o.get("verbose_ytdlp", False), boolean=True)
+        return command
 
     if kind == "analyze":
         if not request.audio:
@@ -378,7 +531,17 @@ def create_gui_app(
     static_dir = package_dir / "static"
     jobs = JobManager(cwd=root)
 
-    app = FastAPI(title="tubeviz studio", version="0.26.2")
+    app = FastAPI(title="tubeviz studio", version="0.26.10")
+
+    @app.middleware("http")
+    async def studio_no_cache(request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/")
@@ -388,10 +551,15 @@ def create_gui_app(
     @app.get("/api/gui/config")
     async def config() -> dict[str, Any]:
         return {
+            "studio_version": "0.26.10",
             "project_root": str(root),
             "library": str(default_library),
             "native": native_doctor(),
             "codec": codec_doctor(),
+            "huggingface": {
+                "token_from_env": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")),
+                "source": "environment" if (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")) else None,
+            },
         }
 
     @app.get("/api/gui/library")
@@ -574,7 +742,21 @@ def create_gui_app(
             command = _job_command(effective)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return jobs.create(request.kind, command, metadata=metadata).payload()
+        env_overrides: dict[str, str] = {}
+        token = (request.hf_token or "").strip()
+        if token:
+            # HF_TOKEN is the canonical huggingface_hub override. Keep the
+            # legacy variable too for libraries that still inspect it. Tokens
+            # are process-local: never put them in argv, job metadata, or logs.
+            env_overrides["HF_TOKEN"] = token
+            env_overrides["HUGGING_FACE_HUB_TOKEN"] = token
+        return jobs.create(
+            request.kind, command, metadata=metadata, env_overrides=env_overrides
+        ).payload()
+
+    @app.get("/api/gui/cli-schema")
+    async def gui_cli_schema() -> dict[str, Any]:
+        return cli_schema()
 
     @app.get("/api/gui/jobs")
     async def list_jobs() -> list[dict[str, Any]]:

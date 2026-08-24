@@ -583,6 +583,115 @@ def ingest_terms(
     return summary
 
 
+
+def ingest_urls(
+    urls: Iterable[str],
+    library: ClipLibrary,
+    *,
+    term: str = "manual",
+    config: IngestConfig | None = None,
+    source: YouTubeSource | None = None,
+    progress=print,
+) -> IngestSummary:
+    """Ingest explicitly selected video URLs without running search/discovery."""
+    cfg = config or IngestConfig(results_per_term=1)
+    source = source or YouTubeSource()
+    library.initialize()
+    require_media_tools()
+    values = [str(url).strip() for url in urls if str(url).strip()]
+    summary = IngestSummary(terms=1 if values else 0, discovered=len(values))
+
+    for rank, url in enumerate(values, start=1):
+        progress(f"[{rank}/{len(values)}] manual URL: {url}")
+        try:
+            hydrated = source.resolve_url(url, rank=rank)
+        except DownloadFailure as exc:
+            _record_failure(summary, exc.status)
+            progress(f"  {exc.status}: {exc}")
+            continue
+
+        existing = library.get_clip(hydrated.source, hydrated.source_id)
+        if existing and existing.status == "rejected_manual" and not cfg.force:
+            summary.manual_rejected += 1
+            summary.skipped_existing += 1
+            progress(f"  manual reject: {hydrated.source_id} {existing.title or ''}")
+            continue
+
+        clip_id = library.upsert_discovery(
+            source=hydrated.source,
+            source_id=hydrated.source_id,
+            source_url=hydrated.url,
+            term=term,
+            rank=rank,
+            metadata=hydrated.metadata,
+        )
+        accepted, reason = _acceptable(hydrated, cfg)
+        if not accepted:
+            summary.rejected += 1
+            if not (existing and existing.status == "ready"):
+                library.mark_failure(clip_id, "rejected", reason or "rejected by ingest policy")
+            progress(f"  reject: {hydrated.source_id}: {reason}")
+            continue
+
+        if existing and existing.status == "ready" and not cfg.force:
+            summary.skipped_existing += 1
+            summary.ready += 1
+            progress(f"  existing ready: {hydrated.source_id} {existing.title or ''}")
+            continue
+
+        summary.accepted += 1
+        original = None
+        record = library.get_clip_by_id(clip_id)
+        if record and record.original_path and not cfg.force:
+            candidate = library.root / record.original_path
+            if candidate.exists():
+                original = candidate
+        try:
+            if original is None:
+                progress(f"  download: {hydrated.source_id} {hydrated.metadata.get('title', '')}")
+                original, info_json, _ = source.download(hydrated, library.originals_dir)
+                original_hash = sha256_file(original)
+                canonical = library.find_by_original_sha256(original_hash, exclude_clip_id=clip_id)
+                if canonical and canonical.original_path:
+                    original.unlink(missing_ok=True)
+                    if info_json:
+                        info_json.unlink(missing_ok=True)
+                    library.mark_duplicate(clip_id, canonical)
+                    summary.skipped_existing += 1
+                    progress(f"  duplicate: {hydrated.source_id} -> clip {canonical.id}")
+                    continue
+                library.mark_downloaded(clip_id, original_path=original, info_json_path=info_json, sha256=original_hash)
+                summary.downloaded += 1
+
+            normalized = library.normalized_dir / f"{hydrated.source_id}.mp4"
+            if cfg.force or not normalized.exists():
+                progress(f"  normalize: {hydrated.source_id}")
+                normalize_video(original, normalized, width=cfg.normalize_width, height=cfg.normalize_height,
+                                fps=cfg.normalize_fps, keep_audio=cfg.keep_audio)
+            library.mark_normalized(clip_id, normalized, sha256_file(normalized))
+
+            if cfg.detect_scenes:
+                scene_count = _index_scenes(library, clip_id, hydrated.source_id, normalized,
+                                            threshold=cfg.scene_threshold,
+                                            min_scene_seconds=cfg.min_scene_seconds)
+                summary.scenes += scene_count
+                if cfg.visual_index_scenes and scene_count:
+                    summary.visual_feature_scenes += index_scene_visual_features(
+                        library, clip_id=clip_id, force=cfg.force, progress=progress)
+                progress(f"  ready: {hydrated.source_id} ({scene_count} scenes)")
+            else:
+                progress(f"  ready: {hydrated.source_id}")
+            summary.ready += 1
+        except DownloadFailure as exc:
+            library.mark_failure(clip_id, exc.status, str(exc))
+            _record_failure(summary, exc.status)
+            progress(f"  {exc.status}: {hydrated.source_id}: {exc}")
+        except Exception as exc:
+            library.mark_failure(clip_id, "download_error", str(exc))
+            _record_failure(summary, "download_error")
+            progress(f"  download_error: {hydrated.source_id}: {exc}")
+    return summary
+
 def _index_scenes(
     library: ClipLibrary,
     clip_id: int,

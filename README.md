@@ -4,7 +4,36 @@
 
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.26.2**
+Current version: **0.26.5**
+
+## Manually add a YouTube clip
+
+When you already know the exact source footage you want, bypass search and AI discovery:
+
+```bash
+tubeviz ingest-url \
+  'https://www.youtube.com/watch?v=VIDEO_ID' \
+  --library ./library
+```
+
+Multiple URLs can be imported in one invocation:
+
+```bash
+tubeviz ingest-url URL1 URL2 URL3 --library ./library --term hand-picked
+```
+
+Manual URL ingestion still runs the normal tubeviz pipeline: yt-dlp metadata extraction, duplicate detection, download, FFmpeg normalization, scene detection, thumbnails, and decoded visual-feature indexing. It accepts the same browser-cookie and network controls needed for accessible YouTube content:
+
+```bash
+tubeviz ingest-url 'https://youtu.be/VIDEO_ID' \
+  --library ./library \
+  --term head-at-curated \
+  --cookies-from-browser chrome \
+  --scene-threshold 0.40 \
+  --min-scene-seconds 1.5
+```
+
+The manual command deliberately defaults `--hard-max-duration` to `0` (disabled), because an explicitly selected source should not be rejected merely because it is longer than the normal discovery policy. Use `--hard-max-duration` when you do want that guardrail. `--force` reprocesses an existing clip.
 
 ## Architecture
 
@@ -125,7 +154,11 @@ tubeviz --help
 ffmpeg -version
 ```
 
-### FFglitch installation
+#### Codec-cache filesystems and MP4 faststart
+
+Codec-glitch shots are finalized in tubeviz's local temporary directory and only then published to `library/codec-glitch/`. This avoids FFmpeg's `+faststart` in-place MP4 rewrite running directly on NFS, FUSE, network, merger, or other mounted library filesystems. If the optional faststart pass still fails locally, tubeviz retries without faststart; cached shots do not require a front-loaded `moov` atom. Cache publication uses a same-directory temporary file plus `fsync` and atomic `os.replace`, so interrupted materialization cannot expose a partially written MP4.
+
+## FFglitch installation
 
 FFglitch is **not** a Python dependency and is not installed by `pip`. tubeviz
 uses the external `ffedit` executable for true codec-space motion-vector
@@ -221,6 +254,14 @@ If `tubeviz codec doctor` reports that FFglitch is unavailable, ordinary
 analysis, preview, vector effects, and rendering still work; only true
 FFglitch materialization is unavailable.
 
+## Studio contextual help
+
+Studio provides inline `?` help affordances for form controls. Hover or focus a help icon to see tubeviz-specific guidance; controls in the Advanced Command Center use the current CLI parser help, defaults, and choices so GUI help stays synchronized with the command line.
+
+The Manual YouTube URL workflow uses a dedicated multi-line URL editor with one source URL per line and keeps uncommon network/normalization settings under **Advanced ingest settings**.
+
+For Hugging Face authentication, leave the Studio token field blank to inherit a server-side `HF_TOKEN`. For security, the value of an environment token is never sent to the browser. The **Show typed token** control only reveals a token entered directly into that Studio field.
+
 ## Quick start: Studio GUI
 
 The easiest way to operate the current system is Studio:
@@ -263,6 +304,102 @@ tubeviz gui --host 0.0.0.0 --port 8090
 ```
 
 The GUI runs the same CLI workflows described below; it is not a separate rendering implementation.
+
+
+## Studio GUI parity and manual URL ingestion
+
+Studio now has two complementary interfaces:
+
+1. the curated **Create** and **Library** panels for frequent workflows; and
+2. the generated **Command Center**, which reflects the current `argparse`
+   command tree and exposes every non-GUI CLI leaf command and option.
+
+```mermaid
+flowchart LR
+    CLI["tubeviz argparse tree"] --> SCHEMA["/api/gui/cli-schema"]
+    SCHEMA --> CC["Studio Command Center"]
+    CC --> ARGV["validated argument vector"]
+    ARGV --> PROC["python -m tubeviz.cli ..."]
+
+    CREATE["Curated Create panel"] --> PROC
+    LIB["Visual Library panel"] --> PROC
+```
+
+The Command Center is deliberately generated from the parser rather than from a
+second hand-maintained option list. If an option is added to commands such as
+`analyze`, `render`, `serve`, `codec materialize`, `library embed`, or
+`ingest`, it appears in Studio automatically. Commands are launched as argument
+vectors without shell interpolation.
+
+Current generated command coverage includes:
+
+```text
+tubeviz ingest
+tubeviz ingest-url
+tubeviz library list
+tubeviz library show
+tubeviz library reject
+tubeviz library restore
+tubeviz library delete
+tubeviz library stats
+tubeviz library ai-report
+tubeviz library visual-index
+tubeviz library codec-motion-index
+tubeviz library embed
+tubeviz audio-ai doctor
+tubeviz audio-ai inspect
+tubeviz analyze
+tubeviz materialize
+tubeviz render
+tubeviz codec doctor
+tubeviz codec inspect
+tubeviz codec materialize
+tubeviz native build
+tubeviz native doctor
+tubeviz serve
+```
+
+The `tubeviz gui` command itself is intentionally not recursively launchable
+from Command Center because the current Studio process already owns the GUI.
+
+### Manual URL ingestion in Studio
+
+The Create panel includes **Manual YouTube URL Ingest**. Paste one or more URLs,
+one per line, and optionally assign a provenance term such as `hand-picked`,
+`head-at-curated`, or `industrial-favorites`.
+
+The visual form exposes the complete `ingest-url` workflow:
+
+```text
+provenance term
+minimum / hard maximum duration
+minimum source width
+normalization width / height / FPS
+scene-change threshold
+minimum scene duration
+browser cookies
+network timeout
+fragment concurrency and retries
+keep audio
+skip scene detection
+skip visual indexing
+force reprocessing
+verbose yt-dlp
+```
+
+The resulting clips enter the exact same persistent library pipeline as searched
+clips: metadata, duplicate checks, download, normalization, scene indexing,
+thumbnails, visual fingerprints, trimming, semantic embeddings, and later
+selection are all shared.
+
+### Using project paths in Command Center
+
+Select any command and click **Use current Project paths** to copy the Studio
+Library, Audio, Timeline, Output, and Search Terms fields into matching CLI
+arguments. The argument-vector preview shows the exact command before it is
+launched. Long-running advanced commands use the same cancellable Studio job
+manager and live log system as the curated controls.
+
 
 ## End-to-end CLI workflow
 
@@ -1366,6 +1503,16 @@ JSON output:
 tubeviz codec inspect song.codec-plan.json --json
 ```
 
+### FFglitch 0.10.2 parameter compatibility
+
+FFglitch's `-sp` setup-parameter parser is intentionally not used for tubeviz's
+codec-effect plan. In FFglitch 0.10.2 that parser rejects floating-point JSON
+values, while tubeviz effect envelopes require fractional amounts and normalized
+start/end positions. tubeviz therefore embeds the deterministic JSON-compatible
+effect payload directly into the generated QuickJS source as a JavaScript object
+literal. This preserves full precision and still uses FFglitch's documented
+`setup()` / `glitch_frame()` scripting path.
+
 ### True FFglitch materialization
 
 Bake scheduled codec effects into deterministic cached shot assets:
@@ -1868,6 +2015,20 @@ Native build diagnostics:
 ```bash
 tubeviz native doctor
 ```
+
+
+### Hugging Face authentication in Studio
+
+OpenCLIP/CLAP model downloads normally work without authentication for public models, but a Hugging Face token can be useful for authenticated, gated, or rate-limited Hub access. The preferred environment variable is `HF_TOKEN`. Studio reports whether a token is already available from its environment. If it is not, expand **Project → AI credentials** and enter a token there.
+
+The Studio token is intentionally ephemeral: it is supplied only to tubeviz child processes as `HF_TOKEN` and is never placed in command-line arguments, job metadata, or job logs. Leaving the field blank inherits the Studio server environment. For a persistent shell setup, use for example:
+
+```bash
+export HF_TOKEN='hf_...'
+tubeviz gui --library ./library
+```
+
+A read token is sufficient for downloading models.
 
 ## License
 
