@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import math
@@ -6,7 +7,7 @@ from typing import Iterable
 import numpy as np
 
 from .library import SceneCandidate
-from .models import ColorDirection, Section, VectorEffect, VisualDirection
+from .models import CodecEffect, ColorDirection, Section, VectorEffect, VisualDirection
 
 
 _VIBE_HUE = {
@@ -50,6 +51,9 @@ def motion_target(section: Section) -> float:
         target *= 0.55
     elif section.label == "peak":
         target = min(1.0, target * 1.22)
+    if section.ai_direction is not None:
+        confidence = .30 + .45 * section.audio_semantic_confidence
+        target = target * (1.0 - confidence) + section.ai_direction.desired_motion * confidence
     return _clamp(target)
 
 
@@ -58,13 +62,18 @@ def visual_match_score(candidate: SceneCandidate, section: Section) -> float:
     if not f:
         return 0.0
     target_motion = motion_target(section)
-    motion = float(f.get("motion", 0.0))
+    raster_motion = float(f.get("motion", 0.0))
+    codec_motion = f.get("codec_motion")
+    motion = (0.72 * raster_motion + 0.28 * float(codec_motion)) if codec_motion is not None else raster_motion
     complexity = float(f.get("complexity", 0.5))
     brightness = float(f.get("brightness", 0.5))
     saturation = float(f.get("saturation", 0.5))
     motion_match = 1.0 - abs(motion - target_motion)
     brightness_match = 1.0 - abs(brightness - section.brightness)
     desired_complexity = _clamp(0.20 + 0.72 * section.energy + 0.20 * section.noisiness)
+    if section.ai_direction is not None:
+        w = .25 + .40 * section.audio_semantic_confidence
+        desired_complexity = _clamp(desired_complexity * (1-w) + section.ai_direction.desired_complexity * w)
     complexity_match = 1.0 - abs(complexity - desired_complexity)
     desired_saturation = _clamp(0.30 + 0.55 * section.energy + 0.15 * section.brightness)
     saturation_match = 1.0 - abs(saturation - desired_saturation)
@@ -90,15 +99,29 @@ def transition_score(
     bright_delta = abs(float(a.get("brightness", .5)) - float(b.get("brightness", .5)))
     complexity_delta = abs(float(a.get("complexity", .5)) - float(b.get("complexity", .5)))
     contrast = _clamp(.34*hue_delta + .28*motion_delta + .20*bright_delta + .18*complexity_delta)
+    if section.ai_direction is not None:
+        continuity = section.ai_direction.continuity
+        # +1 means "this transition satisfies the director". High continuity
+        # rewards similarity; low continuity rewards deliberate contrast.
+        desired_contrast = 1.0 - continuity
+        ai_transition = 1.0 - 2.0 * abs(contrast - desired_contrast)
+        base_weight = .25 + .35 * section.audio_semantic_confidence
+    else:
+        ai_transition = None
+        base_weight = 0.0
 
     # Builds/peaks/drops benefit from contrast; ambient/hypnotic passages prefer continuity.
     if section.label == "peak" or section.vibe in {"heavy", "fractured", "euphoric"}:
-        return contrast
-    if section.label == "build":
-        return (contrast - .45) * .9
-    if section.label == "breakdown" or section.vibe in {"ambient", "hypnotic"}:
-        return 1.0 - 2.0 * contrast
-    return 0.35 - abs(contrast - 0.35)
+        base = contrast
+    elif section.label == "build":
+        base = (contrast - .45) * .9
+    elif section.label == "breakdown" or section.vibe in {"ambient", "hypnotic"}:
+        base = 1.0 - 2.0 * contrast
+    else:
+        base = 0.35 - abs(contrast - 0.35)
+    if ai_transition is not None:
+        base = base * (1.0-base_weight) + ai_transition * base_weight
+    return _clamp(base, -1.0, 1.0)
 
 
 def _accent_alignment(
@@ -142,6 +165,15 @@ def aligned_excerpt(
     available = max(.05, candidate.duration)
     f = candidate.visual_features or {}
     accents = list(f.get("accents", []))
+    # When FFglitch codec-motion indexing is available, merge macroblock motion
+    # peaks with decoded-image accents. Codec motion often reveals camera/object
+    # movement that simple luminance differencing understates.
+    for item in f.get("codec_motion_accents", []):
+        accents.append({
+            "time": float(item.get("time", 0.0)),
+            "strength": min(1.0, .35 + .65*float(item.get("strength", 0.0))),
+        })
+    accents.sort(key=lambda item: float(item.get("time", 0.0)))
     rates = (0.88, 0.94, 1.0, 1.06, 1.12)
     target_source_span = min(
         available,
@@ -432,6 +464,102 @@ def _vector_effects(
     return visible + hidden
 
 
+def _codec_effects(
+    candidate: SceneCandidate,
+    section: Section,
+    *,
+    mode: str,
+    intensity: float,
+    occurrence: int,
+    shot_index: int,
+    narrative_role: str,
+) -> list[CodecEffect]:
+    """Schedule sparse codec-space effects for FFglitch materialization.
+
+    Codec effects are intentionally much rarer than raster/vector treatments.
+    Their perceptual value comes from the transition into and out of true
+    prediction/motion-vector corruption.
+    """
+    mode = (mode or "off").lower()
+    if mode == "off" or intensity <= 0:
+        return []
+    intensity = _clamp(intensity, 0.0, 1.5)
+    f = candidate.visual_features or {}
+    motion = float(f.get("codec_motion", f.get("motion", 0.0)))
+    mx = float(f.get("codec_motion_direction_x", f.get("motion_direction_x", 0.0)))
+    my = float(f.get("codec_motion_direction_y", f.get("motion_direction_y", 0.0)))
+    angle = math.atan2(my, mx if abs(mx) > 1e-6 else 1e-6)
+    energy = _clamp(section.energy)
+    density = _clamp(section.onset_density / .75)
+    tension = _clamp(.46*energy + .24*density + .18*section.noisiness + .12*section.bass_weight)
+    seed = (candidate.scene_id * 2654435761 + section.index*4099 + shot_index*131 + occurrence*17) & 0x7fffffff
+    peak = section.label == "peak" or narrative_role == "payoff"
+    build = section.label == "build"
+    breakdown = section.label == "breakdown"
+
+    if mode == "subtle":
+        gate = peak or build or (section.vibe in {"fractured", "heavy"} and energy > .70)
+    elif mode == "musical":
+        gate = peak or build or narrative_role == "mutate" or (section.vibe in {"fractured", "heavy", "driving"} and energy > .68)
+    else:  # aggressive
+        gate = energy > .42 or narrative_role in {"mutate", "payoff"}
+    if not gate or breakdown and mode != "aggressive":
+        return []
+
+    scale = {"subtle": .48, "musical": .78, "aggressive": 1.10}.get(mode, .78) * intensity
+    out: list[CodecEffect] = []
+
+    # The first effect follows scene motion so the codec treatment inherits the
+    # existing camera/object direction rather than being generic corruption.
+    if build:
+        out.append(CodecEffect(
+            kind="mv_drift" if motion < .35 else "mv_wave",
+            amount=_clamp((.18+.32*tension)*scale, 0, 1.25),
+            start=.36, end=.98, attack=.24, release=.06, angle=angle,
+            pulse=2.0, seed=seed+1, limit=72,
+        ))
+    elif peak:
+        primary = "mv_explode" if section.bass_weight >= .48 else "mv_spiral"
+        out.append(CodecEffect(
+            kind=primary,
+            amount=_clamp((.34+.46*tension)*scale, 0, 1.35),
+            start=.02, end=.42, attack=.025, release=.16,
+            pulse=1.0, seed=seed+2, limit=112,
+        ))
+        # A short feedback/mosh tail lets prediction errors smear after impact.
+        if mode != "subtle":
+            out.append(CodecEffect(
+                kind="datamosh",
+                amount=_clamp((.20+.36*energy+.14*motion)*scale, 0, 1.20),
+                start=.28, end=.82, attack=.08, release=.18,
+                pulse=2.0, seed=seed+3, limit=128,
+            ))
+    elif section.vibe == "fractured":
+        out.append(CodecEffect(
+            kind="mv_jitter",
+            amount=_clamp((.20+.42*section.noisiness+.18*density)*scale, 0, 1.25),
+            start=.18, end=.90, attack=.12, release=.14,
+            pulse=4.0, seed=seed+4, limit=96,
+        ))
+    elif narrative_role == "mutate":
+        out.append(CodecEffect(
+            kind="mv_spiral" if motion > .3 else "mv_shear",
+            amount=_clamp((.18+.32*tension)*scale, 0, 1.10),
+            start=.22, end=.84, attack=.16, release=.16,
+            pulse=1.5, seed=seed+5, limit=88,
+        ))
+    elif mode == "aggressive":
+        out.append(CodecEffect(
+            kind="mv_radial_wave",
+            amount=_clamp((.14+.30*tension)*scale, 0, 1.0),
+            start=.25, end=.90, attack=.15, release=.12,
+            pulse=2.5, seed=seed+6, limit=80,
+        ))
+
+    # Cap vocabulary per shot: true codec glitches become noisy very quickly.
+    return out[:2]
+
+
 def build_visual_direction(
     candidate: SceneCandidate,
     section: Section,
@@ -443,10 +571,17 @@ def build_visual_direction(
     shot_index_in_section: int,
     vector_enabled: bool = True,
     vector_intensity: float = 1.0,
+    codec_glitch_mode: str = "off",
+    codec_glitch_intensity: float = 0.65,
 ) -> VisualDirection:
     f = candidate.visual_features or {}
     source_hue = float(f.get("dominant_hue", 0.0)) % 360.0
     base_target = _VIBE_HUE.get(section.vibe, _VIBE_HUE["neutral"])
+    if section.ai_direction is not None and section.ai_direction.target_hue is not None:
+        w = .28 + .42 * section.audio_semantic_confidence
+        # Circular shortest-path interpolation.
+        delta = _shortest_hue_delta(base_target, section.ai_direction.target_hue)
+        base_target = (base_target + delta*w) % 360.0
     # Evolve hue with harmonic/structural location rather than a static LUT.
     target_hue = (
         base_target
@@ -464,6 +599,9 @@ def build_visual_direction(
     brightness_scale = _clamp(.82 + .36 * section.brightness + .16 * section.energy, .68, 1.38)
     chroma = _clamp(.06 + .55*section.energy + .30*section.noisiness)
     family = _EFFECT_FAMILY.get(section.vibe, "cinematic")
+    if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
+        if section.audio_semantic_confidence >= .18:
+            family = section.ai_direction.effect_family
 
     narrative_role = "develop"
     if shot_index_in_section == 0 and occurrence == 1:
@@ -489,6 +627,9 @@ def build_visual_direction(
         "glitch": _curve((0, .02), (.72, .08+.28*section.noisiness), (.96, .55*section.noisiness), (1, .04)),
         "bloom": _curve((0, .02), (.75, .08+.22*e), (.96, .55*e), (1, .08)),
     }
+
+    ai_vector_scale = section.ai_direction.vector_intensity if section.ai_direction is not None else 1.0
+    ai_codec_scale = section.ai_direction.codec_intensity if section.ai_direction is not None else 1.0
 
     return VisualDirection(
         rhythm_alignment=rhythm_alignment,
@@ -516,8 +657,8 @@ def build_visual_direction(
             [
                 effect.model_copy(
                     update={
-                        "amount": _clamp(effect.amount * vector_intensity),
-                        "opacity": _clamp(effect.opacity * min(1.5, vector_intensity)),
+                        "amount": _clamp(effect.amount * vector_intensity * ai_vector_scale),
+                        "opacity": _clamp(effect.opacity * min(1.5, vector_intensity * ai_vector_scale)),
                     }
                 )
                 for effect in _vector_effects(
@@ -530,5 +671,10 @@ def build_visual_direction(
             ]
             if vector_enabled and vector_intensity > 0
             else []
+        ),
+        codec_effects=_codec_effects(
+            candidate, section, mode=codec_glitch_mode,
+            intensity=codec_glitch_intensity * ai_codec_scale, occurrence=occurrence,
+            shot_index=shot_index_in_section, narrative_role=narrative_role,
         ),
     )

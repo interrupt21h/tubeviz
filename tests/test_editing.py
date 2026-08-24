@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from tubeviz.editing import EditConfig, attach_edit_plan
 from tubeviz.models import DirectedTimeline, EventType, MusicalEvent, SceneSelection, Section, TrackAnalysis
 

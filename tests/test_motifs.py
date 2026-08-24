@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from tubeviz.models import Section, TrackAnalysis
 from tubeviz.motifs import MotifConfig, cosine_similarity, discover_motifs
 

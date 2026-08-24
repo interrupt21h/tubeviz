@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import hashlib
@@ -50,6 +51,12 @@ def plan_transform(
         return VideoTransform()
 
     intensity = _clamp(cfg.intensity, 0.0, 2.0)
+    if section.ai_direction is not None:
+        # AI direction modulates a user's global effect ceiling rather than
+        # replacing it. Spacious sections naturally back off; complex/payoff
+        # sections can use more of the configured budget.
+        ai_scale = .62 + .50*section.ai_direction.desired_complexity + .20*section.ai_direction.edit_density
+        intensity = _clamp(intensity * ai_scale, 0.0, 2.0)
     if intensity <= 0.0:
         return VideoTransform()
     energy = _clamp(section.energy, 0.0, 1.0)

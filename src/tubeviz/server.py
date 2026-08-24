@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import asyncio
@@ -97,7 +98,7 @@ def create_app(
     package_dir = Path(__file__).resolve().parent
     static_dir = package_dir / "static"
 
-    app = FastAPI(title="tubeviz", version="0.24.0")
+    app = FastAPI(title="tubeviz", version="0.26.2")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     if library is not None:
         # StaticFiles resolves requests beneath this directory and rejects path
@@ -113,6 +114,13 @@ def create_app(
             "/transforms",
             StaticFiles(directory=transforms_dir, check_dir=True),
             name="transforms",
+        )
+        codec_dir = library.root / "codec-glitch"
+        codec_dir.mkdir(parents=True, exist_ok=True)
+        app.mount(
+            "/codec-glitch",
+            StaticFiles(directory=codec_dir, check_dir=True),
+            name="codec-glitch",
         )
 
     @app.get("/")
@@ -138,6 +146,8 @@ def create_app(
             "video_layers": sum(1 + len(scene.layers) for scene in timeline.scene_plan),
             "transformed_scenes": sum(1 for scene in timeline.scene_plan if scene.transform.materialized),
             "library": str(library.root) if library is not None else None,
+            "timeline": str(timeline_path),
+            "audio": str(Path(audio_path).expanduser().resolve()) if audio_path is not None else None,
         }
 
     if audio_path is not None:

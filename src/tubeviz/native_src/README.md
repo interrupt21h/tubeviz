@@ -35,7 +35,7 @@ sudo apt install libplacebo-dev libvulkan-dev
 Then:
 
 ```bash
-cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake -S src/tubeviz/native_src -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native -j
 ```
 

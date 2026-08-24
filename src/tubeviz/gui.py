@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -20,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from .library import ClipLibrary
 from .native_render import native_doctor
+from .codec_glitch import codec_doctor
 
 
 class JobRequest(BaseModel):
@@ -57,6 +60,7 @@ class GuiJob:
     status: str = "queued"
     log: deque[str] = field(default_factory=lambda: deque(maxlen=4000))
     process: subprocess.Popen[str] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def payload(self, *, tail: int = 250) -> dict[str, Any]:
         lines = list(self.log)
@@ -72,22 +76,38 @@ class GuiJob:
             "returncode": self.returncode,
             "status": self.status,
             "log": lines,
+            **self.metadata,
         }
 
 
 class JobManager:
-    def __init__(self) -> None:
+    def __init__(self, *, cwd: str | Path | None = None) -> None:
         self._jobs: dict[str, GuiJob] = {}
         self._lock = threading.RLock()
+        self._cwd = Path(cwd).expanduser().resolve() if cwd is not None else None
 
-    def create(self, kind: str, command: list[str]) -> GuiJob:
-        job = GuiJob(id=uuid.uuid4().hex[:12], kind=kind, command=command)
+    def create(
+        self,
+        kind: str,
+        command: list[str],
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> GuiJob:
+        job = GuiJob(
+            id=uuid.uuid4().hex[:12],
+            kind=kind,
+            command=command,
+            metadata=dict(metadata or {}),
+        )
         with self._lock:
             self._jobs[job.id] = job
         threading.Thread(target=self._run, args=(job,), daemon=True).start()
         return job
 
     def _run(self, job: GuiJob) -> None:
+        if job.status == "cancelled":
+            job.ended_at = time.time()
+            return
         job.status = "running"
         job.started_at = time.time()
         job.log.append("$ " + " ".join(job.command))
@@ -101,6 +121,7 @@ class JobManager:
                 text=True,
                 bufsize=1,
                 env=env,
+                cwd=str(self._cwd) if self._cwd is not None else None,
                 start_new_session=True,
             )
             job.process = proc
@@ -132,6 +153,11 @@ class JobManager:
     def cancel(self, job_id: str) -> GuiJob:
         job = self.get(job_id)
         proc = job.process
+        if job.status == "queued" and proc is None:
+            job.status = "cancelled"
+            job.ended_at = time.time()
+            job.log.append("Cancelled before start.")
+            return job
         if proc is not None and proc.poll() is None:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
@@ -140,6 +166,25 @@ class JobManager:
             job.log.append("Cancellation requested.")
             job.status = "cancelling"
         return job
+
+    def cancel_kind(self, kind: str) -> list[GuiJob]:
+        cancelled: list[GuiJob] = []
+        for job in self.list():
+            if job.kind != kind:
+                continue
+            if job.status not in {"queued", "running", "cancelling"}:
+                continue
+            cancelled.append(self.cancel(job.id))
+        return cancelled
+
+
+def _free_tcp_port(host: str = "127.0.0.1") -> int:
+    # Bind port 0 only long enough to obtain an unused local preview port.
+    # The preview subprocess is launched immediately afterwards.
+    bind_host = "127.0.0.1" if host in {"0.0.0.0", "::", "localhost"} else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((bind_host, 0))
+        return int(sock.getsockname()[1])
 
 
 def _tubeviz_command(*parts: str) -> list[str]:
@@ -169,6 +214,19 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--output", request.output or "timeline.json")
         _flag(command, "--semantic", o.get("semantic", True), boolean=True)
         _flag(command, "--semantic-device", o.get("semantic_device", "auto"))
+        if o.get("audio_ai", False):
+            command.append("--audio-ai")
+            _flag(command, "--audio-ai-model", o.get("audio_ai_model", "laion/clap-htsat-fused"))
+            _flag(command, "--audio-ai-device", o.get("audio_ai_device", "auto"))
+            _flag(command, "--audio-ai-window", o.get("audio_ai_window", 8))
+            _flag(command, "--audio-ai-hop", o.get("audio_ai_hop", 4))
+            _flag(command, "--audio-visual-match-weight", o.get("audio_visual_match_weight", 1.10))
+            if o.get("ai_director", False):
+                command.append("--ai-director")
+                _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
+                _flag(command, "--ai-director-model", o.get("ai_director_model"))
+                _flag(command, "--ai-director-api-key", o.get("ai_director_api_key"))
+                _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
         _flag(command, "--section-bars", o.get("section_bars", 8))
         _flag(command, "--max-video-layers", o.get("max_video_layers", 3))
         _flag(command, "--composition-intensity", o.get("composition_intensity", 1.0))
@@ -178,6 +236,8 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--visual-match-weight", o.get("visual_match_weight", 1.25))
         _flag(command, "--transition-weight", o.get("transition_weight", 0.70))
         _flag(command, "--vector-intensity", o.get("vector_intensity", 1.0))
+        _flag(command, "--codec-glitch", o.get("codec_glitch", "off"))
+        _flag(command, "--codec-glitch-intensity", o.get("codec_glitch_intensity", 0.65))
         if o.get("vector_effects", True) is False:
             command.append("--no-vector-effects")
         if o.get("rhythm_alignment", True) is False:
@@ -212,6 +272,10 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--native-threads", o.get("native_threads", 0))
         _flag(command, "--native-build-if-missing", o.get("native_build_if_missing", True), boolean=True)
         _flag(command, "--browser-executable", o.get("browser_executable"))
+        _flag(command, "--codec-materialize", o.get("codec_materialize", False), boolean=True)
+        _flag(command, "--codec-ffedit", o.get("codec_ffedit", "ffedit"))
+        _flag(command, "--codec-qscale", o.get("codec_qscale", 3))
+        _flag(command, "--codec-gop", o.get("codec_gop", 18))
         return command
 
     if kind == "ingest":
@@ -237,6 +301,31 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--force", o.get("force", False), boolean=True)
         return command
 
+    if kind == "codec-doctor":
+        return _tubeviz_command("codec", "doctor")
+
+    if kind == "codec-materialize":
+        if not request.timeline:
+            raise ValueError("timeline is required")
+        command = _tubeviz_command("codec", "materialize", request.timeline)
+        _flag(command, "--library", library)
+        _flag(command, "--output", request.output or "timeline.codec.json")
+        _flag(command, "--qscale", o.get("qscale", 3))
+        _flag(command, "--gop", o.get("gop", 18))
+        _flag(command, "--force", o.get("force", False), boolean=True)
+        return command
+
+    if kind == "codec-motion-index":
+        command = _tubeviz_command("library", "codec-motion-index", "--library", library)
+        _flag(command, "--force", o.get("force", False), boolean=True)
+        return command
+
+    if kind == "audio-ai-doctor":
+        command = _tubeviz_command("audio-ai", "doctor")
+        _flag(command, "--model", o.get("model", "laion/clap-htsat-fused"))
+        _flag(command, "--device", o.get("device", "auto"))
+        return command
+
     if kind == "native-build":
         command = _tubeviz_command("native", "build")
         _flag(command, "--clean", o.get("clean", False), boolean=True)
@@ -252,6 +341,9 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--audio", request.audio)
         _flag(command, "--host", o.get("host", "127.0.0.1"))
         _flag(command, "--port", port)
+        _flag(command, "--codec-materialize", o.get("codec_materialize", False), boolean=True)
+        _flag(command, "--codec-qscale", o.get("codec_qscale", 3))
+        _flag(command, "--codec-gop", o.get("codec_gop", 18))
         if o.get("replan_scenes"):
             command.append("--replan-scenes")
             _flag(command, "--semantic", o.get("semantic", True), boolean=True)
@@ -284,9 +376,9 @@ def create_gui_app(
     default_library = Path(default_library).expanduser().resolve()
     package_dir = Path(__file__).resolve().parent
     static_dir = package_dir / "static"
-    jobs = JobManager()
+    jobs = JobManager(cwd=root)
 
-    app = FastAPI(title="tubeviz studio", version="0.24.0")
+    app = FastAPI(title="tubeviz studio", version="0.26.2")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/")
@@ -299,6 +391,7 @@ def create_gui_app(
             "project_root": str(root),
             "library": str(default_library),
             "native": native_doctor(),
+            "codec": codec_doctor(),
         }
 
     @app.get("/api/gui/library")
@@ -455,11 +548,33 @@ def create_gui_app(
 
     @app.post("/api/gui/jobs")
     async def start_job(request: JobRequest) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        effective = request
+        if request.kind == "preview":
+            # A preview server keeps the timeline in memory. Reusing a fixed
+            # port let Studio silently reopen an older server when a newer
+            # `tubeviz serve` failed with EADDRINUSE. Always retire Studio's
+            # previous preview and launch this selection on a fresh port.
+            jobs.cancel_kind("preview")
+            options = dict(request.options)
+            host = str(options.get("host", "127.0.0.1"))
+            port = int(options.get("port") or 0)
+            if port <= 0:
+                port = _free_tcp_port(host)
+            options["port"] = port
+            effective = request.model_copy(update={"options": options})
+            browser_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+            metadata = {
+                "preview_url": f"http://{browser_host}:{port}/",
+                "preview_timeline": str(request.timeline or ""),
+                "preview_audio": str(request.audio or ""),
+                "preview_library": str(Path(request.library).expanduser()),
+            }
         try:
-            command = _job_command(request)
+            command = _job_command(effective)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        return jobs.create(request.kind, command).payload()
+        return jobs.create(request.kind, command, metadata=metadata).payload()
 
     @app.get("/api/gui/jobs")
     async def list_jobs() -> list[dict[str, Any]]:

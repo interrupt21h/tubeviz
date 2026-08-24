@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 from enum import StrEnum
@@ -34,6 +35,33 @@ class TempoPoint(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class SectionAIDirection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    visual_world: str = ""
+    motion_style: str = ""
+    palette: str = ""
+    effect_family: str | None = None
+    desired_motion: float = Field(default=0.5, ge=0.0, le=1.0)
+    desired_complexity: float = Field(default=0.5, ge=0.0, le=1.0)
+    edit_density: float = Field(default=0.5, ge=0.0, le=1.0)
+    continuity: float = Field(default=0.5, ge=0.0, le=1.0)
+    target_hue: float | None = Field(default=None, ge=0.0, lt=360.0)
+    vector_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
+    codec_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
+    notes: str = ""
+
+
+class AudioSemanticWindow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: float = Field(ge=0.0)
+    end: float = Field(gt=0.0)
+    scores: dict[str, float] = Field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    entropy: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class Section(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +84,10 @@ class Section(BaseModel):
     vibe: str = "neutral"
     chroma_profile: list[float] = Field(default_factory=list)
     fingerprint: list[float] = Field(default_factory=list)
+    audio_semantics: dict[str, float] = Field(default_factory=dict)
+    audio_semantic_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    audio_semantic_entropy: float = Field(default=1.0, ge=0.0, le=1.0)
+    ai_direction: SectionAIDirection | None = None
 
 
 class TrackAnalysis(BaseModel):
@@ -72,6 +104,9 @@ class TrackAnalysis(BaseModel):
     bars: list[float]
     sections: list[Section]
     events: list[MusicalEvent]
+    audio_ai_model: str | None = None
+    audio_ai_concepts: list[str] = Field(default_factory=list)
+    audio_ai_windows: list[AudioSemanticWindow] = Field(default_factory=list)
 
 
 class MotifOccurrence(BaseModel):
@@ -244,6 +279,38 @@ class VectorEffect(BaseModel):
     automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
 
 
+class CodecEffect(BaseModel):
+    """Codec-space motion-vector effect scheduled by the Visual Director."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    amount: float = Field(default=0.0, ge=0.0, le=1.5)
+    start: float = Field(default=0.0, ge=0.0, le=1.0)
+    end: float = Field(default=1.0, ge=0.0, le=1.0)
+    attack: float = Field(default=0.12, ge=0.0, le=1.0)
+    release: float = Field(default=0.18, ge=0.0, le=1.0)
+    pulse: float = Field(default=0.0, ge=0.0, le=32.0)
+    angle: float = 0.0
+    limit: int = Field(default=96, ge=4, le=512)
+    seed: int = 0
+    materialized: bool = False
+
+
+class CodecMaterialization(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    materialized: bool = False
+    cache_key: str | None = None
+    original_media_file: str | None = None
+    original_media_url: str | None = None
+    original_start: float | None = None
+    original_end: float | None = None
+    media_file: str | None = None
+    media_url: str | None = None
+    ffedit_version: str | None = None
+
+
 class VisualDirection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -260,6 +327,7 @@ class VisualDirection(BaseModel):
     # Curve values are normalized to shot progress 0..1.
     automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
     vector_effects: list[VectorEffect] = Field(default_factory=list)
+    codec_effects: list[CodecEffect] = Field(default_factory=list)
 
 
 class SceneSelection(BaseModel):
@@ -288,6 +356,7 @@ class SceneSelection(BaseModel):
     transform: VideoTransform = Field(default_factory=VideoTransform)
     composition_mode: str = "single"
     layers: list[CompositeLayer] = Field(default_factory=list)
+    codec_materialization: CodecMaterialization = Field(default_factory=CodecMaterialization)
 
 
 class DirectedTimeline(BaseModel):

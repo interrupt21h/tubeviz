@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -49,17 +50,32 @@
         <label>Visual match <input id="visualMatchWeight" type="number" step=".05" value="1.25"></label>
         <label>Transition intelligence <input id="transitionWeight" type="number" step=".05" value=".70"></label>
         <label>Vector intensity <input id="vectorIntensity" type="number" step=".1" value="1.0"></label>
+        <label>Codec glitch
+          <select id="codecGlitch"><option value="off">off</option><option value="subtle">subtle</option><option value="musical">musical</option><option value="aggressive">aggressive</option></select>
+        </label>
+        <label>Codec intensity <input id="codecGlitchIntensity" type="number" step=".05" value=".65"></label>
         <label>Min shot <input id="minShot" type="number" step=".05" value=".65"></label>
         <label>Max shot <input id="maxShot" type="number" step=".25" value="6"></label>
         <label>Max excerpt <input id="maxExcerpt" type="number" step=".25" value="5"></label>
         <label>Semantic device <input id="semanticDevice" value="auto"></label>
+        <label>Audio AI device <input id="audioAiDevice" value="auto"></label>
+        <label>Audio↔visual weight <input id="audioVisualWeight" type="number" step=".05" value="1.10"></label>
+        <label>CLAP window <input id="audioAiWindow" type="number" step="1" value="8"></label>
+        <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
+        <label>AI director URL <input id="aiDirectorUrl" placeholder="http://localhost:8000/v1"></label>
+        <label>AI director model <input id="aiDirectorModel" placeholder="local model name"></label>
+        <label>AI director API key <input id="aiDirectorApiKey" type="password" placeholder="optional for local endpoints"></label>
+        <label>AI director strength <input id="aiDirectorStrength" type="number" step=".05" value=".75"></label>
       </div>
       <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
+      <label class="check"><input id="audioAi" type="checkbox" checked> CLAP audio-semantic director</label>
+      <label class="check"><input id="aiDirector" type="checkbox"> Whole-song LLM visual director</label>
       <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
       <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
       <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
       <label class="check"><input id="vectorEffects" type="checkbox" checked> Vector scene graph: contours, flow, fracture, portals and glyphs</label>
-      <button class="primary" id="analyzeBtn">Analyze + Build Timeline</button>
+      <label class="check"><input id="codecPreviewMaterialize" type="checkbox"> Materialize true FFglitch effects for browser preview</label>
+      <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
     </article>
 
     <article class="card">
@@ -80,8 +96,11 @@
         <label>Threads <input id="nativeThreads" type="number" value="0"></label>
       </div>
       <label class="check"><input id="buildMissing" type="checkbox" checked> Build native renderer if missing</label>
+      <label class="check"><input id="codecRenderMaterialize" type="checkbox"> Materialize scheduled FFglitch effects before final render</label>
       <div class="actions">
         <button id="nativeBuildBtn">Rebuild Native</button>
+        <button id="codecDoctorBtn">FFglitch Doctor</button>
+        <button id="codecMaterializeBtn">Materialize Codec FX</button>
         <button class="primary" id="renderBtn">Render Video</button>
       </div>
     </article>
@@ -122,6 +141,7 @@
       <input id="termFilter" placeholder="term filter">
       <button id="loadClips">Refresh</button>
       <button id="visualIndexBtn">Rebuild Visual Index</button>
+      <button id="codecMotionBtn">Codec Motion Index</button>
     </div>
     <div id="libraryStats" class="stats"></div>
     <div id="clipGrid" class="clip-grid"></div>

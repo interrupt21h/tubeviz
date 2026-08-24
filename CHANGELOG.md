@@ -1,5 +1,71 @@
 # Changelog
 
+## 0.26.2
+
+### Fixed
+
+- Fixed CLAP inference with current Hugging Face Transformers releases where `ClapModel.get_text_features()` and `get_audio_features()` return `BaseModelOutputWithPooling` instead of a raw tensor.
+- Added compatibility extraction for current `pooler_output`, explicit `text_embeds`/`audio_embeds`, legacy raw-tensor returns, and `return_dict=False` tuple returns.
+- Added regression tests covering the supported CLAP feature-output forms.
+
+## 0.26.1
+
+### Changed
+
+- Licensed tubeviz under Apache License 2.0 with top-level `LICENSE` and `NOTICE` files and SPDX identifiers on source files.
+- Added PEP 639 `license = "Apache-2.0"` and `license-files = ["LICENSE", "NOTICE"]` package metadata.
+- Removed the duplicate top-level `native/` C++ source tree; `src/tubeviz/native_src/` is now the single canonical native-renderer source used by both editable installs and wheels.
+- Updated native build/test paths for the canonical source tree.
+- Expanded README installation documentation with exact FFglitch 0.10.2 requirements, official binary locations, Linux installation commands, `ffedit` PATH setup, codec-materialization architecture, and `tubeviz codec doctor` verification.
+- Clarified that third-party software, model weights, and media are not relicensed by tubeviz.
+
+## 0.26.0
+
+### Added
+
+- Added CLAP sliding-window audio-semantic analysis using Hugging Face `ClapModel`/`AutoProcessor` APIs.
+- Added a persistent/cached shared audio-visual concept basis spanning mood, motion, visual world, texture, palette and cinematography.
+- Added uncertainty-aware CLAP concept distributions and per-section semantic confidence/entropy.
+- Added CLAP↔OpenCLIP cross-modal scene scoring through a common text-concept basis rather than invalid direct embedding comparison.
+- Audio-semantic concepts now enrich SceneIntent retrieval queries and scene ranking.
+- Added deterministic semantic section direction for desired motion, complexity, edit density, transition continuity, target hue, effect family, vector intensity and codec intensity.
+- AI-directed edit density is quantized onto the existing beat grid so semantic AI cannot destroy musical timing.
+- Added optional whole-song OpenAI-compatible LLM direction that plans themes/treatment only while tubeviz retains clip selection and exact timing authority.
+- LLM plans are schema-validated, cached, blended against the deterministic CLAP baseline and confidence-gated when audio semantics are ambiguous.
+- Added `tubeviz audio-ai doctor` and `tubeviz audio-ai inspect`.
+- Added `--audio-ai`, CLAP model/device/window/hop/cache controls, `--audio-visual-match-weight`, and whole-song `--ai-director-*` controls.
+- Added Studio Audio AI controls and Audio AI Doctor.
+- Added timeline persistence for CLAP windows, section semantic distributions and section-level AI direction metadata.
+
+## 0.25.0
+
+### Added
+
+- Added a first-class FFglitch codec-space effect subsystem using `ffedit` motion-vector transplication.
+- Added controlled MPEG-4 Part 2 AVI preparation encodes so codec behavior is independent of the original YouTube codec/container.
+- Added deterministic QuickJS motion-vector effects: drift, wave, shear, explode, implode, spiral, jitter, freeze, feedback, invert, radial wave, and datamosh-style prediction amplification.
+- Added Visual Director codec modes: `off`, `subtle`, `musical`, and `aggressive`, plus independent intensity control.
+- Added sparse narrative-aware scheduling so codec effects favor builds, mutations, fractured sections, drops and payoffs instead of continuously corrupting footage.
+- Added `tubeviz codec doctor`, `tubeviz codec inspect`, and `tubeviz codec materialize`.
+- Added `tubeviz library codec-motion-index` using FFglitch's motion-vector JSON export mode.
+- Codec-motion magnitude, direction, peaks and accents now augment scene motion matching and beat-to-visual-accent alignment when indexed.
+- Added deterministic `library/codec-glitch/` caching with source/range/effect/toolchain provenance sidecars and atomic final writes.
+- Codec-materialized selections preserve original source/range provenance so forced rebuilds never recursively glitch prior cache assets.
+- Added `/codec-glitch` media serving and native media-path resolution for materialized codec assets.
+- Added browser/native raster fallback cues when a timeline contains codec effects that have not yet been materialized.
+- Added `tubeviz render --codec-materialize` and `tubeviz serve --codec-materialize` for one-command true codec-space final rendering/preview.
+- Added Studio codec controls, FFglitch Doctor, Codec Motion Index, explicit codec materialization, and preview/final-render materialization toggles.
+
+## 0.24.1
+
+### Fixed
+
+- Fixed Studio **Start Preview** reopening an older preview/timeline when the previous preview server was still listening on the fixed port.
+- Studio now terminates earlier Studio-managed preview jobs and allocates a fresh local port for each preview launch.
+- Preview navigation waits for the new Uvicorn process to reach startup instead of using a fixed 1.2 second delay.
+- Preview job metadata records the exact selected timeline, audio, library, and URL.
+- `/api/status` now reports the timeline and audio loaded by the current visualizer server.
+
 ## 0.24.0
 
 ### Changed

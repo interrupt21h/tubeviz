@@ -4,7 +4,7 @@
 
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.24.0**
+Current version: **0.26.2**
 
 ## Architecture
 
@@ -71,6 +71,30 @@ flowchart TD
 - Chrome/Chromium + Playwright only for the browser/offline-browser renderer
 - CMake, a C++20 compiler, pkg-config, and FFmpeg development libraries for the native renderer
 - OpenCLIP dependencies only when semantic/AI visual selection is wanted
+- FFglitch **0.10.2** `ffedit` only for true codec-space motion-vector effects; `fflive` and `ffgac` are optional and not required by tubeviz
+
+System packages used by the full feature set:
+
+**Arch Linux / CachyOS:**
+
+```bash
+sudo pacman -S --needed \
+  base-devel cmake pkgconf ffmpeg curl unzip chromium
+```
+
+**Debian / Ubuntu:**
+
+```bash
+sudo apt install \
+  build-essential cmake pkg-config ffmpeg curl unzip chromium \
+  libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
+```
+
+`chromium` is only required when you want browser preview/offline browser
+rendering and do not use Playwright's downloaded browser. CMake/compiler and
+FFmpeg development headers are only required to build the native C++ renderer.
+FFglitch is installed separately below because it is not normally provided by
+tubeviz or Python packaging.
 
 Install the base project:
 
@@ -100,6 +124,102 @@ Verify:
 tubeviz --help
 ffmpeg -version
 ```
+
+### FFglitch installation
+
+FFglitch is **not** a Python dependency and is not installed by `pip`. tubeviz
+uses the external `ffedit` executable for true codec-space motion-vector
+materialization. The supported/recommended release is **FFglitch 0.10.2**.
+FFglitch's official documentation identifies `ffedit` as the main multimedia
+bitstream editor; `fflive` is for live playback/glitching and `ffgac` is an
+FFmpeg variant with extra glitch-oriented functionality. tubeviz only requires
+`ffedit`.
+
+#### Linux x86-64
+
+The official prebuilt archive is:
+
+```text
+https://ffglitch.org/pub/bin/linux64/ffglitch-0.10.2-linux-x86_64.zip
+```
+
+A user-local installation that does not modify `/usr/local`:
+
+```bash
+mkdir -p ~/.local/bin
+tmpdir="$(mktemp -d)"
+curl -L \
+  https://ffglitch.org/pub/bin/linux64/ffglitch-0.10.2-linux-x86_64.zip \
+  -o "$tmpdir/ffglitch.zip"
+unzip -q "$tmpdir/ffglitch.zip" -d "$tmpdir/unpacked"
+install -m 0755 \
+  "$(find "$tmpdir/unpacked" -type f -name ffedit -print -quit)" \
+  ~/.local/bin/ffedit
+rm -rf "$tmpdir"
+
+# Ensure ~/.local/bin is on PATH for this shell/session.
+export PATH="$HOME/.local/bin:$PATH"
+
+ffedit -h | head -40
+tubeviz codec doctor
+```
+
+If you also want FFglitch's optional tools, locate them in the same extracted
+archive and install them similarly:
+
+```bash
+# Optional; tubeviz does not require these.
+install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name fflive -print -quit)" ~/.local/bin/fflive
+install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name ffgac -print -quit)" ~/.local/bin/ffgac
+```
+
+#### Linux aarch64
+
+FFglitch also publishes an official Linux aarch64 archive:
+
+```text
+https://ffglitch.org/pub/bin/linux-aarch64/ffglitch-0.10.2-linux-aarch64.7z
+```
+
+Extract it with `7z`, copy `ffedit` to a directory on `PATH`, and verify with
+`tubeviz codec doctor`.
+
+#### macOS and Windows
+
+Official FFglitch 0.10.2 archives are also published for macOS x86-64, macOS
+aarch64/Apple silicon, and Windows x86-64. Install `ffedit` from the appropriate
+archive and ensure the executable is on `PATH` before starting tubeviz. See the
+FFglitch Download page for the current official archive links.
+
+#### What tubeviz does with FFglitch
+
+tubeviz does **not** send arbitrary YouTube/H.264/WebM files directly to
+`ffedit`. FFglitch features are codec-specific. tubeviz first prepares a short,
+controlled MPEG-4 Part 2 working asset, runs scripted `ffedit` motion-vector
+transplication, and then converts the result back to an ordinary cached MP4.
+This is why both ordinary FFmpeg **and** FFglitch `ffedit` are required for true
+codec effects.
+
+```mermaid
+flowchart LR
+    SRC["Selected source excerpt"] --> PREP["FFmpeg: MPEG-4 Part 2 working AVI"]
+    PREP --> FFEDIT["FFglitch ffedit: motion-vector script"]
+    FFEDIT --> GLITCH["Transplicated working stream"]
+    GLITCH --> ENCODE["FFmpeg: cached H.264 MP4"]
+    ENCODE --> RENDER["Browser/native tubeviz renderer"]
+```
+
+Useful diagnostics:
+
+```bash
+command -v ffedit
+ffedit -h | head -40
+tubeviz codec doctor
+```
+
+If `tubeviz codec doctor` reports that FFglitch is unavailable, ordinary
+analysis, preview, vector effects, and rendering still work; only true
+FFglitch materialization is unavailable.
 
 ## Quick start: Studio GUI
 
@@ -469,6 +589,37 @@ Use `--force` to regenerate cached transforms.
 
 Materialization is optional; the current renderers do not require it for all effects.
 
+### Native source layout
+
+The native renderer has **one canonical source tree**:
+
+```text
+src/tubeviz/native_src/
+├── CMakeLists.txt
+├── include/tubeviz/
+├── src/
+└── shaders/
+```
+
+Older tubeviz source archives contained an identical second copy at top-level
+`native/`. That duplication has been removed. Keeping the canonical C++ source
+inside the Python package means editable installs and built wheels compile the
+exact same renderer sources, eliminating drift between checkout and packaged
+code.
+
+Manual CMake builds now use:
+
+```bash
+cmake -S src/tubeviz/native_src -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native -j
+```
+
+Normally prefer the wrapper command:
+
+```bash
+tubeviz native build --clean
+```
+
 ### 7. Build and inspect the native renderer
 
 Inspect availability:
@@ -817,6 +968,158 @@ arc rather than simple clip repetition.
 
 
 
+## Audio-semantic AI choreography
+
+v0.26 adds a second AI layer above tubeviz's deterministic rhythm, variable-BPM,
+visual-fingerprint and motif systems. It uses CLAP to interpret overlapping
+windows of the actual music, projects those audio semantics onto the same
+curated concept vocabulary used to interrogate OpenCLIP scene embeddings, and
+then lets the existing optimizer choose real library footage.
+
+```mermaid
+flowchart TD
+    AUDIO["Audio"] --> DSP["Beat / BPM / sections / timbre"]
+    AUDIO --> CLAP["CLAP sliding-window embeddings"]
+    CLAP --> ACONCEPT["Audio concept distribution"]
+    SCENES["OpenCLIP scene embeddings"] --> VCONCEPT["Scene concept distribution"]
+    ACONCEPT --> BRIDGE["Common semantic concept basis"]
+    VCONCEPT --> BRIDGE
+    DSP --> DIRECTOR["Deterministic semantic director"]
+    ACONCEPT --> DIRECTOR
+    BRIDGE --> SELECT["Scene optimizer"]
+    DIRECTOR --> SELECT
+    LLM["Optional whole-song LLM director"] --> DIRECTOR
+    SELECT --> RHYTHM["Visual-accent / beat alignment"]
+    RHYTHM --> FX["Color / vector / codec choreography"]
+```
+
+Install the optional runtime:
+
+```bash
+pip install -e '.[semantic,audio-ai,render]'
+```
+
+Check CUDA/Transformers availability:
+
+```bash
+tubeviz audio-ai doctor
+```
+
+After analysis, inspect what the model heard and how each section was directed:
+
+```bash
+tubeviz audio-ai inspect timelines/connected-ai.json
+```
+
+A recommended AI-directed analysis is:
+
+```bash
+tubeviz analyze audio/connected.mp3 \
+  --library ./library \
+  --semantic \
+  --semantic-device cuda \
+  --audio-ai \
+  --audio-ai-device cuda \
+  --audio-ai-window 8 \
+  --audio-ai-hop 4 \
+  --audio-visual-match-weight 1.10 \
+  --visual-match-weight 1.35 \
+  --transition-weight .55 \
+  --rhythm-alignment \
+  --vector-intensity .65 \
+  --transform-intensity .85 \
+  --composition-intensity .75 \
+  --min-shot-seconds 1.0 \
+  --max-shot-seconds 6 \
+  --reshuffle \
+  --output timelines/connected-ai.json
+```
+
+CLAP analysis defaults to `laion/clap-htsat-fused`. Audio is resampled to
+48 kHz and analyzed in overlapping windows. The result is cached under
+`~/.cache/tubeviz/audio-ai/`, so alternate reshuffles do not repeatedly run the
+model unless `--audio-ai-force` is supplied.
+
+Each window and musical section receives a probability distribution over a
+shared audio/visual concept basis including mood, movement, visual world,
+texture, palette and cinematography concepts such as `hypnotic`, `industrial`,
+`forward_motion`, `rave`, `cold_blue`, `liquid`, `architecture`, `wide`, and
+`fragmented`.
+
+The cross-modal match intentionally does **not** cosine CLAP vectors directly
+against OpenCLIP vectors; those models have different embedding spaces. Instead:
+
+```text
+CLAP(audio)      -> scores over shared text concepts
+OpenCLIP(scene)  -> scores over the same text concepts
+                           ↓
+                distribution affinity
+```
+
+That affinity is weighted by CLAP confidence. High-entropy/ambiguous audio
+semantics therefore have less power to override the deterministic visual and
+rhythm matchers.
+
+The semantic director also turns CLAP results into section-level targets for:
+
+```text
+visual world
+motion style / desired motion
+visual complexity
+edit density
+transition continuity vs contrast
+palette / target hue
+effect family
+vector intensity
+codec-glitch intensity
+```
+
+Edit density is quantized back onto musical beat counts, so AI can ask for a
+more urgent or spacious montage but cannot move cuts off the beat grid.
+
+### Optional whole-song LLM director
+
+For a higher-level narrative arc, tubeviz can send a compact section summary to
+any OpenAI-compatible chat-completions endpoint. The model is explicitly asked
+for themes and treatment only: it cannot select filenames, clip IDs, or exact
+cut times.
+
+```bash
+tubeviz analyze audio/connected.mp3 \
+  --library ./library \
+  --semantic \
+  --audio-ai \
+  --ai-director \
+  --ai-director-base-url http://localhost:8000/v1 \
+  --ai-director-model my-local-model \
+  --ai-director-strength .70 \
+  --output timelines/connected-ai-directed.json
+```
+
+If authentication is required:
+
+```bash
+--ai-director-api-key "$OPENAI_API_KEY"
+```
+
+The returned JSON is schema-validated and unknown fields are discarded. The
+LLM plan is blended with the deterministic CLAP baseline; low CLAP confidence
+reduces how strongly the language model may redirect a section. Plans are
+cached under `~/.cache/tubeviz/ai-director/`.
+
+Conceptually the authority split is:
+
+```text
+LLM / CLAP:     what should this passage feel and look like?
+tubeviz:        which actual library scenes best satisfy that intent?
+rhythm engine:  exactly where should cuts and accents land?
+renderer:       how should pixels, vectors and codec effects execute it?
+```
+
+Studio exposes CLAP enable/device/window/hop settings, audio-to-visual match
+weight, optional whole-song director URL/model/strength, and an **Audio AI
+Doctor** action.
+
 ## Vector scene graph and procedural motion graphics
 
 v0.22 adds a first-class vector scene graph to every directed shot. Vector
@@ -953,6 +1256,244 @@ strength, color, and mutation evolve with the musical callback. The vector
 system can function as a persistent visual alphabet instead of unrelated
 generative shapes.
 
+
+
+
+## FFglitch codec-space effects
+
+v0.25 adds a separate **codec-space** effect domain powered by FFglitch. This is
+intentionally different from tubeviz's raster glitches, vector geometry, and
+optical-flow displacement. FFglitch modifies prediction/motion-vector structures
+inside a supported compressed video stream, which produces true codec artifacts
+that ordinary pixel filters only imitate.
+
+FFglitch 0.10.2 documents `ffedit` as its bitstream editor and exposes MPEG-4
+Part 2 features including `mv`, `mv_delta`, and macroblock information. tubeviz
+therefore never assumes that arbitrary downloaded H.264/WebM clips are directly
+editable. It first creates a controlled short MPEG-4 Part 2 AVI working stream,
+transplicates that stream with `ffedit`, then converts the result back to a normal
+H.264 MP4 cache asset for the browser/native renderers.
+
+```mermaid
+flowchart LR
+    SRC["Selected tubeviz shot"] --> PREP["FFmpeg preparation encode\nMPEG-4 Part 2 / AVI\ncontrolled GOP"]
+    PREP --> FFEDIT["ffedit -f mv\nQuickJS motion-vector script"]
+    MUSIC["Visual Director\nbeat + vibe + role + motion"] --> PLAN["CodecEffect plan"]
+    PLAN --> FFEDIT
+    FFEDIT --> MOSH["Transplicated AVI"]
+    MOSH --> FINAL["FFmpeg H.264 MP4\ncodec-glitch cache"]
+    FINAL --> BROWSER["Browser renderer"]
+    FINAL --> NATIVE["Native renderer"]
+```
+
+### Availability
+
+Check the local toolchain:
+
+```bash
+tubeviz codec doctor
+```
+
+The normal successful state is roughly:
+
+```text
+available: true
+ffedit: /path/to/ffedit
+ffedit_version: ffglitch-0.10.2 ...
+ffmpeg: /usr/bin/ffmpeg
+ffgac: optional
+working_codec: mpeg4
+```
+
+`ffgac` is detected and reported but the materialization path deliberately uses
+standard FFmpeg for the controlled preparation/final conversion and `ffedit` for
+the actual bitstream manipulation.
+
+### Scheduling codec effects
+
+Codec effects are **opt-in** during analysis because they are strongest when used
+sparingly:
+
+```bash
+tubeviz analyze song.mp3 \
+  --library ./library \
+  --semantic \
+  --codec-glitch musical \
+  --codec-glitch-intensity .65 \
+  --output song.codec-plan.json
+```
+
+Modes:
+
+| Mode | Behavior |
+|---|---|
+| `off` | no codec-space effects; default |
+| `subtle` | only restrained build/impact accents |
+| `musical` | sparse build, mutation, fractured and payoff effects |
+| `aggressive` | broader codec treatment across energetic passages |
+
+The Visual Director currently schedules a compact vocabulary of true motion-vector
+operations:
+
+```text
+mv_drift
+mv_wave
+mv_shear
+mv_explode
+mv_implode
+mv_spiral
+mv_jitter
+mv_freeze
+mv_feedback
+mv_invert
+mv_radial_wave
+datamosh
+```
+
+A shot is capped at a small codec-effect vocabulary (normally one or two effects)
+so the codec treatment remains a punctuation/transition device instead of
+constant visual noise.
+
+Inspect the exact plan before materializing:
+
+```bash
+tubeviz codec inspect song.codec-plan.json
+```
+
+JSON output:
+
+```bash
+tubeviz codec inspect song.codec-plan.json --json
+```
+
+### True FFglitch materialization
+
+Bake scheduled codec effects into deterministic cached shot assets:
+
+```bash
+tubeviz codec materialize song.codec-plan.json \
+  --library ./library \
+  --output song.codec.json
+```
+
+Important tuning controls:
+
+```text
+--qscale 3       MPEG-4 preparation quality
+--gop 18         preparation GOP length
+--fps 30         preparation frame rate
+--width 1280
+--height 720
+--threads 0      ffedit automatic threading
+--crf 18         final cached H.264 quality
+--preset fast
+--force          rebuild cached codec assets
+```
+
+The cache lives under:
+
+```text
+library/codec-glitch/
+```
+
+Each materialized MP4 also has a JSON provenance sidecar containing the source,
+source range, FFglitch version, effect plan, preparation codec/GOP/quality, and
+cache key. Cache keys include source file identity, selected range, effect plan,
+and working/output parameters. Final files are written atomically so an aborted
+materialization cannot be mistaken for a completed cache entry.
+
+The materialized timeline keeps the original source media/range in
+`codec_materialization`, so `--force` can regenerate from the original footage
+instead of recursively glitching a previously glitched cache file.
+
+### Render or preview in one command
+
+Final rendering can materialize codec effects automatically:
+
+```bash
+tubeviz render song.codec-plan.json \
+  --audio song.mp3 \
+  --library ./library \
+  --backend native \
+  --codec-materialize \
+  --output song-viz.mp4
+```
+
+The generated codec-materialized timeline is retained beside the output video by
+default, making the render reproducible.
+
+Browser preview can also materialize first:
+
+```bash
+tubeviz serve song.codec-plan.json \
+  --audio song.mp3 \
+  --library ./library \
+  --codec-materialize
+```
+
+Without materialization, browser/native renderers use musically equivalent raster
+fallbacks for the scheduled codec effects. This makes planning immediately
+previewable while reserving the genuinely different codec artifacts for the
+FFglitch materialization step.
+
+### Codec motion as a scene-selection feature
+
+FFglitch can export motion-vector JSON. tubeviz can use that as an optional second
+motion-analysis source alongside decoded-image temporal analysis:
+
+```bash
+tubeviz library codec-motion-index \
+  --library ./library
+```
+
+Force a rebuild:
+
+```bash
+tubeviz library codec-motion-index \
+  --library ./library \
+  --force
+```
+
+The persisted scene fingerprint gains:
+
+```text
+codec_motion
+codec_motion_peak
+codec_motion_direction_x
+codec_motion_direction_y
+codec_motion_accents
+codec_motion_frames
+```
+
+Scene matching blends codec motion with the existing visual-motion estimate when
+available. Natural codec-motion peaks are also merged into beat-to-visual-accent
+alignment, helping source-offset/playback-rate search find moments where encoded
+camera/object motion naturally lands on the music.
+
+### Studio
+
+Studio exposes:
+
+```text
+Codec glitch mode
+Codec intensity
+Materialize true FFglitch effects for browser preview
+Materialize scheduled FFglitch effects before final render
+FFglitch Doctor
+Materialize Codec FX
+Codec Motion Index
+```
+
+A productive workflow is:
+
+```text
+1. codec doctor
+2. optionally build Codec Motion Index once
+3. Analyze with codec-glitch=musical
+4. preview using raster fallbacks while editing
+5. enable FFglitch materialization for a high-fidelity preview
+6. final render with codec materialization enabled
+```
 
 
 ## Visual clip trimming in Studio
@@ -1170,6 +1711,25 @@ tubeviz render song.timeline.json \
 
 This encourages many distinct clips while using only short, musically appropriate excerpts rather than exhausting each selected source sequentially.
 
+
+## Studio preview selection
+
+Studio preview servers are managed per launch. Clicking **Start Preview** now:
+
+1. reads the current Timeline, Audio, and Library fields from Studio;
+2. retires the previous Studio-managed preview process;
+3. allocates a fresh local TCP port;
+4. starts `tubeviz serve` with the currently selected paths; and
+5. waits for Uvicorn startup before navigating the reusable preview tab.
+
+This avoids reopening a stale in-memory timeline from an older preview server
+that was still bound to the historical fixed port `8080`. Studio subprocesses
+also run with `--project-root` as their working directory, so relative Timeline,
+Audio, and Library paths resolve against the project selected in Studio. The preview job
+payload records `preview_timeline`, `preview_audio`, `preview_library`, and
+`preview_url`, and `/api/status` reports the timeline/audio currently loaded by
+the visualizer server for diagnostics.
+
 ## Troubleshooting
 
 ### YouTube 403 / Forbidden
@@ -1257,10 +1817,16 @@ tubeviz library delete --help
 tubeviz library stats --help
 tubeviz library ai-report --help
 tubeviz library visual-index --help
+tubeviz library codec-motion-index --help
 tubeviz library embed --help
 tubeviz analyze --help
 tubeviz materialize --help
 tubeviz render --help
+tubeviz codec doctor --help
+tubeviz audio-ai doctor --help
+tubeviz audio-ai inspect --help
+tubeviz codec inspect --help
+tubeviz codec materialize --help
 tubeviz native build --help
 tubeviz native doctor --help
 tubeviz gui --help
@@ -1276,6 +1842,8 @@ Top-level commands:
 | `tubeviz analyze` | Analyze music and produce the directed timeline |
 | `tubeviz materialize` | Bake selected source transforms into cached media |
 | `tubeviz render` | Render final video with native/browser/auto backend |
+| `tubeviz codec` | Inspect, materialize and diagnose FFglitch codec-space effects |
+| `tubeviz audio-ai` | Diagnose and inspect CLAP/AI choreography metadata |
 | `tubeviz native` | Build or diagnose the native renderer |
 | `tubeviz gui` | Launch Studio |
 | `tubeviz serve` | Run the interactive visualizer/preview server |
@@ -1300,6 +1868,29 @@ Native build diagnostics:
 ```bash
 tubeviz native doctor
 ```
+
+## License
+
+tubeviz is licensed under the **Apache License, Version 2.0**. See
+[LICENSE](LICENSE) for the complete license text and [NOTICE](NOTICE) for
+project notices. Source files use the SPDX identifier:
+
+```text
+SPDX-License-Identifier: Apache-2.0
+```
+
+### Third-party software, models, and media
+
+The Apache-2.0 license applies to the **tubeviz software itself**. It does not
+grant rights to third-party videos, audio, model weights, downloaded media, or
+external tools used with tubeviz. In particular, FFmpeg, yt-dlp, FFglitch,
+OpenCLIP, CLAP/Transformers models, PyTorch, Playwright/Chromium, and other
+dependencies retain their own licenses and terms. tubeviz does not redistribute
+FFglitch binaries.
+
+Users are responsible for ensuring that media they download, import, transform,
+or distribute with tubeviz is used consistently with applicable copyright law,
+licenses, platform terms, and other requirements.
 
 ## Version history
 

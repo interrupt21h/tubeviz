@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from tubeviz.library import SceneCandidate
 from tubeviz.models import Section
 from tubeviz.visual_director import build_visual_direction

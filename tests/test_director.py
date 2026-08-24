@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from tubeviz.director import direct
 from tubeviz.models import EventType, MusicalEvent, TrackAnalysis
 

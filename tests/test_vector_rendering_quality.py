@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
 
@@ -23,7 +24,7 @@ def test_director_limits_visible_vector_stacking():
 
 
 def test_native_contours_are_component_paths_not_tangent_hairs():
-    source = Path("native/src/effects.cpp").read_text()
+    source = Path("src/tubeviz/native_src/src/effects.cpp").read_text()
     assert "struct Component" in source
     assert "components.push_back" in source
     assert "std::vector<std::pair<int,int>> path" in source

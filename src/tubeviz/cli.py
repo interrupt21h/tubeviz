@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import argparse
@@ -30,9 +31,19 @@ from .native_render import (
 )
 from .youtube import YouTubeSource
 from .visual_features import VisualFeatureConfig, index_scene_visual_features
+from .audio_ai import AudioAIConfig, attach_audio_semantics, audio_ai_doctor
+from .ai_music_director import AIDirectorConfig, attach_llm_directions, attach_semantic_directions
+from .codec_glitch import (
+    CodecGlitchConfig, CodecGlitchError, codec_doctor,
+    index_codec_motion_features, materialize_codec_timeline,
+)
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
+    if getattr(args, "ai_director", False) and not getattr(args, "audio_ai", False):
+        raise SystemExit("--ai-director requires --audio-ai so the whole-song plan is grounded in CLAP audio semantics")
+    if getattr(args, "ai_director", False) and (not args.ai_director_base_url or not args.ai_director_model):
+        raise SystemExit("--ai-director requires --ai-director-base-url and --ai-director-model")
     analysis = analyze_track(
         args.audio,
         AnalysisConfig(
@@ -51,6 +62,37 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             tempo_octave_max=args.tempo_octave_max,
         ),
     )
+    if getattr(args, "audio_ai", False):
+        analysis = attach_audio_semantics(
+            analysis,
+            args.audio,
+            config=AudioAIConfig(
+                model=args.audio_ai_model,
+                device=args.audio_ai_device,
+                window_seconds=args.audio_ai_window,
+                hop_seconds=args.audio_ai_hop,
+                batch_size=args.audio_ai_batch_size,
+                temperature=args.audio_ai_temperature,
+                cache_dir=args.audio_ai_cache_dir,
+                force=args.audio_ai_force,
+            ),
+        )
+        # CLAP semantics always get a deterministic section-level direction.
+        analysis = attach_semantic_directions(analysis)
+        if getattr(args, "ai_director", False):
+            analysis = attach_llm_directions(
+                analysis,
+                config=AIDirectorConfig(
+                    enabled=True,
+                    base_url=args.ai_director_base_url,
+                    model=args.ai_director_model,
+                    api_key=args.ai_director_api_key,
+                    timeout=args.ai_director_timeout,
+                    cache_dir=args.ai_director_cache_dir,
+                    force=args.ai_director_force,
+                    semantic_strength=args.ai_director_strength,
+                ),
+            )
     timeline = direct(analysis)
     if args.library:
         library = ClipLibrary(args.library)
@@ -80,6 +122,10 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     }
     for selection in timeline.scene_plan:
         all_source_ids.update(layer.clip_id for layer in selection.layers)
+    codec_shots = sum(bool(selection.direction.codec_effects) for selection in timeline.scene_plan)
+    codec_effects = sum(len(selection.direction.codec_effects) for selection in timeline.scene_plan)
+    audio_ai_sections = sum(bool(section.audio_semantics) for section in analysis.sections)
+    ai_directed_sections = sum(section.ai_direction is not None for section in analysis.sections)
     print(
         f"Wrote {output}: "
         f"{analysis.duration:.1f}s, {tempo_summary}, "
@@ -87,6 +133,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         f"{len(timeline.motifs)} recurring motifs, "
         f"{len(timeline.scene_plan)} planned shots, "
         f"{unique_sources} unique primary clips/{len(all_source_ids)} including companions, "
+        f"codec_fx={codec_effects} across {codec_shots} shots, "
+        f"audio_ai_sections={audio_ai_sections} ai_directed_sections={ai_directed_sections}, "
         f"vibes={','.join(vibes) if vibes else '-'}"
     )
 
@@ -416,6 +464,9 @@ def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
         visual_auto_index=getattr(args, "visual_auto_index", True),
         vector_effects=getattr(args, "vector_effects", True),
         vector_intensity=max(0.0, getattr(args, "vector_intensity", 1.0)),
+        codec_glitch_mode=getattr(args, "codec_glitch", "off"),
+        codec_glitch_intensity=max(0.0, getattr(args, "codec_glitch_intensity", 0.65)),
+        audio_visual_match_weight=max(0.0, getattr(args, "audio_visual_match_weight", 1.10)),
     )
 
 
@@ -442,6 +493,31 @@ def _cmd_materialize(args: argparse.Namespace) -> None:
     print(f"Wrote {output}: materialized={materialized} cached_dir={library.root / 'transforms'}")
 
 def _cmd_render(args: argparse.Namespace) -> None:
+    render_timeline_path = args.timeline
+    if getattr(args, "codec_materialize", False):
+        source_path = Path(args.timeline).expanduser().resolve()
+        source_timeline = DirectedTimeline.model_validate_json(source_path.read_text())
+        library = ClipLibrary(args.library)
+        library.initialize()
+        try:
+            source_timeline = materialize_codec_timeline(
+                source_timeline, library_root=library.root,
+                config=CodecGlitchConfig(
+                    ffedit=args.codec_ffedit, ffmpeg=args.codec_ffmpeg,
+                    width=args.codec_width, height=args.codec_height, fps=args.codec_fps,
+                    qscale=args.codec_qscale, gop=args.codec_gop, threads=args.codec_threads,
+                    output_crf=args.codec_crf, output_preset=args.codec_preset,
+                ),
+                force=args.codec_force,
+            )
+        except CodecGlitchError as exc:
+            raise SystemExit(f"codec materialize failed: {exc}") from exc
+        codec_timeline = Path(args.codec_timeline_output).expanduser() if args.codec_timeline_output else Path(args.output).with_suffix(".codec.timeline.json")
+        codec_timeline.parent.mkdir(parents=True, exist_ok=True)
+        codec_timeline.write_text(source_timeline.model_dump_json(indent=2))
+        render_timeline_path = str(codec_timeline)
+        print(f"Codec-space timeline: {codec_timeline}")
+
     backend = args.backend
     if backend == "auto":
         backend = "native" if find_native_renderer(
@@ -452,7 +528,7 @@ def _cmd_render(args: argparse.Namespace) -> None:
     try:
         if backend == "native":
             output = render_timeline_native(
-                args.timeline,
+                render_timeline_path,
                 library_path=args.library,
                 audio_path=args.audio,
                 output_path=args.output,
@@ -476,7 +552,7 @@ def _cmd_render(args: argparse.Namespace) -> None:
             )
         else:
             output = render_timeline(
-                args.timeline,
+                render_timeline_path,
                 library_path=args.library,
                 audio_path=args.audio,
                 output_path=args.output,
@@ -504,6 +580,87 @@ def _cmd_render(args: argparse.Namespace) -> None:
     print(f"Render complete: {output}")
 
 
+def _codec_config_from_args(args: argparse.Namespace) -> CodecGlitchConfig:
+    return CodecGlitchConfig(
+        ffedit=getattr(args, "ffedit", "ffedit"),
+        ffmpeg=getattr(args, "ffmpeg", "ffmpeg"),
+        ffgac=getattr(args, "ffgac", None),
+        width=getattr(args, "width", 1280),
+        height=getattr(args, "height", 720),
+        fps=float(getattr(args, "fps", 30.0)),
+        qscale=getattr(args, "qscale", 3),
+        gop=getattr(args, "gop", 18),
+        threads=getattr(args, "threads", 0),
+        output_crf=getattr(args, "crf", 18),
+        output_preset=getattr(args, "preset", "fast"),
+    )
+
+
+def _cmd_codec_doctor(args: argparse.Namespace) -> None:
+    print(json.dumps(codec_doctor(_codec_config_from_args(args)), indent=2))
+
+
+def _cmd_codec_inspect(args: argparse.Namespace) -> None:
+    timeline = DirectedTimeline.model_validate_json(Path(args.timeline).expanduser().read_text())
+    rows = []
+    for selection in timeline.scene_plan:
+        if not selection.direction.codec_effects:
+            continue
+        rows.append({
+            "time": selection.time, "source_id": selection.source_id,
+            "title": selection.title, "role": selection.direction.narrative_role,
+            "family": selection.direction.effect_family,
+            "materialized": selection.codec_materialization.materialized,
+            "effects": [e.model_dump(mode="json") for e in selection.direction.codec_effects],
+        })
+    if args.json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("No codec-space effects scheduled in this timeline.")
+        return
+    print("TIME     ROLE      FAMILY      MATERIALIZED  SOURCE          CODEC EFFECTS")
+    for row in rows:
+        effects = ", ".join(f"{e['kind']}:{e['amount']:.2f}@{e['start']:.2f}-{e['end']:.2f}" for e in row["effects"])
+        print(f"{row['time']:7.2f}  {row['role'][:9]:9} {row['family'][:10]:10} {str(row['materialized']):12}  {row['source_id'][:14]:14}  {effects}")
+
+
+def _cmd_codec_materialize(args: argparse.Namespace) -> None:
+    timeline_path = Path(args.timeline).expanduser().resolve()
+    timeline = DirectedTimeline.model_validate_json(timeline_path.read_text())
+    library = ClipLibrary(args.library)
+    library.initialize()
+    try:
+        rendered = materialize_codec_timeline(
+            timeline, library_root=library.root, config=_codec_config_from_args(args),
+            force=args.force,
+        )
+    except CodecGlitchError as exc:
+        raise SystemExit(f"codec materialize failed: {exc}") from exc
+    output = Path(args.output).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(rendered.model_dump_json(indent=2))
+    count = sum(s.codec_materialization.materialized for s in rendered.scene_plan)
+    print(f"Wrote {output}: codec_materialized={count} cache={library.root / 'codec-glitch'}")
+
+
+def _cmd_library_codec_motion(args: argparse.Namespace) -> None:
+    library = ClipLibrary(args.library)
+    library.initialize()
+    try:
+        count = index_codec_motion_features(
+            library, clip_id=args.clip_id, force=args.force,
+            config=CodecGlitchConfig(
+                ffedit=args.ffedit, ffmpeg=args.ffmpeg,
+                width=args.width, height=args.height, fps=args.fps,
+                qscale=args.qscale, gop=args.gop, threads=args.threads,
+            ),
+        )
+    except CodecGlitchError as exc:
+        raise SystemExit(f"codec-motion indexing failed: {exc}") from exc
+    print(f"Codec-motion features indexed: {count}")
+
+
 def _cmd_native_build(args: argparse.Namespace) -> None:
     try:
         binary = build_native_renderer(
@@ -527,9 +684,32 @@ def _cmd_native_doctor(args: argparse.Namespace) -> None:
 def _cmd_serve(args: argparse.Namespace) -> None:
     if (args.reshuffle or args.selection_seed) and not args.replan_scenes:
         raise SystemExit("--selection-seed/--reshuffle require --replan-scenes for serve")
+    serve_timeline_path = args.timeline
+    if getattr(args, "codec_materialize", False):
+        source_path = Path(args.timeline).expanduser().resolve()
+        timeline = DirectedTimeline.model_validate_json(source_path.read_text())
+        library = ClipLibrary(args.library or "./library")
+        library.initialize()
+        try:
+            timeline = materialize_codec_timeline(
+                timeline, library_root=library.root,
+                config=CodecGlitchConfig(
+                    ffedit=args.codec_ffedit, ffmpeg=args.codec_ffmpeg,
+                    width=args.codec_width, height=args.codec_height, fps=args.codec_fps,
+                    qscale=args.codec_qscale, gop=args.codec_gop, threads=args.codec_threads,
+                    output_crf=args.codec_crf, output_preset=args.codec_preset,
+                ),
+                force=args.codec_force,
+            )
+        except CodecGlitchError as exc:
+            raise SystemExit(f"codec preview materialize failed: {exc}") from exc
+        preview_path = source_path.with_name(source_path.stem + ".codec-preview.json")
+        preview_path.write_text(timeline.model_dump_json(indent=2))
+        serve_timeline_path = str(preview_path)
+        print(f"Codec preview timeline: {preview_path}")
     uvicorn.run(
         create_app(
-            args.timeline,
+            serve_timeline_path,
             args.audio,
             args.library,
             replan_scenes=args.replan_scenes,
@@ -550,6 +730,45 @@ def _cmd_gui(args: argparse.Namespace) -> None:
         url = f"http://{args.host}:{args.port}/"
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=args.host, port=args.port)
+
+
+def _cmd_audio_ai_doctor(args: argparse.Namespace) -> None:
+    print(json.dumps(audio_ai_doctor(args.model, args.device), indent=2, sort_keys=True))
+
+
+def _cmd_audio_ai_inspect(args: argparse.Namespace) -> None:
+    timeline = DirectedTimeline.model_validate_json(Path(args.timeline).expanduser().read_text())
+    rows = []
+    for section in timeline.track.sections:
+        top = sorted(section.audio_semantics.items(), key=lambda item: item[1], reverse=True)[:args.top]
+        rows.append({
+            "index": section.index, "start": section.start, "end": section.end,
+            "label": section.label, "vibe": section.vibe,
+            "confidence": section.audio_semantic_confidence,
+            "entropy": section.audio_semantic_entropy,
+            "concepts": top,
+            "direction": section.ai_direction.model_dump(mode="json") if section.ai_direction else None,
+        })
+    if args.json:
+        print(json.dumps({"model": timeline.track.audio_ai_model, "sections": rows}, indent=2))
+        return
+    print(f"Audio AI model: {timeline.track.audio_ai_model or '-'}")
+    for row in rows:
+        concepts = ", ".join(f"{key}:{value:.2f}" for key, value in row["concepts"]) or "-"
+        direction = row["direction"] or {}
+        print(
+            f"{row['index']:3d} {row['start']:7.2f}-{row['end']:7.2f}s "
+            f"conf={row['confidence']:.2f} H={row['entropy']:.2f} "
+            f"{row['label']}/{row['vibe']} | {concepts}"
+        )
+        if direction:
+            print(
+                f"    world={direction.get('visual_world','-')} "
+                f"motion={direction.get('desired_motion',0):.2f} "
+                f"edit={direction.get('edit_density',0):.2f} "
+                f"continuity={direction.get('continuity',0):.2f} "
+                f"fx={direction.get('effect_family') or '-'}"
+            )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -745,6 +964,23 @@ def build_parser() -> argparse.ArgumentParser:
     visual_index.add_argument("--force", action="store_true")
     visual_index.set_defaults(func=_cmd_library_visual_index)
 
+    codec_motion = library_sub.add_parser(
+        "codec-motion-index",
+        help="Index FFglitch MPEG-4 motion-vector statistics into scene fingerprints",
+    )
+    codec_motion.add_argument("--library", default="./library")
+    codec_motion.add_argument("--clip-id", type=int)
+    codec_motion.add_argument("--ffedit", default="ffedit")
+    codec_motion.add_argument("--ffmpeg", default="ffmpeg")
+    codec_motion.add_argument("--width", type=int, default=320)
+    codec_motion.add_argument("--height", type=int, default=180)
+    codec_motion.add_argument("--fps", type=float, default=12.0)
+    codec_motion.add_argument("--qscale", type=int, default=4)
+    codec_motion.add_argument("--gop", type=int, default=18)
+    codec_motion.add_argument("--threads", type=int, default=0)
+    codec_motion.add_argument("--force", action="store_true")
+    codec_motion.set_defaults(func=_cmd_library_codec_motion)
+
     embed = library_sub.add_parser(
         "embed",
         help="Index scene thumbnails with optional OpenCLIP visual embeddings",
@@ -756,6 +992,18 @@ def build_parser() -> argparse.ArgumentParser:
     embed.add_argument("--batch-size", type=int, default=32)
     embed.add_argument("--force", action="store_true")
     embed.set_defaults(func=_cmd_library_embed)
+
+    audio_ai = sub.add_parser("audio-ai", help="CLAP audio-semantic analysis tools")
+    audio_ai_sub = audio_ai.add_subparsers(dest="audio_ai_command", required=True)
+    audio_ai_doc = audio_ai_sub.add_parser("doctor", help="Inspect CLAP/Transformers runtime availability")
+    audio_ai_doc.add_argument("--model", default="laion/clap-htsat-fused")
+    audio_ai_doc.add_argument("--device", default="auto")
+    audio_ai_doc.set_defaults(func=_cmd_audio_ai_doctor)
+    audio_ai_inspect = audio_ai_sub.add_parser("inspect", help="Inspect CLAP semantics and AI direction stored in a timeline")
+    audio_ai_inspect.add_argument("timeline")
+    audio_ai_inspect.add_argument("--top", type=int, default=5)
+    audio_ai_inspect.add_argument("--json", action="store_true")
+    audio_ai_inspect.set_defaults(func=_cmd_audio_ai_inspect)
 
     analyze = sub.add_parser("analyze", help="Analyze an audio file and build a directed timeline")
     analyze.add_argument("audio")
@@ -781,6 +1029,24 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--semantic-model", default="ViT-B-32")
     analyze.add_argument("--semantic-pretrained", default="laion2b_s34b_b79k")
     analyze.add_argument("--semantic-device", default="auto")
+    analyze.add_argument("--audio-ai", action=argparse.BooleanOptionalAction, default=False, help="Use CLAP sliding-window audio semantics to direct scene selection and effects")
+    analyze.add_argument("--audio-ai-model", default="laion/clap-htsat-fused")
+    analyze.add_argument("--audio-ai-device", default="auto")
+    analyze.add_argument("--audio-ai-window", type=float, default=8.0, help="CLAP semantic analysis window in seconds")
+    analyze.add_argument("--audio-ai-hop", type=float, default=4.0, help="CLAP semantic analysis hop in seconds")
+    analyze.add_argument("--audio-ai-batch-size", type=int, default=8)
+    analyze.add_argument("--audio-ai-temperature", type=float, default=0.075, help="Concept-score softmax temperature")
+    analyze.add_argument("--audio-ai-cache-dir")
+    analyze.add_argument("--audio-ai-force", action="store_true", help="Ignore cached CLAP analysis")
+    analyze.add_argument("--audio-visual-match-weight", type=float, default=1.10, help="Weight CLAP↔OpenCLIP common-concept alignment in scene ranking")
+    analyze.add_argument("--ai-director", action=argparse.BooleanOptionalAction, default=False, help="Refine CLAP section directions with a whole-song OpenAI-compatible LLM plan")
+    analyze.add_argument("--ai-director-base-url", help="OpenAI-compatible base URL, e.g. http://localhost:8000/v1")
+    analyze.add_argument("--ai-director-model")
+    analyze.add_argument("--ai-director-api-key")
+    analyze.add_argument("--ai-director-timeout", type=float, default=90.0)
+    analyze.add_argument("--ai-director-cache-dir")
+    analyze.add_argument("--ai-director-force", action="store_true")
+    analyze.add_argument("--ai-director-strength", type=float, default=0.75, help="How strongly the whole-song LLM plan may alter the deterministic CLAP baseline")
     analyze.add_argument("--no-transforms", action="store_true", help="Disable per-scene video transform planning")
     analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Transform strength; 0 disables, 1 normal, up to 2 aggressive")
     analyze.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")
@@ -796,6 +1062,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--visual-auto-index", action=argparse.BooleanOptionalAction, default=True, help="Backfill missing scene visual fingerprints before planning")
     analyze.add_argument("--vector-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable vector scene-graph effects")
     analyze.add_argument("--vector-intensity", type=float, default=1.0, help="Global vector-effect strength; 0 disables, 1 normal, >1 aggressive")
+    analyze.add_argument("--codec-glitch", choices=("off", "subtle", "musical", "aggressive"), default="off", help="Schedule sparse FFglitch codec-space motion-vector effects")
+    analyze.add_argument("--codec-glitch-intensity", type=float, default=0.65, help="Codec-space effect strength; normally 0.35..1.0")
     analyze.add_argument("--novelty-candidate-fraction", type=float, default=0.30, help="Only explore unseen clips from this strongest semantic fraction of candidates")
     analyze.add_argument("--clip-reuse-cooldown", type=int, default=20, help="Primary/composite shot uses before a source clip is preferred again")
     analyze.add_argument("--scene-reuse-cooldown", type=int, default=48, help="Shot uses before an exact indexed scene is preferred again")
@@ -863,7 +1131,52 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--headed", action="store_true", help="Show the render browser for debugging")
     render.add_argument("--seed", type=int, default=0x51F15E, help="Deterministic offline FX seed")
     render.add_argument("--page-timeout", type=int, default=30, help="Browser operation timeout in seconds")
+    render.add_argument("--codec-materialize", action="store_true", help="Materialize scheduled FFglitch codec effects before rendering")
+    render.add_argument("--codec-timeline-output", help="Where to keep the materialized codec timeline; defaults beside output")
+    render.add_argument("--codec-ffedit", default="ffedit")
+    render.add_argument("--codec-ffmpeg", default="ffmpeg")
+    render.add_argument("--codec-width", type=int, default=1280)
+    render.add_argument("--codec-height", type=int, default=720)
+    render.add_argument("--codec-fps", type=float, default=30.0)
+    render.add_argument("--codec-qscale", type=int, default=3)
+    render.add_argument("--codec-gop", type=int, default=18)
+    render.add_argument("--codec-threads", type=int, default=0)
+    render.add_argument("--codec-crf", type=int, default=18)
+    render.add_argument("--codec-preset", default="fast")
+    render.add_argument("--codec-force", action="store_true")
     render.set_defaults(func=_cmd_render)
+
+    codec = sub.add_parser("codec", help="FFglitch codec-space effects and motion-vector tools")
+    codec_sub = codec.add_subparsers(dest="codec_command", required=True)
+
+    codec_doctor_cmd = codec_sub.add_parser("doctor", help="Inspect ffedit/ffmpeg/ffgac availability")
+    codec_doctor_cmd.add_argument("--ffedit", default="ffedit")
+    codec_doctor_cmd.add_argument("--ffmpeg", default="ffmpeg")
+    codec_doctor_cmd.add_argument("--ffgac")
+    codec_doctor_cmd.set_defaults(func=_cmd_codec_doctor)
+
+    codec_inspect = codec_sub.add_parser("inspect", help="Show the codec-space effect schedule embedded in a timeline")
+    codec_inspect.add_argument("timeline")
+    codec_inspect.add_argument("--json", action="store_true")
+    codec_inspect.set_defaults(func=_cmd_codec_inspect)
+
+    codec_mat = codec_sub.add_parser("materialize", help="Bake scheduled codec-space effects into cached MP4 shot assets")
+    codec_mat.add_argument("timeline")
+    codec_mat.add_argument("--library", default="./library")
+    codec_mat.add_argument("--output", "-o", default="timeline.codec.json")
+    codec_mat.add_argument("--ffedit", default="ffedit")
+    codec_mat.add_argument("--ffmpeg", default="ffmpeg")
+    codec_mat.add_argument("--ffgac")
+    codec_mat.add_argument("--width", type=int, default=1280)
+    codec_mat.add_argument("--height", type=int, default=720)
+    codec_mat.add_argument("--fps", type=float, default=30.0)
+    codec_mat.add_argument("--qscale", type=int, default=3)
+    codec_mat.add_argument("--gop", type=int, default=18)
+    codec_mat.add_argument("--threads", type=int, default=0)
+    codec_mat.add_argument("--crf", type=int, default=18)
+    codec_mat.add_argument("--preset", default="fast")
+    codec_mat.add_argument("--force", action="store_true")
+    codec_mat.set_defaults(func=_cmd_codec_materialize)
 
     native = sub.add_parser("native", help="Build and inspect the native C++ renderer")
     native_sub = native.add_subparsers(dest="native_command", required=True)
@@ -914,6 +1227,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--visual-auto-index", action=argparse.BooleanOptionalAction, default=True)
     serve.add_argument("--vector-effects", action=argparse.BooleanOptionalAction, default=True)
     serve.add_argument("--vector-intensity", type=float, default=1.0)
+    serve.add_argument("--codec-glitch", choices=("off", "subtle", "musical", "aggressive"), default="off")
+    serve.add_argument("--codec-glitch-intensity", type=float, default=0.65)
     serve.add_argument("--novelty-candidate-fraction", type=float, default=0.30)
     serve.add_argument("--clip-reuse-cooldown", type=int, default=20)
     serve.add_argument("--scene-reuse-cooldown", type=int, default=48)
@@ -921,6 +1236,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--min-shot-seconds", type=float, default=0.65)
     serve.add_argument("--max-shot-seconds", type=float, default=6.0)
     serve.add_argument("--source-excerpt-max-seconds", type=float, default=5.0)
+    serve.add_argument("--codec-materialize", action="store_true", help="Materialize scheduled FFglitch effects before starting preview")
+    serve.add_argument("--codec-ffedit", default="ffedit")
+    serve.add_argument("--codec-ffmpeg", default="ffmpeg")
+    serve.add_argument("--codec-width", type=int, default=1280)
+    serve.add_argument("--codec-height", type=int, default=720)
+    serve.add_argument("--codec-fps", type=float, default=30.0)
+    serve.add_argument("--codec-qscale", type=int, default=3)
+    serve.add_argument("--codec-gop", type=int, default=18)
+    serve.add_argument("--codec-threads", type=int, default=0)
+    serve.add_argument("--codec-crf", type=int, default=18)
+    serve.add_argument("--codec-preset", default="fast")
+    serve.add_argument("--codec-force", action="store_true")
     serve.add_argument("--replan-transforms", action="store_true", help="Recompute transform plans for an existing scene plan")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)

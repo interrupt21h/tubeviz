@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
 from tubeviz.cli import build_parser
@@ -25,7 +26,7 @@ def test_native_render_cli_exposes_performance_controls():
 
 
 def test_native_source_has_cached_frame_fast_path_and_lru():
-    root = Path("native")
+    root = Path("src/tubeviz/native_src")
     decoder = (root / "src/decoder.cpp").read_text()
     renderer = (root / "src/renderer.cpp").read_text()
     cmake = (root / "CMakeLists.txt").read_text()
@@ -38,21 +39,6 @@ def test_native_source_has_cached_frame_fast_path_and_lru():
     assert "warm_shot" in renderer
     assert "OpenMP" in cmake
     assert "#pragma omp parallel for" in effects
-
-
-def test_packaged_native_source_matches_checkout():
-    pairs = [
-        "CMakeLists.txt",
-        "src/decoder.cpp",
-        "src/effects.cpp",
-        "src/renderer.cpp",
-        "src/main.cpp",
-        "include/tubeviz/renderer.hpp",
-    ]
-    for relative in pairs:
-        assert (Path("native") / relative).read_text() == (
-            Path("src/tubeviz/native_src") / relative
-        ).read_text()
 
 
 def test_native_ffmpeg_default_uses_veryfast():

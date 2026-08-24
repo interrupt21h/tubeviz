@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import hashlib
@@ -9,6 +10,7 @@ from urllib.parse import quote
 import numpy as np
 
 from .library import ClipLibrary, SceneCandidate
+from .audio_ai import CONCEPT_KEYS, CONCEPT_PROMPTS, scene_audio_concept_alignment, top_audio_concepts
 from .models import CompositeLayer, DirectedTimeline, SceneIntent, SceneSelection, VisualCue
 from .transforms import TransformConfig, attach_transform_plan
 from .editing import EditConfig, attach_edit_plan
@@ -61,6 +63,9 @@ class SceneSelectorConfig:
     visual_auto_index: bool = True
     vector_effects: bool = True
     vector_intensity: float = 1.0
+    codec_glitch_mode: str = "off"
+    codec_glitch_intensity: float = 0.65
+    audio_visual_match_weight: float = 1.10
 
 
 _SECTION_DESCRIPTORS = {
@@ -334,7 +339,20 @@ def _choose_companions(
 
 
 def _beats_per_shot(section) -> int:
-    """Musically sensible shot density from section energy and vibe."""
+    """Musically sensible shot density from section energy, vibe, and AI arc."""
+    if section.ai_direction is not None:
+        density = section.ai_direction.edit_density
+        # Quantize the AI director onto musical beat counts so it can influence
+        # pacing without owning exact cut times.
+        if density >= .86:
+            return 1
+        if density >= .68:
+            return 2
+        if density >= .46:
+            return 4
+        if density >= .28:
+            return 6
+        return 8
     vibe = section.vibe
     if vibe in {"ambient", "hypnotic"} or section.label == "breakdown":
         return 8
@@ -478,6 +496,12 @@ def build_scene_plan(
             pretrained=cfg.semantic_pretrained,
         )
 
+    concept_text_embeddings: np.ndarray | None = None
+    if embedder is not None and any(section.audio_semantics for section in timeline.track.sections):
+        concept_text_embeddings = embedder.encode_text(
+            [CONCEPT_PROMPTS[key] for key in CONCEPT_KEYS]
+        )
+
     shot_ordinal = 0
     previous_primary: SceneCandidate | None = None
     for section in timeline.track.sections:
@@ -500,6 +524,12 @@ def build_scene_plan(
             vibe=section.vibe,
             local_tempo_bpm=section.local_tempo_bpm,
         )
+        if section.audio_semantics:
+            audio_words = [key.replace("_", " ") for key, _ in top_audio_concepts(section, 5)]
+            if audio_words:
+                query += ". audio character: " + ", ".join(audio_words)
+        if section.ai_direction and section.ai_direction.visual_world:
+            query += f". directed visual world: {section.ai_direction.visual_world}"
         query_vector: np.ndarray | None = None
         if embedder is not None:
             query_vector = embedder.encode_text([query])[0]
@@ -524,6 +554,15 @@ def build_scene_plan(
             )
             for candidate in candidates
         }
+        audio_visual_scores = {
+            candidate.scene_id: scene_audio_concept_alignment(
+                section,
+                scene_embedding=all_embeddings.get(candidate.scene_id),
+                concept_text_embeddings=concept_text_embeddings,
+                candidate=candidate,
+            )
+            for candidate in candidates
+        } if section.audio_semantics else {}
 
         windows = _shot_windows(timeline, section, cfg)
         for local_shot_index, (shot_start, shot_end) in enumerate(windows):
@@ -548,6 +587,9 @@ def build_scene_plan(
                     semantic_scores.get(candidate.scene_id, 0.0)
                     + cfg.visual_match_weight * visual_match_score(candidate, section)
                     + cfg.transition_weight * transition_score(previous_primary, candidate, section)
+                    + cfg.audio_visual_match_weight
+                    * section.audio_semantic_confidence
+                    * audio_visual_scores.get(candidate.scene_id, 0.0)
                 )
                 for candidate in candidates
             }
@@ -578,6 +620,14 @@ def build_scene_plan(
                         metadata_semantic_score(candidate, query)
                         + cfg.visual_match_weight * visual_match_score(candidate, section)
                         + cfg.transition_weight * transition_score(previous_primary, candidate, section)
+                        + cfg.audio_visual_match_weight
+                        * section.audio_semantic_confidence
+                        * scene_audio_concept_alignment(
+                            section,
+                            scene_embedding=all_embeddings.get(candidate.scene_id),
+                            concept_text_embeddings=concept_text_embeddings,
+                            candidate=candidate,
+                        )
                     )
                     for candidate in fallback
                 }
@@ -647,10 +697,15 @@ def build_scene_plan(
                 shot_index_in_section=local_shot_index,
                 vector_enabled=cfg.vector_effects,
                 vector_intensity=cfg.vector_intensity,
+                codec_glitch_mode=cfg.codec_glitch_mode,
+                codec_glitch_intensity=cfg.codec_glitch_intensity,
             )
 
             layer_budget = max(1, min(4, int(cfg.max_video_layers)))
             comp_strength = max(0.0, min(2.0, cfg.composition_intensity))
+            if section.ai_direction is not None:
+                comp_strength *= .68 + .48*section.ai_direction.desired_complexity + .14*(1-section.ai_direction.continuity)
+                comp_strength = max(0.0, min(2.0, comp_strength))
             if section.energy < 0.30 or comp_strength <= 0.0:
                 desired_layers = 1
             elif section.energy < 0.58:
@@ -844,6 +899,36 @@ def attach_scene_plan(
                         "amount": float(min(1.0, peak_amount * 0.65)),
                         "directed": True,
                         "vector_fallback": effect.kind,
+                    },
+                )
+            )
+        codec_fallback = {
+            "datamosh": "video_edit_datamosh",
+            "mv_feedback": "video_edit_datamosh",
+            "mv_explode": "video_edit_ripple",
+            "mv_implode": "video_edit_ripple",
+            "mv_radial_wave": "video_edit_ripple",
+            "mv_spiral": "video_edit_vortex",
+            "mv_jitter": "video_edit_chroma_delay",
+            "mv_wave": "video_edit_ripple",
+            "mv_drift": "video_edit_vortex",
+            "mv_shear": "video_edit_ripple",
+            "mv_freeze": "video_edit_datamosh",
+            "mv_invert": "video_edit_chroma_delay",
+        }
+        for effect in selection.direction.codec_effects:
+            action = codec_fallback.get(effect.kind)
+            if not action or effect.amount <= 0.025:
+                continue
+            progress = min(1.0, max(0.0, (effect.start + effect.end) * .5))
+            non_scene_cues.append(
+                VisualCue(
+                    time=min(shot_end - 1e-4, selection.time + span * progress),
+                    action=action,
+                    parameters={
+                        "amount": float(min(1.0, effect.amount * .72)),
+                        "directed": True,
+                        "codec_fallback": effect.kind,
                     },
                 )
             )

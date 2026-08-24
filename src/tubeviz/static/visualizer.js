@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
 const ctx = canvas.getContext('2d', {alpha:true});
 const videoFx = document.querySelector('#video-fx');
@@ -1075,21 +1076,51 @@ function renderVectorSceneGraph(){
     }
   }
 }
+function codecEffectEnvelope(effect){
+  if(activeScene?.codec_materialization?.materialized)return 0;
+  const p=directedProgress(),a=Number(effect.start??0),b=Number(effect.end??1);
+  if(p<a||p>b)return 0;
+  const q=(p-a)/Math.max(1e-6,b-a),attack=Number(effect.attack??.12),release=Number(effect.release??.18);
+  const smooth=x=>x*x*(3-2*x);
+  const ai=attack>0?smooth(Math.max(0,Math.min(1,q/attack))):1;
+  const ro=release>0?1-smooth(Math.max(0,Math.min(1,(q-(1-release))/release))):1;
+  const pulse=Number(effect.pulse??0);let shape=Math.min(ai,ro);
+  if(pulse>0)shape*=.45+.55*Math.abs(Math.sin(q*Math.PI*pulse));
+  return Math.max(0,Math.min(1.5,Number(effect.amount??0)*shape));
+}
+function codecFallback(){
+  const out={datamosh:0,blocks:0,vortex:0,ripple:0,rgb:0,tracking:0,feedback:0};
+  for(const effect of activeScene?.direction?.codec_effects??[]){
+    const a=codecEffectEnvelope(effect);if(a<=.005)continue;
+    switch(effect.kind){
+      case'datamosh':case'mv_feedback':out.datamosh=Math.max(out.datamosh,a*.88);out.feedback=Math.max(out.feedback,a*.35);break;
+      case'mv_explode':case'mv_implode':case'mv_radial_wave':out.ripple=Math.max(out.ripple,a*.72);out.blocks=Math.max(out.blocks,a*.40);break;
+      case'mv_spiral':out.vortex=Math.max(out.vortex,a*.78);break;
+      case'mv_shear':out.blocks=Math.max(out.blocks,a*.55);break;
+      case'mv_jitter':out.rgb=Math.max(out.rgb,a*.35);out.tracking=Math.max(out.tracking,a*.55);break;
+      case'mv_wave':case'mv_drift':out.ripple=Math.max(out.ripple,a*.30);out.tracking=Math.max(out.tracking,a*.24);break;
+      case'mv_freeze':out.datamosh=Math.max(out.datamosh,a*.40);break;
+      case'mv_invert':out.rgb=Math.max(out.rgb,a*.30);out.vortex=Math.max(out.vortex,a*.30);break;
+    }
+  }
+  return out;
+}
 function applyPostFx(){
   if(!activeScene)return;
   const t=activeScene.transform??{},m=liveFx.master;
   const motion=m*liveFx.motion,trails=m*liveFx.trails,glitchScale=m*liveFx.glitch,strobeScale=m*liveFx.strobe;
 
+  const codec=codecFallback();
   const directedFeedback=automationValue('feedback',0),directedGlitch=automationValue('glitch',0);
   const directedWarp=automationValue('spectral_warp',0),directedChroma=automationValue('chromatic',0);
   const directedBloom=automationValue('bloom',0),directedFlow=automationValue('flow',0);
-  const feedback=Math.min(1,((t.feedback??0)+directedFeedback)*trails);
+  const feedback=Math.min(1,((t.feedback??0)+directedFeedback+codec.feedback)*trails);
   const glitch=Math.min(1,((t.glitch??0)+sliceFx+directedGlitch)*glitchScale);
   const pixel=Math.min(1,(t.pixelate??0)*glitchScale);
-  const rgb=Math.min(1,(t.rgb_split??0)*glitchScale);
+  const rgb=Math.min(1,((t.rgb_split??0)+codec.rgb)*glitchScale);
   const scan=Math.min(1,(t.scanlines??0)*m);
   const vignette=Math.min(1,(t.vignette??0)*m);
-  const ripple=Math.min(1,((t.ripple??0)+rippleFx+directedFlow*.28)*motion);
+  const ripple=Math.min(1,((t.ripple??0)+rippleFx+directedFlow*.28+codec.ripple)*motion);
   const kaleido=Math.min(1,((t.kaleidoscope??0)+kaleidoFx)*motion);
   const tiles=Math.min(1,(t.tiles??0)*motion);
   const tunnel=Math.min(1,((t.tunnel??0)+tunnelFx)*motion);
@@ -1103,11 +1134,11 @@ function applyPostFx(){
   const corridor=Math.min(1,((t.mirror_corridor??0)+corridorFx)*motion);
   const mask=Math.min(1,((t.mask_wipe??0)+maskFx)*motion);
   const solarize=Math.min(1,((t.solarize??0)+solarizeFx)*m);
-  const datamosh=Math.min(1,((t.datamosh??0)+datamoshFx)*glitchScale);
-  const blocks=Math.min(1,(t.block_displace??0)*glitchScale);
+  const datamosh=Math.min(1,((t.datamosh??0)+datamoshFx+codec.datamosh)*glitchScale);
+  const blocks=Math.min(1,((t.block_displace??0)+codec.blocks)*glitchScale);
   const chromaDelay=Math.min(1,((t.chroma_delay??0)+chromaDelayFx+directedChroma*.24)*trails);
-  const tracking=Math.min(1,(t.vhs_tracking??0)*glitchScale);
-  const vortex=Math.min(1,((t.vortex??0)+vortexFx)*motion);
+  const tracking=Math.min(1,((t.vhs_tracking??0)+codec.tracking)*glitchScale);
+  const vortex=Math.min(1,((t.vortex??0)+vortexFx+codec.vortex)*motion);
   const motionTrails=Math.min(1,((t.motion_trails??0)+motionTrailFx)*trails);
   const sliceRecursion=Math.min(1,((t.slice_recursion??0)+sliceRecursionFx)*motion);
 

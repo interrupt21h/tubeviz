@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
 def test_kaleidoscope_uses_drifting_focal_point():

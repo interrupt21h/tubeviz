@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from tubeviz.cli import build_parser
 from tubeviz.scene_selector import _scene_rank
 from tubeviz.library import SceneCandidate

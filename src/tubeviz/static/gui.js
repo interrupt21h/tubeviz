@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 const $=id=>document.getElementById(id);
 let activeJob=null;
 let pollTimer=null;
@@ -30,6 +31,7 @@ async function init(){
   const ok=!!n.renderer;
   $("nativeBadge").textContent=ok?`native: ${n.renderer.split("/").pop()}`:"native: not built";
   $("nativeBadge").classList.add(ok?"ok":"warn");
+  if(cfg.codec?.available){$("nativeBadge").textContent+=` · FFglitch ready`;}
   await refreshLibrarySummary();
   loadClips();
   refreshJobs();
@@ -77,11 +79,18 @@ $("analyzeBtn").onclick=()=>{
   output:value("timelinePath")||"timeline.json",
   options:{
     semantic:checked("semantic"),semantic_device:value("semanticDevice"),
+    audio_ai:checked("audioAi"),audio_ai_device:value("audioAiDevice"),
+    audio_ai_window:number("audioAiWindow"),audio_ai_hop:number("audioAiHop"),
+    audio_visual_match_weight:number("audioVisualWeight"),
+    ai_director:checked("aiDirector"),ai_director_base_url:value("aiDirectorUrl")||null,
+    ai_director_model:value("aiDirectorModel")||null,ai_director_api_key:value("aiDirectorApiKey")||null,
+    ai_director_strength:number("aiDirectorStrength"),
     section_bars:number("sectionBars"),max_video_layers:number("maxLayers"),
     transform_intensity:number("transformIntensity"),composition_intensity:number("compositionIntensity"),
     target_unique_clips:number("targetUnique"),novelty_weight:number("noveltyWeight"),
     visual_match_weight:number("visualMatchWeight"),transition_weight:number("transitionWeight"),
     vector_effects:checked("vectorEffects"),vector_intensity:number("vectorIntensity"),
+    codec_glitch:value("codecGlitch"),codec_glitch_intensity:number("codecGlitchIntensity"),
     rhythm_alignment:checked("rhythmAlignment"),
     selection_variation:.30,min_shot_seconds:number("minShot"),max_shot_seconds:number("maxShot"),
     source_excerpt_max_seconds:number("maxExcerpt"),reshuffle:checked("reshuffle"),
@@ -96,7 +105,7 @@ $("renderBtn").onclick=()=>startJob("render",{
     backend:value("backend"),width:number("width"),height:number("height"),fps:number("fps"),
     crf:number("crf"),video_codec:value("codec"),native_preset:value("nativePreset"),
     native_decoder_cache:number("decoderCache"),native_threads:number("nativeThreads"),
-    native_build_if_missing:checked("buildMissing")
+    native_build_if_missing:checked("buildMissing"),codec_materialize:checked("codecRenderMaterialize")
   }
 });
 
@@ -110,13 +119,70 @@ $("ingestBtn").onclick=()=>startJob("ingest",{
   }
 });
 
+$("audioAiDoctorBtn").onclick=()=>startJob("audio-ai-doctor",{library:value("libraryPath"),options:{device:value("audioAiDevice"),model:"laion/clap-htsat-fused"}});
 $("nativeBuildBtn").onclick=()=>startJob("native-build",{library:value("libraryPath"),options:{clean:true}});
 $("visualIndexBtn").onclick=()=>startJob("visual-index",{library:value("libraryPath"),options:{force:true,fps:6,max_frames:180}});
-$("previewBtn").onclick=()=>{
+$("codecDoctorBtn").onclick=()=>startJob("codec-doctor",{library:value("libraryPath"),options:{}});
+$("codecMaterializeBtn").onclick=()=>startJob("codec-materialize",{...projectBase(),output:(value("timelinePath")||"timeline").replace(/\.json$/,".codec.json"),options:{}});
+$("codecMotionBtn").onclick=()=>startJob("codec-motion-index",{library:value("libraryPath"),options:{force:false}});
+async function startPreview(){
+  const timeline=value("timelinePath");
+  if(!timeline){
+    $("jobLog").textContent="Preview error: select a timeline first.";
+    return;
+  }
   const preview=window.open("about:blank","tubevizPreview");
-  startJob("preview",{...projectBase(),options:{port:8080,host:"127.0.0.1"}});
-  setTimeout(()=>{if(preview)preview.location="http://127.0.0.1:8080/"},1200);
-};
+  if(preview){
+    preview.document.write(`<title>tubeviz preview</title><body style="background:#080b10;color:#d9e6ef;font:16px system-ui;padding:30px">Starting preview for <code>${escapeHtml(timeline)}</code>…</body>`);
+  }
+  try{
+    // port=0 asks Studio to allocate a fresh port. This prevents an old
+    // in-memory timeline on :8080 from being mistaken for the current one.
+    const job=await api("/api/gui/jobs",{
+      method:"POST",
+      body:JSON.stringify({
+        kind:"preview",
+        ...projectBase(),
+        options:{port:0,host:"127.0.0.1",codec_materialize:checked("codecPreviewMaterialize")}
+      })
+    });
+    activeJob=job.id;
+    $("cancelJob").disabled=false;
+    $("jobLog").textContent=(job.log||[]).join("\n");
+    waitForPreview(job.id,job.preview_url,preview);
+    pollActiveJob();
+  }catch(e){
+    $("jobLog").textContent=`Preview error: ${e.message}`;
+    if(preview)preview.close();
+  }
+}
+async function waitForPreview(jobId,url,previewWindow){
+  const deadline=Date.now()+20000;
+  while(Date.now()<deadline){
+    try{
+      const job=await api(`/api/gui/jobs/${jobId}?tail=100`);
+      const log=(job.log||[]).join("\n");
+      if(job.status==="failed"||job.status==="complete"){
+        if(previewWindow&&!previewWindow.closed){
+          previewWindow.document.body.textContent=`Preview failed: ${log.split("\n").slice(-8).join(" | ")}`;
+        }
+        return;
+      }
+      if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
+        if(previewWindow&&!previewWindow.closed){
+          const sep=url.includes("?")?"&":"?";
+          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&t=${Date.now()}`;
+        }
+        return;
+      }
+    }catch(e){}
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+  if(previewWindow&&!previewWindow.closed){
+    previewWindow.document.body.textContent="Preview server did not become ready within 20 seconds. Check the Studio job log.";
+  }
+}
+$("previewBtn").onclick=startPreview;
 $("refreshLibrary").onclick=()=>{refreshLibrarySummary();loadClips()};
 $("cancelJob").onclick=async()=>{
   if(!activeJob)return;

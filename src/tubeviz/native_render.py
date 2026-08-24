@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 import os
@@ -84,11 +85,12 @@ def _resolve_media(
 
     normalized = library / "normalized"
     transforms = library / "transforms"
+    codec_glitch = library / "codec-glitch"
 
     # Explicit relative paths from old/custom timelines remain supported.
     candidates: list[Path] = []
     parts = raw.parts
-    if parts and parts[0] in {"normalized", "transforms"}:
+    if parts and parts[0] in {"normalized", "transforms", "codec-glitch"}:
         candidates.append(library / raw)
 
     # media_url is the authoritative browser mapping when present.
@@ -96,6 +98,8 @@ def _resolve_media(
         url_path = unquote(media_url.split("?", 1)[0].split("#", 1)[0])
         if url_path.startswith("/transforms/"):
             candidates.append(transforms / url_path.removeprefix("/transforms/"))
+        elif url_path.startswith("/codec-glitch/"):
+            candidates.append(codec_glitch / url_path.removeprefix("/codec-glitch/"))
         elif url_path.startswith("/media/"):
             candidates.append(normalized / url_path.removeprefix("/media/"))
 
@@ -136,12 +140,14 @@ def _media_resolution_candidates(
     if raw.is_absolute():
         return [raw.resolve()]
     candidates: list[Path] = []
-    if raw.parts and raw.parts[0] in {"normalized", "transforms"}:
+    if raw.parts and raw.parts[0] in {"normalized", "transforms", "codec-glitch"}:
         candidates.append(library / raw)
     if media_url:
         url_path = unquote(media_url.split("?", 1)[0].split("#", 1)[0])
         if url_path.startswith("/transforms/"):
             candidates.append(library / "transforms" / url_path.removeprefix("/transforms/"))
+        elif url_path.startswith("/codec-glitch/"):
+            candidates.append(library / "codec-glitch" / url_path.removeprefix("/codec-glitch/"))
         elif url_path.startswith("/media/"):
             candidates.append(library / "normalized" / url_path.removeprefix("/media/"))
     if materialized:
@@ -359,17 +365,19 @@ def write_native_manifest(
 
 
 def native_source_dir() -> Path:
-    # Editable/source checkout.
-    candidate = Path(__file__).resolve().parents[2] / "native"
-    if candidate.exists():
-        return candidate
-    # Wheel/install fallback: native sources are also packaged under tubeviz.
-    packaged = Path(__file__).resolve().parent / "native_src"
-    if packaged.exists():
-        return packaged
+    """Return the single canonical native-renderer source tree.
+
+    Native C++ sources live under ``tubeviz/native_src`` so the editable
+    checkout and installed wheel use exactly the same files. Keeping one
+    source tree prevents the former top-level ``native/`` copy from drifting
+    away from the packaged renderer.
+    """
+    source = Path(__file__).resolve().parent / "native_src"
+    if source.exists():
+        return source
     raise NativeRenderError(
         "native renderer sources are not available in this installation; "
-        "install tubeviz from the full source tree"
+        "reinstall tubeviz from a complete source distribution"
     )
 
 

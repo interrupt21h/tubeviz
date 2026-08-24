@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 import numpy as np
 
 from tubeviz.analysis import AnalysisConfig, _dynamic_tempo, _fold_tempo_octaves
