@@ -6,6 +6,14 @@
 
 Current version: **0.26.10**
 
+## Sample videos
+
+See what tubeviz produces in these example renders:
+
+- [Tubeviz - Andrew Bayer feat. Alison May - Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
+- [Tubeviz - Step It Up - Stereo MC's](https://youtu.be/nrYzxJzPYbE)
+
+
 ## What’s new in 0.26.10
 
 The current release completes the recent Studio usability, authentication, manual-ingest, and codec-materialization work:
