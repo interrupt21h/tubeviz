@@ -12,6 +12,7 @@ from typing import Iterable
 import librosa
 import numpy as np
 
+from .torch_device import resolve_torch_device
 from .models import AudioSemanticWindow, Section, TrackAnalysis
 
 
@@ -169,15 +170,7 @@ class ClapSemanticAnalyzer:
             ) from exc
 
         self.torch = torch
-        if self.config.device == "auto":
-            if torch.cuda.is_available():
-                self.device = "cuda"
-            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-                self.device = "mps"
-            else:
-                self.device = "cpu"
-        else:
-            self.device = self.config.device
+        self.device, self.device_warning = resolve_torch_device(torch, self.config.device)
 
         self.processor = AutoProcessor.from_pretrained(self.config.model)
         self.model = ClapModel.from_pretrained(self.config.model).to(self.device)
@@ -457,11 +450,17 @@ def audio_ai_doctor(model: str = "laion/clap-htsat-fused", device: str = "auto")
         result["transformers"] = getattr(transformers, "__version__", "unknown")
         result["cuda_available"] = bool(torch.cuda.is_available())
         result["cuda_devices"] = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
-        result["resolved_device"] = (
-            "cuda" if device == "auto" and torch.cuda.is_available()
-            else "mps" if device == "auto" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
-            else "cpu" if device == "auto" else device
-        )
+        resolved, warning = resolve_torch_device(torch, device)
+        result["resolved_device"] = resolved
+        if warning:
+            result["device_warning"] = warning
+        if torch.cuda.is_available():
+            result["cuda_arch_list"] = list(torch.cuda.get_arch_list())
+            try:
+                result["cuda_capability"] = list(torch.cuda.get_device_capability(0))
+                result["cuda_device_name"] = torch.cuda.get_device_name(0)
+            except Exception:
+                pass
         result["available"] = True
     except ImportError as exc:
         result["available"] = False

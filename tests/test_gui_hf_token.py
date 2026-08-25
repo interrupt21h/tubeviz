@@ -2,6 +2,7 @@
 from pathlib import Path
 from fastapi.testclient import TestClient
 import tubeviz.gui as gui
+from tubeviz import __version__
 from tubeviz.gui import GuiJob, create_gui_app
 
 
@@ -38,7 +39,7 @@ def test_studio_static_assets_disable_cache():
     from tubeviz.gui import create_gui_app
     client = TestClient(create_gui_app(default_library="./library", project_root="."))
     root = client.get("/")
-    css = client.get("/static/gui.css?v=0.26.10")
+    css = client.get(f"/static/gui.css?v={__version__}")
     assert "no-store" in root.headers.get("cache-control", "")
     assert "no-store" in css.headers.get("cache-control", "")
-    assert client.get("/api/gui/config").json()["studio_version"] == "0.26.10"
+    assert client.get("/api/gui/config").json()["studio_version"] == __version__

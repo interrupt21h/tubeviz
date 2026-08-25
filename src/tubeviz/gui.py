@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import __version__
 from .library import ClipLibrary
 from .native_render import native_doctor
 from .codec_glitch import codec_doctor
@@ -33,9 +34,11 @@ class JobRequest(BaseModel):
     timeline: str | None = None
     output: str | None = None
     terms: str | None = None
+    visual_brief: str | None = None
     urls: list[str] = Field(default_factory=list)
     options: dict[str, Any] = Field(default_factory=dict)
     hf_token: str | None = Field(default=None, exclude=True)
+    llm_api_key: str | None = Field(default=None, exclude=True)
 
 
 class ClipAction(BaseModel):
@@ -209,7 +212,7 @@ def _flag(command: list[str], name: str, value: Any, *, boolean: bool = False) -
 
 
 _GUI_CLI_ALLOWED_TOP_LEVEL = {
-    "ingest", "ingest-url", "library", "audio-ai", "analyze", "materialize",
+    "ingest", "ingest-url", "library", "audio-ai", "music-ai", "choreography", "analyze", "materialize",
     "render", "codec", "native", "serve",
 }
 
@@ -350,6 +353,11 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--keep-audio", o.get("keep_audio", False), boolean=True)
         _flag(command, "--no-scenes", o.get("no_scenes", False), boolean=True)
         _flag(command, "--no-visual-index", o.get("no_visual_index", False), boolean=True)
+        _flag(command, "--no-semantic-index", o.get("no_semantic_index", False), boolean=True)
+        _flag(command, "--no-scene-classification", o.get("no_scene_classification", False), boolean=True)
+        _flag(command, "--semantic-device", o.get("semantic_device", "auto"))
+        _flag(command, "--semantic-model", o.get("semantic_model", "ViT-B-32"))
+        _flag(command, "--semantic-pretrained", o.get("semantic_pretrained", "laion2b_s34b_b79k"))
         _flag(command, "--force", o.get("force", False), boolean=True)
         _flag(command, "--cookies-from-browser", o.get("cookies_from_browser"))
         _flag(command, "--download-socket-timeout", o.get("download_socket_timeout", 20.0))
@@ -367,6 +375,12 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--output", request.output or "timeline.json")
         _flag(command, "--semantic", o.get("semantic", True), boolean=True)
         _flag(command, "--semantic-device", o.get("semantic_device", "auto"))
+        if o.get("music_ai", False):
+            command.append("--music-ai")
+            _flag(command, "--music-ai-model", o.get("music_ai_model", "m-a-p/MERT-v1-95M"))
+            _flag(command, "--music-ai-device", o.get("music_ai_device", "auto"))
+            _flag(command, "--music-ai-window", o.get("music_ai_window", 8))
+            _flag(command, "--music-ai-hop", o.get("music_ai_hop", 4))
         if o.get("audio_ai", False):
             command.append("--audio-ai")
             _flag(command, "--audio-ai-model", o.get("audio_ai_model", "laion/clap-htsat-fused"))
@@ -374,12 +388,26 @@ def _job_command(request: JobRequest) -> list[str]:
             _flag(command, "--audio-ai-window", o.get("audio_ai_window", 8))
             _flag(command, "--audio-ai-hop", o.get("audio_ai_hop", 4))
             _flag(command, "--audio-visual-match-weight", o.get("audio_visual_match_weight", 1.10))
-            if o.get("ai_director", False):
-                command.append("--ai-director")
-                _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
-                _flag(command, "--ai-director-model", o.get("ai_director_model"))
-                _flag(command, "--ai-director-api-key", o.get("ai_director_api_key"))
-                _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
+        if o.get("choreography", True) is False:
+            command.append("--no-choreography")
+        _flag(command, "--trajectory-strength", o.get("trajectory_strength", 0.85))
+        _flag(command, "--anticipation-seconds", o.get("anticipation_seconds", 12.0))
+        _flag(command, "--visual-arc-strength", o.get("visual_arc_strength", 0.70))
+        _flag(command, "--sequence-lookahead", o.get("sequence_lookahead", 5))
+        _flag(command, "--sequence-beam-width", o.get("sequence_beam_width", 6))
+        _flag(command, "--sequence-candidate-pool", o.get("sequence_candidate_pool", 18))
+        _flag(command, "--trajectory-weight", o.get("trajectory_weight", 0.85))
+        _flag(command, "--anticipation-weight", o.get("anticipation_weight", 0.75))
+        _flag(command, "--effect-compatibility-weight", o.get("effect_compatibility_weight", 0.60))
+        if o.get("preference_learning", True) is False:
+            command.append("--no-preference-learning")
+        _flag(command, "--preference-weight", o.get("preference_weight", 0.35))
+        if o.get("ai_director", False):
+            command.append("--ai-director")
+            _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
+            _flag(command, "--ai-director-model", o.get("ai_director_model"))
+            _flag(command, "--ai-director-api-key", o.get("ai_director_api_key"))
+            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
         _flag(command, "--section-bars", o.get("section_bars", 8))
         _flag(command, "--max-video-layers", o.get("max_video_layers", 3))
         _flag(command, "--composition-intensity", o.get("composition_intensity", 1.0))
@@ -432,9 +460,12 @@ def _job_command(request: JobRequest) -> list[str]:
         return command
 
     if kind == "ingest":
-        if not request.terms:
-            raise ValueError("terms file is required")
-        command = _tubeviz_command("ingest", "--terms", request.terms, "--library", library)
+        if not request.terms and not request.visual_brief:
+            raise ValueError("terms file or visual brief is required")
+        command = _tubeviz_command("ingest", "--library", library)
+        _flag(command, "--terms", request.terms)
+        _flag(command, "--visual-brief", request.visual_brief)
+        _flag(command, "--audio", request.audio if request.visual_brief else None)
         _flag(command, "--results-per-term", o.get("results_per_term", 5))
         _flag(command, "--hard-max-duration", o.get("hard_max_duration", 600))
         _flag(command, "--cookies-from-browser", o.get("cookies_from_browser"))
@@ -443,6 +474,25 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--ai-query-count", o.get("ai_query_count", 8))
         _flag(command, "--ai-candidates-per-term", o.get("ai_candidates_per_term", 100))
         _flag(command, "--ai-min-score", o.get("ai_min_score", -0.05))
+        _flag(command, "--ai-llm-base-url", o.get("ai_llm_base_url"))
+        _flag(command, "--ai-llm-model", o.get("ai_llm_model"))
+        _flag(command, "--target-clips", o.get("target_clips", 40))
+        _flag(command, "--acquisition-query-count", o.get("acquisition_query_count", 24))
+        _flag(command, "--preview-gate", o.get("preview_gate", bool(request.visual_brief)), boolean=True)
+        _flag(command, "--preview-seconds", o.get("preview_seconds", 4))
+        _flag(command, "--preview-samples", o.get("preview_samples", 4))
+        _flag(command, "--min-video-fitness", o.get("min_video_fitness", .18))
+        _flag(command, "--min-dynamic-score", o.get("min_dynamic_score", .24))
+        _flag(command, "--max-text-overlay-fraction", o.get("max_text_overlay_fraction", .10))
+        _flag(command, "--max-persistent-text-fraction", o.get("max_persistent_text_fraction", .045))
+        _flag(command, "--min-motion-coverage", o.get("min_motion_coverage", .20))
+        _flag(command, "--min-temporal-diversity", o.get("min_temporal_diversity", .12))
+        _flag(command, "--max-face-dominance", o.get("max_face_dominance", .42))
+        _flag(command, "--min-aesthetic-score", o.get("min_aesthetic_score", .22))
+        _flag(command, "--sample-long-videos", o.get("sample_long_videos", True), boolean=True)
+        _flag(command, "--long-video-segment-attempts", o.get("long_video_segment_attempts", 8))
+        _flag(command, "--long-video-excerpt-seconds", o.get("long_video_excerpt_seconds", 45))
+        _flag(command, "--auto-trim", o.get("auto_trim", True), boolean=True)
         if o.get("visual_index_scenes", True) is False:
             command.append("--no-visual-index-scenes")
         return command
@@ -476,6 +526,12 @@ def _job_command(request: JobRequest) -> list[str]:
     if kind == "audio-ai-doctor":
         command = _tubeviz_command("audio-ai", "doctor")
         _flag(command, "--model", o.get("model", "laion/clap-htsat-fused"))
+        _flag(command, "--device", o.get("device", "auto"))
+        return command
+
+    if kind == "music-ai-doctor":
+        command = _tubeviz_command("music-ai", "doctor")
+        _flag(command, "--model", o.get("model", "m-a-p/MERT-v1-95M"))
         _flag(command, "--device", o.get("device", "auto"))
         return command
 
@@ -531,7 +587,7 @@ def create_gui_app(
     static_dir = package_dir / "static"
     jobs = JobManager(cwd=root)
 
-    app = FastAPI(title="tubeviz studio", version="0.26.10")
+    app = FastAPI(title="tubeviz studio", version=__version__)
 
     @app.middleware("http")
     async def studio_no_cache(request, call_next):
@@ -551,7 +607,7 @@ def create_gui_app(
     @app.get("/api/gui/config")
     async def config() -> dict[str, Any]:
         return {
-            "studio_version": "0.26.10",
+            "studio_version": __version__,
             "project_root": str(root),
             "library": str(default_library),
             "native": native_doctor(),
@@ -750,6 +806,9 @@ def create_gui_app(
             # are process-local: never put them in argv, job metadata, or logs.
             env_overrides["HF_TOKEN"] = token
             env_overrides["HUGGING_FACE_HUB_TOKEN"] = token
+        llm_key = (request.llm_api_key or "").strip()
+        if llm_key:
+            env_overrides["TUBEVIZ_LLM_API_KEY"] = llm_key
         return jobs.create(
             request.kind, command, metadata=metadata, env_overrides=env_overrides
         ).payload()

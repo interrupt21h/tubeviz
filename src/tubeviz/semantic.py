@@ -10,6 +10,7 @@ from typing import Iterable
 
 import numpy as np
 
+from .torch_device import resolve_torch_device
 from .library import ClipLibrary, SceneCandidate
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -79,10 +80,7 @@ class OpenClipEmbedder:
         self.open_clip = open_clip
         self.torch = torch
         self.Image = Image
-        if self.config.device == "auto":
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            self.device = self.config.device
+        self.device, self.device_warning = resolve_torch_device(torch, self.config.device)
 
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(
             self.config.model,
@@ -182,3 +180,72 @@ def cosine_similarity(vector: np.ndarray, query: np.ndarray) -> float:
     if denom <= 1e-12:
         return 0.0
     return float(np.dot(a, b) / denom)
+
+
+SCENE_CLASS_PROMPTS: dict[str, str] = {
+    "crowd": "a crowd of people",
+    "dancing": "people dancing energetically",
+    "nightlife": "nightlife in a club or city at night",
+    "city": "an urban city scene",
+    "tunnel": "a tunnel or corridor with forward perspective",
+    "transport": "a train subway bus or moving vehicle",
+    "industrial": "industrial machinery factory or mechanical equipment",
+    "architecture": "interesting architecture or geometric built environment",
+    "nature": "natural landscape plants water mountains or sky",
+    "water": "water liquid waves rain or reflections",
+    "abstract": "abstract visual art shapes colors or textures",
+    "lights": "colorful lights neon lasers or glowing illumination",
+    "human_closeup": "a close-up view of a person or face",
+    "performance": "a musical performance concert or stage",
+    "vehicle_pov": "a moving point of view traveling through an environment",
+    "macro": "a macro close-up of texture material or small details",
+    "space": "space stars planets or cosmic imagery",
+    "fire": "fire sparks flames or pyrotechnics",
+    "smoke": "smoke fog haze or atmospheric particles",
+    "text_heavy": "a title card subtitles captions or large text overlay",
+    "talking_head": "a person speaking directly to a camera",
+    "static_presentation": "a static presentation slide logo or informational screen",
+}
+
+def classify_scene_thumbnails(
+    library: ClipLibrary,
+    *,
+    clip_id: int,
+    embedder: OpenClipEmbedder,
+    top_k: int = 5,
+    min_score: float = 0.12,
+    progress=print,
+) -> int:
+    """Zero-shot classify scene thumbnails and persist labels with visual features."""
+    candidates = [c for c in library.scene_candidates(clip_id=clip_id, respect_trim=False) if c.thumbnail_path]
+    pending = []
+    for c in candidates:
+        path = library.root / c.thumbnail_path
+        if path.is_file():
+            pending.append((c, path))
+    if not pending:
+        return 0
+    labels = list(SCENE_CLASS_PROMPTS)
+    text_vectors = embedder.encode_text(SCENE_CLASS_PROMPTS.values())
+    existing = library.load_scene_visual_features([c.scene_id for c, _ in pending])
+    count = 0
+    batch_size = max(1, embedder.config.batch_size)
+    for off in range(0, len(pending), batch_size):
+        batch = pending[off:off + batch_size]
+        image_vectors = embedder.encode_images(path for _, path in batch)
+        scores = image_vectors @ text_vectors.T
+        for (candidate, _), row in zip(batch, scores, strict=True):
+            order = np.argsort(row)[::-1]
+            ranked = [
+                {"label": labels[int(i)], "score": round(float(row[int(i)]), 4)}
+                for i in order[:max(1, top_k)] if float(row[int(i)]) >= min_score
+            ]
+            features = dict(existing.get(candidate.scene_id) or {"version": 1})
+            features["semantic_labels"] = ranked
+            features["semantic_primary"] = ranked[0]["label"] if ranked else None
+            features["semantic_model"] = {"model": embedder.config.model, "pretrained": embedder.config.pretrained}
+            library.store_scene_visual_features(candidate.scene_id, features)
+            count += 1
+    if count:
+        progress(f"  semantic classification: {count} scenes labeled")
+    return count

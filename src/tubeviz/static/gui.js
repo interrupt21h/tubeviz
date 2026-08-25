@@ -26,6 +26,14 @@ const STATIC_HELP={
   noveltyWeight:"Rewards clips that have not been used recently. Higher values increase visual variety but can reduce semantic continuity.",
   visualMatchWeight:"Weight given to motion, brightness, saturation, complexity, and other visual-feature compatibility with the current musical state.",
   transitionWeight:"Controls how strongly adjacent-shot continuity or contrast affects scene selection. High values make transitions more deliberate.",
+  trajectoryStrength:"How strongly rising/falling musical tension changes clip motion, complexity, cut density, transforms, and payoff contrast.",
+  anticipationSeconds:"How far ahead tubeviz begins visually preparing for an approaching peak/drop. Larger values create longer escalation arcs.",
+  sequenceLookahead:"How many future beat-aligned shots are evaluated together. More lookahead can improve coherence at additional planning cost.",
+  sequenceBeamWidth:"Number of competing multi-shot edit paths retained during lookahead search. Higher values explore more alternatives.",
+  effectCompatibilityWeight:"Prefer footage whose natural motion/complexity is compatible with the intended effect family, reducing effects that fight the source.",
+  preferenceWeight:"Strength of the soft preference signal learned from manually rejected clips. It never becomes a hard blacklist.",
+  preferenceLearning:"Use repeated manual rejects as negative examples in visual-feature space so future candidate ranking gradually avoids similar footage.",
+  choreography:"Enable phrase-aware build/drop/release analysis, pre-drop withholding, payoff shaping, and multi-shot sequence optimization.",
   vectorIntensity:"Global strength of footage-derived vector effects. Lower this if contours/flow geometry becomes too visually dominant.",
   codecGlitch:"Schedules FFglitch codec-space effects. 'musical' reserves them for musically meaningful moments; 'aggressive' uses them more often.",
   codecGlitchIntensity:"Global strength of scheduled FFglitch motion-vector/datamosh effects.",
@@ -33,7 +41,10 @@ const STATIC_HELP={
   maxShot:"Maximum dynamic shot duration in seconds.",
   maxExcerpt:"Maximum amount of a selected source scene used for one shot; tubeviz can take short excerpts rather than playing an entire clip.",
   semanticDevice:"Device for OpenCLIP semantic scene selection, e.g. auto, cpu, cuda, or cuda:0.",
-  audioAiDevice:"Device for CLAP audio-semantic inference, e.g. auto, cpu, cuda, or cuda:0.",
+  audioAiDevice:"Device for CLAP audio-semantic inference, e.g. auto, cpu, cuda, or cuda:0. Auto now falls back when the installed torch wheel lacks kernels for the detected GPU.",
+  musicAiDevice:"Device for optional MERT music-representation inference. Auto validates CUDA compute-capability support before choosing the GPU.",
+  musicAiModel:"Optional Hugging Face MERT model used for music-specific representation dynamics. The default model uses trust_remote_code=True and is not required for ordinary tubeviz operation.",
+  musicAi:"Enable optional MERT embeddings to measure musical-state novelty/velocity and strengthen structural cut/transition decisions.",
   audioVisualWeight:"Strength of CLAP-audio ↔ OpenCLIP-scene concept matching in candidate ranking.",
   audioAiWindow:"Length in seconds of each CLAP analysis window.",
   audioAiHop:"Seconds between successive CLAP windows. Smaller hops provide finer temporal semantic tracking at greater inference cost.",
@@ -54,14 +65,15 @@ const STATIC_HELP={
   crf:"Encoder quality target. Lower CRF means higher quality/larger files for software codecs; tubeviz maps this appropriately for supported hardware encoders.",
   codec:"Final video encoder used by FFmpeg.",nativePreset:"FFmpeg/native encoder speed-quality preset.",decoderCache:"Number of native decoder contexts retained across cuts to reduce reopen/decode overhead.",nativeThreads:"Native effect worker count. Zero lets the runtime choose automatically.",
   buildMissing:"Build the native C++ renderer automatically when the executable is missing.",codecRenderMaterialize:"Materialize scheduled FFglitch effects before final rendering.",
-  termsPath:"Text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Reject automatically discovered videos longer than this many seconds. Zero disables the hard limit.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",
+  visualBrief:"Describe the desired visual world in natural language. Tubeviz converts this prose into short YouTube-native searches; the brief itself is never used as a search query.",
+  aiLlmBaseUrl:"Optional OpenAI-compatible /v1 endpoint used to turn the visual brief into a structured acquisition plan.",aiLlmModel:"Model name for the acquisition planner. If blank, Tubeviz uses the deterministic short-query fallback.",aiLlmApiKey:"Optional planner API key. It is passed only through the child-process environment, never command history.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
   manualUrls:"Paste one hand-picked YouTube URL per line. Each accepted video enters the normal tubeviz download, normalization, scene-detection, visual-index, and duplicate-detection pipeline.",
   manualTerm:"Search/provenance tag assigned to manually ingested videos so they can be filtered and selected as a coherent source family.",manualCookies:"Optional browser cookies for manual yt-dlp ingestion.",manualMinDuration:"Reject manually supplied videos shorter than this duration. Zero disables.",manualHardMaxDuration:"Reject manually supplied videos longer than this duration. Zero disables, which is the manual-ingest default.",manualMinWidth:"Reject sources narrower than this width. Zero disables.",manualWidth:"Width of normalized library media.",manualHeight:"Height of normalized library media.",manualFps:"Frame rate of normalized library media.",manualSceneThreshold:"FFmpeg scene-change sensitivity used when detecting shot boundaries.",manualMinScene:"Minimum detected scene duration retained in the library.",manualSocketTimeout:"yt-dlp network socket timeout in seconds.",manualFragments:"Number of fragmented-media pieces yt-dlp may download concurrently.",manualRetries:"Number of overall download retries.",manualFragmentRetries:"Number of retries for individual media fragments.",manualKeepAudio:"Keep audio in the normalized library copy. Visual rendering does not require source audio.",manualNoScenes:"Skip scene detection and scene thumbnails for these manually added videos.",manualNoVisualIndex:"Skip motion/palette/visual-accent indexing for these videos.",manualForce:"Redownload/reprocess even when the source already exists in the library.",manualVerbose:"Show verbose yt-dlp diagnostics in the job log.",
   statusFilter:"Filter Library cards by clip processing status.",termFilter:"Filter Library cards by provenance/search term.",trimIn:"Saved start of the usable source region. Material before this point is excluded from future scene selection.",trimOut:"Saved end of the usable source region. Material after this point is excluded from future scene selection.",loopTrim:"Loop only the highlighted usable range while editing a clip.",
 };
 
 const BUTTON_HELP={
-  refreshLibrary:"Refresh project/library statistics from SQLite.",previewBtn:"Launch a fresh browser preview using the currently selected timeline, audio, and library.",audioAiDoctorBtn:"Check CLAP/Transformers/PyTorch availability and resolved device.",analyzeBtn:"Analyze the selected audio and build a new directed timeline.",nativeBuildBtn:"Clean/rebuild the packaged native C++ renderer.",codecDoctorBtn:"Check FFglitch/ffedit installation and codec capabilities.",codecMaterializeBtn:"Materialize scheduled FFglitch effects into cached MP4 shot assets.",renderBtn:"Render the currently selected timeline to the output video.",ingestBtn:"Start search-based clip ingestion using the selected terms file.",manualIngestBtn:"Ingest every URL currently listed in the manual URL editor.",clearManualUrls:"Clear the manual URL editor.",loadClips:"Refresh visible Library cards.",visualIndexBtn:"Rebuild temporal visual fingerprints for library scenes.",codecMotionBtn:"Extract/index codec motion-vector features using FFglitch where supported.",reloadCliSchema:"Reload Command Center directly from the current argparse tree.",syncCliProject:"Populate matching Command Center arguments from the Project fields.",runCliCommand:"Validate and launch the current Command Center argument vector.",refreshJobs:"Refresh background job history.",cancelJob:"Request cancellation of the active Create workflow job.",cancelCommandJob:"Request cancellation of the active Command Center job.",setTrimIn:"Set the clip's usable start to the current video playhead.",setTrimOut:"Set the clip's usable end to the current video playhead.",jumpTrimIn:"Seek playback to the current In marker.",jumpTrimOut:"Seek playback to the current Out marker.",clearTrim:"Remove saved source trim and restore the full video as eligible footage.",saveTrim:"Persist the selected usable In/Out range to the library database.",closeModal:"Close the clip playback/trim editor.",
+  refreshLibrary:"Refresh project/library statistics from SQLite.",previewBtn:"Launch a fresh browser preview using the currently selected timeline, audio, and library.",audioAiDoctorBtn:"Check CLAP/Transformers/PyTorch availability and resolved device.",musicAiDoctorBtn:"Check optional MERT/Transformers/PyTorch availability and resolved device. MERT model code is loaded only when you explicitly enable Music AI.",analyzeBtn:"Analyze the selected audio and build a new directed timeline.",nativeBuildBtn:"Clean/rebuild the packaged native C++ renderer.",codecDoctorBtn:"Check FFglitch/ffedit installation and codec capabilities.",codecMaterializeBtn:"Materialize scheduled FFglitch effects into cached MP4 shot assets.",renderBtn:"Render the currently selected timeline to the output video.",ingestBtn:"Start search-based clip ingestion using the selected terms file.",manualIngestBtn:"Ingest every URL currently listed in the manual URL editor.",clearManualUrls:"Clear the manual URL editor.",loadClips:"Refresh visible Library cards.",visualIndexBtn:"Rebuild temporal visual fingerprints for library scenes.",codecMotionBtn:"Extract/index codec motion-vector features using FFglitch where supported.",reloadCliSchema:"Reload Command Center directly from the current argparse tree.",syncCliProject:"Populate matching Command Center arguments from the Project fields.",runCliCommand:"Validate and launch the current Command Center argument vector.",refreshJobs:"Refresh background job history.",cancelJob:"Request cancellation of the active Create workflow job.",cancelCommandJob:"Request cancellation of the active Command Center job.",setTrimIn:"Set the clip's usable start to the current video playhead.",setTrimOut:"Set the clip's usable end to the current video playhead.",jumpTrimIn:"Seek playback to the current In marker.",jumpTrimOut:"Seek playback to the current Out marker.",clearTrim:"Remove saved source trim and restore the full video as eligible footage.",saveTrim:"Persist the selected usable In/Out range to the library database.",closeModal:"Close the clip playback/trim editor.",
 };
 
 function tooltipTextFor(el){
@@ -171,6 +183,7 @@ function setStats(el,data){
 async function init(){
   const cfg=await api("/api/gui/config");
   $("libraryPath").value=cfg.library;
+  if($("studioVersion")) $("studioVersion").textContent=`v${cfg.studio_version}`;
   const n=cfg.native;
   const ok=!!n.renderer;
   $("nativeBadge").textContent=ok?`native: ${n.renderer.split("/").pop()}`:"native: not built";
@@ -207,7 +220,8 @@ async function refreshLibrarySummary(){
 async function startJob(kind, payload){
   try{
     const hfToken=value("hfToken")||null;
-    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind,...payload,hf_token:hfToken})});
+    const llmKey=value("aiLlmApiKey")||null;
+    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind,...payload,hf_token:hfToken,llm_api_key:llmKey})});
     activeJob=job.id;
     $("cancelJob").disabled=false;
     $("jobLog").textContent=(job.log||[]).join("\n");
@@ -231,6 +245,7 @@ $("analyzeBtn").onclick=()=>{
   options:{
     semantic:checked("semantic"),semantic_device:value("semanticDevice"),
     audio_ai:checked("audioAi"),audio_ai_device:value("audioAiDevice"),
+    music_ai:checked("musicAi"),music_ai_device:value("musicAiDevice"),music_ai_model:value("musicAiModel"),
     audio_ai_window:number("audioAiWindow"),audio_ai_hop:number("audioAiHop"),
     audio_visual_match_weight:number("audioVisualWeight"),
     ai_director:checked("aiDirector"),ai_director_base_url:value("aiDirectorUrl")||null,
@@ -240,6 +255,10 @@ $("analyzeBtn").onclick=()=>{
     transform_intensity:number("transformIntensity"),composition_intensity:number("compositionIntensity"),
     target_unique_clips:number("targetUnique"),novelty_weight:number("noveltyWeight"),
     visual_match_weight:number("visualMatchWeight"),transition_weight:number("transitionWeight"),
+    choreography:checked("choreography"),trajectory_strength:number("trajectoryStrength"),
+    anticipation_seconds:number("anticipationSeconds"),sequence_lookahead:number("sequenceLookahead"),
+    sequence_beam_width:number("sequenceBeamWidth"),effect_compatibility_weight:number("effectCompatibilityWeight"),
+    preference_learning:checked("preferenceLearning"),preference_weight:number("preferenceWeight"),
     vector_effects:checked("vectorEffects"),vector_intensity:number("vectorIntensity"),
     codec_glitch:value("codecGlitch"),codec_glitch_intensity:number("codecGlitchIntensity"),
     rhythm_alignment:checked("rhythmAlignment"),
@@ -261,12 +280,19 @@ $("renderBtn").onclick=()=>startJob("render",{
 });
 
 $("ingestBtn").onclick=()=>startJob("ingest",{
-  library:value("libraryPath"),terms:value("termsPath"),
+  library:value("libraryPath"),terms:value("termsPath")||null,visual_brief:value("visualBrief")||null,audio:value("audioPath")||null,
   options:{
     results_per_term:number("resultsPerTerm"),hard_max_duration:number("hardMaxDuration"),
     cookies_from_browser:value("cookiesBrowser")||null,ai_discovery:checked("aiDiscovery"),
     ai_device:value("aiDevice"),ai_candidates_per_term:number("aiCandidates"),
-    ai_query_count:number("aiQueries"),visual_index_scenes:checked("visualIndexScenes")
+    ai_query_count:number("aiQueries"),acquisition_query_count:number("acquisitionQueries"),target_clips:number("targetClips"),
+    ai_llm_base_url:value("aiLlmBaseUrl")||null,ai_llm_model:value("aiLlmModel")||null,
+    min_video_fitness:number("minVideoFitness"),min_dynamic_score:number("minDynamicScore"),
+    max_text_overlay_fraction:number("maxTextOverlay"),max_persistent_text_fraction:number("maxPersistentText"),
+    min_motion_coverage:number("minMotionCoverage"),min_temporal_diversity:number("minTemporalDiversity"),
+    max_face_dominance:number("maxFaceDominance"),min_aesthetic_score:number("minAestheticScore"),
+    preview_gate:checked("previewGate"),sample_long_videos:checked("sampleLongVideos"),
+    long_video_segment_attempts:number("longVideoAttempts"),long_video_excerpt_seconds:number("longVideoExcerptSeconds"),auto_trim:checked("autoTrim"),visual_index_scenes:checked("visualIndexScenes")
   }
 });
 
@@ -283,12 +309,16 @@ $("manualIngestBtn").onclick=()=>{
       cookies_from_browser:value("manualCookies")||null,download_socket_timeout:number("manualSocketTimeout"),
       concurrent_fragments:number("manualFragments"),download_retries:number("manualRetries"),fragment_retries:number("manualFragmentRetries"),
       keep_audio:checked("manualKeepAudio"),no_scenes:checked("manualNoScenes"),no_visual_index:checked("manualNoVisualIndex"),
+      no_semantic_index:checked("manualNoSemanticIndex"),no_scene_classification:checked("manualNoSceneClassification"),
+      semantic_device:value("manualSemanticDevice")||"auto",semantic_model:value("manualSemanticModel")||"ViT-B-32",
+      semantic_pretrained:value("manualSemanticPretrained")||"laion2b_s34b_b79k",
       force:checked("manualForce"),verbose_ytdlp:checked("manualVerbose")
     }
   });
 };
 
 $("audioAiDoctorBtn").onclick=()=>startJob("audio-ai-doctor",{library:value("libraryPath"),options:{device:value("audioAiDevice"),model:"laion/clap-htsat-fused"}});
+$("musicAiDoctorBtn").onclick=()=>startJob("music-ai-doctor",{library:value("libraryPath"),options:{device:value("musicAiDevice"),model:value("musicAiModel")||"m-a-p/MERT-v1-95M"}});
 $("nativeBuildBtn").onclick=()=>startJob("native-build",{library:value("libraryPath"),options:{clean:true}});
 $("visualIndexBtn").onclick=()=>startJob("visual-index",{library:value("libraryPath"),options:{force:true,fps:6,max_frames:180}});
 $("codecDoctorBtn").onclick=()=>startJob("codec-doctor",{library:value("libraryPath"),options:{}});
@@ -722,3 +752,20 @@ installHelp();
 updateManualUrlCount();
 init().catch(e=>console.error(e));
 
+
+function installIntuitiveSliders(){
+  document.querySelectorAll('.slider-value[data-for]').forEach(out=>{
+    const input=$(out.dataset.for);
+    if(!input)return;
+    const render=()=>{
+      const step=String(input.step||'1');
+      const decimals=step.includes('.')?step.split('.')[1].length:0;
+      out.textContent=Number(input.value).toFixed(Math.min(decimals,3));
+      input.setAttribute('aria-valuetext',out.textContent);
+    };
+    input.addEventListener('input',render);
+    input.addEventListener('change',render);
+    render();
+  });
+}
+installIntuitiveSliders();

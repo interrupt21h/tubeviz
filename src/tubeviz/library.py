@@ -423,6 +423,45 @@ class ClipLibrary:
                 ).fetchall()
         return [str(row["term"]) for row in rows]
 
+    def visual_preference_profile(self, *, min_rejected_scenes: int = 3) -> dict[str, object] | None:
+        """Build a lightweight negative preference profile from manual rejects.
+
+        Rejection is an explicit curation signal. We intentionally do not treat
+        every READY clip as a positive rating; instead the profile only learns
+        which broad visual-feature region the user repeatedly rejected.
+        """
+        keys = ("motion", "complexity", "brightness", "saturation", "visual_entropy", "cut_rate")
+        sql = """
+            SELECT c.status, svf.data_json
+            FROM scene_visual_features svf
+            JOIN scenes s ON s.id=svf.scene_id
+            JOIN clips c ON c.id=s.clip_id
+            WHERE c.status IN ('ready','rejected_manual')
+        """
+        rejected: list[list[float]] = []
+        ready: list[list[float]] = []
+        with self.connect() as db:
+            rows = db.execute(sql).fetchall()
+        for row in rows:
+            try:
+                data = json.loads(row["data_json"])
+            except Exception:
+                continue
+            vec = [float(data.get(key, .0 if key == "cut_rate" else .5)) for key in keys]
+            (rejected if row["status"] == "rejected_manual" else ready).append(vec)
+        if len(rejected) < max(1, int(min_rejected_scenes)):
+            return None
+        import numpy as _np
+        r = _np.asarray(rejected, dtype=float)
+        profile: dict[str, object] = {
+            "keys": list(keys), "rejected_count": len(rejected),
+            "rejected_centroid": [float(x) for x in _np.mean(r, axis=0)],
+            "rejected_scale": [float(max(.08, x)) for x in _np.std(r, axis=0)],
+        }
+        if ready:
+            profile["ready_centroid"] = [float(x) for x in _np.mean(_np.asarray(ready, dtype=float), axis=0)]
+        return profile
+
     def scene_candidates(
         self,
         *,

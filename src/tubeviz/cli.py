@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import secrets
 import threading
@@ -13,6 +14,7 @@ import uvicorn
 from .analysis import AnalysisConfig, analyze_track
 from .director import direct
 from .ingest import IngestConfig, ingest_terms, ingest_urls, read_search_terms
+from .acquisition import AcquisitionConfig, plan_acquisition, summarize_library_coverage
 from .library import ClipLibrary
 from .server import create_app
 from .gui import create_gui_app
@@ -33,10 +35,47 @@ from .youtube import YouTubeSource
 from .visual_features import VisualFeatureConfig, index_scene_visual_features
 from .audio_ai import AudioAIConfig, attach_audio_semantics, audio_ai_doctor
 from .ai_music_director import AIDirectorConfig, attach_llm_directions, attach_semantic_directions
+from .choreography import ChoreographyConfig, attach_choreography
+from .music_ai import MusicAIConfig, attach_music_embeddings, music_ai_doctor
 from .codec_glitch import (
     CodecGlitchConfig, CodecGlitchError, codec_doctor,
     index_codec_motion_features, materialize_codec_timeline,
 )
+
+
+def _cmd_music_ai_doctor(args: argparse.Namespace) -> None:
+    print(json.dumps(music_ai_doctor(args.model, args.device), indent=2, sort_keys=True))
+
+
+def _cmd_choreography_inspect(args: argparse.Namespace) -> None:
+    timeline = DirectedTimeline.model_validate_json(Path(args.timeline).expanduser().read_text())
+    rows = []
+    for section in timeline.track.sections:
+        t = section.trajectory
+        if t is None:
+            continue
+        rows.append({
+            "section": section.index, "start": section.start, "end": section.end,
+            "label": section.label, "vibe": section.vibe, "phase": t.phase,
+            "tension": t.tension, "slope": t.tension_slope,
+            "build": t.build_probability, "drop": t.drop_probability,
+            "release": t.release_probability, "anticipation": t.anticipation,
+            "withholding": t.withholding, "time_to_peak": t.time_to_peak,
+            "music_novelty": section.music_embedding_novelty,
+            "music_velocity": section.music_embedding_velocity,
+        })
+    if args.json:
+        print(json.dumps({"visual_arc": [x.model_dump(mode="json") for x in timeline.track.visual_arc], "sections": rows}, indent=2))
+        return
+    for row in rows:
+        peak = "-" if row["time_to_peak"] is None else f'{row["time_to_peak"]:.1f}s'
+        print(
+            f'{row["section"]:3d} {row["start"]:7.2f}-{row["end"]:7.2f}s '
+            f'{row["phase"]:8s} tension={row["tension"]:.2f} slope={row["slope"]:+.2f} '
+            f'build={row["build"]:.2f} drop={row["drop"]:.2f} release={row["release"]:.2f} '
+            f'anticip={row["anticipation"]:.2f} hold={row["withholding"]:.2f} peak={peak} '
+            f'mertΔ={row["music_novelty"]:.2f}'
+        )
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
@@ -62,6 +101,25 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             tempo_octave_max=args.tempo_octave_max,
         ),
     )
+    if getattr(args, "music_ai", False):
+        analysis = attach_music_embeddings(
+            analysis, args.audio,
+            config=MusicAIConfig(
+                model=args.music_ai_model, device=args.music_ai_device,
+                window_seconds=args.music_ai_window, hop_seconds=args.music_ai_hop,
+                batch_size=args.music_ai_batch_size, layer=args.music_ai_layer,
+                cache_dir=args.music_ai_cache_dir, force=args.music_ai_force,
+            ),
+        )
+    if getattr(args, "choreography", True):
+        analysis = attach_choreography(
+            analysis,
+            ChoreographyConfig(
+                trajectory_strength=max(0.0, min(1.5, getattr(args, "trajectory_strength", 0.85))),
+                anticipation_seconds=max(1.0, getattr(args, "anticipation_seconds", 12.0)),
+                visual_arc_strength=max(0.0, min(1.5, getattr(args, "visual_arc_strength", 0.70))),
+            ),
+        )
     if getattr(args, "audio_ai", False):
         analysis = attach_audio_semantics(
             analysis,
@@ -93,6 +151,15 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
                     semantic_strength=args.ai_director_strength,
                 ),
             )
+    if getattr(args, "choreography", True):
+        analysis = attach_choreography(
+            analysis,
+            ChoreographyConfig(
+                trajectory_strength=max(0.0, min(1.5, getattr(args, "trajectory_strength", 0.85))),
+                anticipation_seconds=max(1.0, getattr(args, "anticipation_seconds", 12.0)),
+                visual_arc_strength=max(0.0, min(1.5, getattr(args, "visual_arc_strength", 0.70))),
+            ),
+        )
     timeline = direct(analysis)
     if args.library:
         library = ClipLibrary(args.library)
@@ -126,6 +193,9 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     codec_effects = sum(len(selection.direction.codec_effects) for selection in timeline.scene_plan)
     audio_ai_sections = sum(bool(section.audio_semantics) for section in analysis.sections)
     ai_directed_sections = sum(section.ai_direction is not None for section in analysis.sections)
+    trajectory_sections = sum(section.trajectory is not None for section in analysis.sections)
+    build_sections = sum(bool(section.trajectory and section.trajectory.build_probability >= .55) for section in analysis.sections)
+    drop_sections = sum(bool(section.trajectory and section.trajectory.drop_probability >= .55) for section in analysis.sections)
     print(
         f"Wrote {output}: "
         f"{analysis.duration:.1f}s, {tempo_summary}, "
@@ -135,14 +205,34 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         f"{unique_sources} unique primary clips/{len(all_source_ids)} including companions, "
         f"codec_fx={codec_effects} across {codec_shots} shots, "
         f"audio_ai_sections={audio_ai_sections} ai_directed_sections={ai_directed_sections}, "
+        f"trajectory_sections={trajectory_sections} builds={build_sections} drops={drop_sections}, "
         f"vibes={','.join(vibes) if vibes else '-'}"
     )
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
-    terms = read_search_terms(args.terms)
+    plan = None
+    if args.visual_brief:
+        _planning_library = ClipLibrary(args.library); _planning_library.initialize()
+        _coverage = summarize_library_coverage(_planning_library)
+        plan = plan_acquisition(AcquisitionConfig(
+            visual_brief=args.visual_brief, audio=args.audio, target_clips=args.target_clips,
+            query_count=args.acquisition_query_count, llm_base_url=args.ai_llm_base_url,
+            llm_model=args.ai_llm_model, llm_api_key=args.ai_llm_api_key,
+            negative_concepts=tuple(x.strip() for x in args.ai_negative_concepts.split(",") if x.strip()),
+            library_summary=_coverage,
+        ))
+        terms = plan.queries
+        print("Acquisition plan:")
+        if plan.audio_summary: print(f"  audio: {plan.audio_summary}")
+        for role in plan.roles: print(f"  role: {role.get('role','visual')} need={role.get('need','-')}")
+        for q in terms: print(f"  query: {q}")
+    elif args.terms:
+        terms = read_search_terms(args.terms)
+    else:
+        raise SystemExit("Provide either --terms FILE or --visual-brief TEXT")
     if not terms:
-        raise SystemExit(f"No search terms found in {args.terms}")
+        raise SystemExit("No acquisition/search queries were produced")
 
     library = ClipLibrary(args.library)
     source = YouTubeSource(
@@ -157,7 +247,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         terms,
         library,
         config=IngestConfig(
-            results_per_term=args.results_per_term,
+            results_per_term=(max(1, (args.target_clips + len(terms) - 1) // len(terms)) if plan else args.results_per_term),
             min_duration=args.min_duration,
             preferred_max_duration=args.preferred_max_duration,
             hard_max_duration=args.hard_max_duration,
@@ -173,8 +263,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             keep_audio=args.keep_audio,
             detect_scenes=not args.no_scenes,
             force=args.force,
-            ai_discovery=args.ai_discovery,
-            ai_query_expansion=args.ai_query_expansion,
+            ai_discovery=args.ai_discovery or bool(plan),
+            ai_query_expansion=(False if plan else args.ai_query_expansion),
             ai_query_count=args.ai_query_count,
             ai_candidates_per_term=args.ai_candidates_per_term,
             ai_model=args.ai_model,
@@ -194,6 +284,21 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             ai_llm_api_key=args.ai_llm_api_key,
             ai_index_scenes=args.ai_index_scenes,
             visual_index_scenes=args.visual_index_scenes,
+            preview_gate=args.preview_gate or bool(args.visual_brief),
+            preview_seconds=args.preview_seconds, preview_samples=args.preview_samples,
+            min_video_fitness=args.min_video_fitness,
+            min_dynamic_score=args.min_dynamic_score,
+            max_text_overlay_fraction=args.max_text_overlay_fraction,
+            max_persistent_text_fraction=args.max_persistent_text_fraction,
+            max_face_dominance=args.max_face_dominance,
+            min_motion_coverage=args.min_motion_coverage,
+            min_temporal_diversity=args.min_temporal_diversity,
+            min_aesthetic_score=args.min_aesthetic_score,
+            preview_positive_concepts=tuple(plan.positive_concepts) if plan else (),
+            sample_long_videos=args.sample_long_videos,
+            long_video_segment_attempts=args.long_video_segment_attempts,
+            long_video_excerpt_seconds=args.long_video_excerpt_seconds,
+            auto_trim=args.auto_trim, auto_trim_min_fitness=args.auto_trim_min_fitness,
         ),
         source=source,
     )
@@ -208,7 +313,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         f"ai_queries={summary.ai_queries} ai_scored={summary.ai_scored} ai_rejected={summary.ai_rejected} "
         f"ai_scene_embeddings={summary.ai_scene_embeddings} "
         f"visual_feature_scenes={summary.visual_feature_scenes} "
-        f"manual_rejected={summary.manual_rejected} "
+        f"manual_rejected={summary.manual_rejected} preview_scored={summary.preview_scored} preview_rejected={summary.preview_rejected} "
         f"quota_shortfall={summary.quota_shortfall} scenes={summary.scenes}"
     )
     print(f"Library: {library.root}")
@@ -225,7 +330,10 @@ def _cmd_ingest_url(args: argparse.Namespace) -> None:
         hard_max_duration=args.hard_max_duration, min_width=args.min_width, normalize_width=args.width,
         normalize_height=args.height, normalize_fps=args.fps, scene_threshold=args.scene_threshold,
         min_scene_seconds=args.min_scene_seconds, keep_audio=args.keep_audio, detect_scenes=not args.no_scenes,
-        force=args.force, visual_index_scenes=not args.no_visual_index))
+        force=args.force, visual_index_scenes=not args.no_visual_index,
+        manual_semantic_index=not args.no_semantic_index, manual_semantic_device=args.semantic_device,
+        manual_semantic_model=args.semantic_model, manual_semantic_pretrained=args.semantic_pretrained,
+        manual_classify_scenes=not args.no_scene_classification))
     print("Manual ingest complete: " f"urls={len(args.urls)} accepted={summary.accepted} "
           f"existing={summary.skipped_existing} rejected={summary.rejected} downloaded={summary.downloaded} "
           f"ready={summary.ready} failed={summary.failed} scenes={summary.scenes}")
@@ -484,6 +592,14 @@ def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
         codec_glitch_mode=getattr(args, "codec_glitch", "off"),
         codec_glitch_intensity=max(0.0, getattr(args, "codec_glitch_intensity", 0.65)),
         audio_visual_match_weight=max(0.0, getattr(args, "audio_visual_match_weight", 1.10)),
+        sequence_lookahead=max(1, getattr(args, "sequence_lookahead", 5)),
+        sequence_beam_width=max(1, getattr(args, "sequence_beam_width", 6)),
+        sequence_candidate_pool=max(4, getattr(args, "sequence_candidate_pool", 18)),
+        trajectory_weight=max(0.0, getattr(args, "trajectory_weight", 0.85)),
+        anticipation_weight=max(0.0, getattr(args, "anticipation_weight", 0.75)),
+        effect_compatibility_weight=max(0.0, getattr(args, "effect_compatibility_weight", 0.60)),
+        preference_learning=getattr(args, "preference_learning", True),
+        preference_weight=max(0.0, getattr(args, "preference_weight", 0.35)),
     )
 
 
@@ -765,6 +881,9 @@ def _cmd_audio_ai_inspect(args: argparse.Namespace) -> None:
             "entropy": section.audio_semantic_entropy,
             "concepts": top,
             "direction": section.ai_direction.model_dump(mode="json") if section.ai_direction else None,
+            "trajectory": section.trajectory.model_dump(mode="json") if section.trajectory else None,
+            "music_embedding_novelty": section.music_embedding_novelty,
+            "music_embedding_velocity": section.music_embedding_velocity,
         })
     if args.json:
         print(json.dumps({"model": timeline.track.audio_ai_model, "sections": rows}, indent=2))
@@ -786,6 +905,16 @@ def _cmd_audio_ai_inspect(args: argparse.Namespace) -> None:
                 f"continuity={direction.get('continuity',0):.2f} "
                 f"fx={direction.get('effect_family') or '-'}"
             )
+        trajectory = row.get("trajectory") or {}
+        if trajectory:
+            print(
+                f"    trajectory={trajectory.get('phase','-')} "
+                f"tension={trajectory.get('tension',0):.2f} "
+                f"build={trajectory.get('build_probability',0):.2f} "
+                f"drop={trajectory.get('drop_probability',0):.2f} "
+                f"release={trajectory.get('release_probability',0):.2f} "
+                f"anticipation={trajectory.get('anticipation',0):.2f}"
+            )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -796,15 +925,35 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     ingest = sub.add_parser("ingest", help="Search YouTube and build/update a local clip library")
-    ingest.add_argument("--terms", required=True, help="Text file containing one search term per line")
+    ingest.add_argument("--terms", help="Text file containing one search term per line (legacy/manual discovery mode)")
     ingest.add_argument("--library", default="./library", help="Persistent tubeviz clip library")
+    ingest.add_argument("--visual-brief", help="Theme-first visual brief; an LLM/heuristic planner generates diverse acquisition queries")
+    ingest.add_argument("--audio", help="Optional song used to inform theme-first acquisition planning")
+    ingest.add_argument("--target-clips", type=int, default=40, help="Desired overall acquisition size for planning")
+    ingest.add_argument("--acquisition-query-count", type=int, default=24, help="Number of diverse searches generated from a visual brief")
+    ingest.add_argument("--preview-gate", action=argparse.BooleanOptionalAction, default=False, help="Sample promising candidates before full download and reject low-fitness footage")
+    ingest.add_argument("--preview-seconds", type=float, default=4.0, help="Seconds per strategic preview sample")
+    ingest.add_argument("--preview-samples", type=int, default=4, help="Strategic temporal samples per candidate")
+    ingest.add_argument("--min-video-fitness", type=float, default=0.18, help="Minimum overall semantic/dynamic preview fitness before download")
+    ingest.add_argument("--min-dynamic-score", type=float, default=0.24, help="Hard minimum motion/dynamicness score; prevents semantic relevance from rescuing static footage")
+    ingest.add_argument("--max-text-overlay-fraction", type=float, default=0.10, help="Reject probes whose detected text-like regions occupy more than this fraction")
+    ingest.add_argument("--max-persistent-text-fraction", type=float, default=0.045, help="Reject persistent captions/logos occupying more than this frame fraction")
+    ingest.add_argument("--max-face-dominance", type=float, default=0.42, help="Reject presenter/talking-head-like probes dominated by faces")
+    ingest.add_argument("--min-motion-coverage", type=float, default=0.20, help="Minimum fraction of frame area participating in optical-flow motion")
+    ingest.add_argument("--min-temporal-diversity", type=float, default=0.12, help="Minimum frame-to-frame visual diversity")
+    ingest.add_argument("--min-aesthetic-score", type=float, default=0.22, help="Minimum exposure/sharpness/color aesthetic heuristic")
+    ingest.add_argument("--sample-long-videos", action=argparse.BooleanOptionalAction, default=True, help="For sources longer than --hard-max-duration, probe randomized regions and ingest only a bounded segment instead of rejecting the source")
+    ingest.add_argument("--long-video-segment-attempts", type=int, default=8, help="Stratified randomized preview windows considered when choosing a segment from a long source")
+    ingest.add_argument("--long-video-excerpt-seconds", type=float, default=45.0, help="Downloaded excerpt length for long sources; bounded by --hard-max-duration")
+    ingest.add_argument("--auto-trim", action=argparse.BooleanOptionalAction, default=True, help="Automatically trim low-dynamic intro/outro scene runs after indexing")
+    ingest.add_argument("--auto-trim-min-fitness", type=float, default=0.22, help="Scene fitness threshold used for automatic edge trimming")
     ingest.add_argument("--results-per-term", type=int, default=10, help="Desired READY clips per term")
     ingest.add_argument("--search-pool", type=int, default=50, help="Initial ytsearch result window per term")
     ingest.add_argument("--max-search-pool", type=int, default=250, help="Maximum progressively expanded ytsearch window per term")
     ingest.add_argument("--search-pool-step", type=int, default=50, help="How many additional search results to request when the READY quota is not filled")
     ingest.add_argument("--min-duration", type=float, default=3.0, help="Reject shorter videos, seconds")
     ingest.add_argument("--preferred-max-duration", type=float, default=1200.0, help="Soft preference for shorter source videos; seconds; 0 disables")
-    ingest.add_argument("--hard-max-duration", type=float, default=3600.0, help="Actually reject source videos longer than this; seconds; 0 disables")
+    ingest.add_argument("--hard-max-duration", type=float, default=3600.0, help="Maximum downloaded clip/segment length in seconds. Longer finite search results are sampled when --sample-long-videos is enabled; 0 disables")
     ingest.add_argument("--min-width", type=int, default=0, help="Reject videos narrower than this; 0 disables")
     ingest.add_argument("--width", type=int, default=1280, help="Normalized frame width")
     ingest.add_argument("--height", type=int, default=720, help="Normalized frame height")
@@ -890,7 +1039,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional OpenAI-compatible base URL, e.g. http://localhost:8000/v1",
     )
     ingest.add_argument("--ai-llm-model", help="Optional model name for AI query expansion")
-    ingest.add_argument("--ai-llm-api-key", help="Optional bearer token for the LLM endpoint")
+    ingest.add_argument("--ai-llm-api-key", default=os.environ.get("TUBEVIZ_LLM_API_KEY"),
+                        help="Optional bearer token for the LLM endpoint; defaults to TUBEVIZ_LLM_API_KEY")
     ingest.add_argument(
         "--ai-index-scenes",
         action=argparse.BooleanOptionalAction,
@@ -921,6 +1071,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_url.add_argument("--keep-audio", action="store_true")
     ingest_url.add_argument("--no-scenes", action="store_true")
     ingest_url.add_argument("--no-visual-index", action="store_true", help="Skip decoded visual-feature indexing")
+    ingest_url.add_argument("--no-semantic-index", action="store_true", help="Skip OpenCLIP scene embeddings")
+    ingest_url.add_argument("--no-scene-classification", action="store_true", help="Skip zero-shot semantic scene labels")
+    ingest_url.add_argument("--semantic-device", default="auto", help="OpenCLIP device for manual scene classification")
+    ingest_url.add_argument("--semantic-model", default="ViT-B-32")
+    ingest_url.add_argument("--semantic-pretrained", default="laion2b_s34b_b79k")
     ingest_url.add_argument("--force", action="store_true")
     ingest_url.add_argument("--cookies-from-browser", metavar="BROWSER")
     ingest_url.add_argument("--download-socket-timeout", type=float, default=20.0)
@@ -1034,6 +1189,20 @@ def build_parser() -> argparse.ArgumentParser:
     embed.add_argument("--force", action="store_true")
     embed.set_defaults(func=_cmd_library_embed)
 
+    choreography = sub.add_parser("choreography", help="Inspect phrase-level build/drop/release choreography")
+    choreography_sub = choreography.add_subparsers(dest="choreography_command", required=True)
+    choreography_inspect = choreography_sub.add_parser("inspect", help="Inspect stored trajectory/visual-arc decisions")
+    choreography_inspect.add_argument("timeline")
+    choreography_inspect.add_argument("--json", action="store_true")
+    choreography_inspect.set_defaults(func=_cmd_choreography_inspect)
+
+    music_ai = sub.add_parser("music-ai", help="Music-specific MERT representation tools")
+    music_ai_sub = music_ai.add_subparsers(dest="music_ai_command", required=True)
+    music_ai_doc = music_ai_sub.add_parser("doctor", help="Inspect optional MERT/torch runtime and device compatibility")
+    music_ai_doc.add_argument("--model", default="m-a-p/MERT-v1-95M")
+    music_ai_doc.add_argument("--device", default="auto")
+    music_ai_doc.set_defaults(func=_cmd_music_ai_doctor)
+
     audio_ai = sub.add_parser("audio-ai", help="CLAP audio-semantic analysis tools")
     audio_ai_sub = audio_ai.add_subparsers(dest="audio_ai_command", required=True)
     audio_ai_doc = audio_ai_sub.add_parser("doctor", help="Inspect CLAP/Transformers runtime availability")
@@ -1070,6 +1239,15 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--semantic-model", default="ViT-B-32")
     analyze.add_argument("--semantic-pretrained", default="laion2b_s34b_b79k")
     analyze.add_argument("--semantic-device", default="auto")
+    analyze.add_argument("--music-ai", action=argparse.BooleanOptionalAction, default=False, help="Use optional MERT music embeddings for structural novelty/velocity cues")
+    analyze.add_argument("--music-ai-model", default="m-a-p/MERT-v1-95M")
+    analyze.add_argument("--music-ai-device", default="auto")
+    analyze.add_argument("--music-ai-window", type=float, default=8.0)
+    analyze.add_argument("--music-ai-hop", type=float, default=4.0)
+    analyze.add_argument("--music-ai-batch-size", type=int, default=4)
+    analyze.add_argument("--music-ai-layer", type=int, default=-1, help="MERT hidden-state layer; -1 uses the final layer")
+    analyze.add_argument("--music-ai-cache-dir")
+    analyze.add_argument("--music-ai-force", action="store_true")
     analyze.add_argument("--audio-ai", action=argparse.BooleanOptionalAction, default=False, help="Use CLAP sliding-window audio semantics to direct scene selection and effects")
     analyze.add_argument("--audio-ai-model", default="laion/clap-htsat-fused")
     analyze.add_argument("--audio-ai-device", default="auto")
@@ -1080,6 +1258,18 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--audio-ai-cache-dir")
     analyze.add_argument("--audio-ai-force", action="store_true", help="Ignore cached CLAP analysis")
     analyze.add_argument("--audio-visual-match-weight", type=float, default=1.10, help="Weight CLAP↔OpenCLIP common-concept alignment in scene ranking")
+    analyze.add_argument("--choreography", action=argparse.BooleanOptionalAction, default=True, help="Enable build/drop trajectory intelligence and whole-song visual arc planning")
+    analyze.add_argument("--trajectory-strength", type=float, default=0.85, help="Strength of build/drop/release trajectory influence on visual targets")
+    analyze.add_argument("--anticipation-seconds", type=float, default=12.0, help="How far ahead choreography begins preparing for an approaching peak/drop")
+    analyze.add_argument("--visual-arc-strength", type=float, default=0.70, help="Strength of whole-song visual arc continuity/evolution")
+    analyze.add_argument("--sequence-lookahead", type=int, default=5, help="Number of future shots considered by multi-shot sequence optimization")
+    analyze.add_argument("--sequence-beam-width", type=int, default=6, help="Beam width for multi-shot clip-sequence optimization")
+    analyze.add_argument("--sequence-candidate-pool", type=int, default=18, help="Top candidate scenes considered at each beam-search step")
+    analyze.add_argument("--trajectory-weight", type=float, default=0.85, help="Weight of build/drop trajectory compatibility in scene ranking")
+    analyze.add_argument("--anticipation-weight", type=float, default=0.75, help="Weight of transition progression toward upcoming impact")
+    analyze.add_argument("--effect-compatibility-weight", type=float, default=0.60, help="Prefer footage whose motion/complexity suits the intended transform family")
+    analyze.add_argument("--preference-learning", action=argparse.BooleanOptionalAction, default=True, help="Use manually rejected clips as soft negative visual-preference examples")
+    analyze.add_argument("--preference-weight", type=float, default=0.35, help="Strength of learned manual-rejection preference signal")
     analyze.add_argument("--ai-director", action=argparse.BooleanOptionalAction, default=False, help="Refine CLAP section directions with a whole-song OpenAI-compatible LLM plan")
     analyze.add_argument("--ai-director-base-url", help="OpenAI-compatible base URL, e.g. http://localhost:8000/v1")
     analyze.add_argument("--ai-director-model")
@@ -1264,6 +1454,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--novelty-weight", type=float, default=0.65)
     serve.add_argument("--visual-match-weight", type=float, default=1.25)
     serve.add_argument("--transition-weight", type=float, default=0.70)
+    serve.add_argument("--sequence-lookahead", type=int, default=5)
+    serve.add_argument("--sequence-beam-width", type=int, default=6)
+    serve.add_argument("--sequence-candidate-pool", type=int, default=18)
+    serve.add_argument("--trajectory-weight", type=float, default=0.85)
+    serve.add_argument("--anticipation-weight", type=float, default=0.75)
+    serve.add_argument("--effect-compatibility-weight", type=float, default=0.60)
+    serve.add_argument("--preference-learning", action=argparse.BooleanOptionalAction, default=True)
+    serve.add_argument("--preference-weight", type=float, default=0.35)
     serve.add_argument("--rhythm-alignment", action=argparse.BooleanOptionalAction, default=True)
     serve.add_argument("--visual-auto-index", action=argparse.BooleanOptionalAction, default=True)
     serve.add_argument("--vector-effects", action=argparse.BooleanOptionalAction, default=True)

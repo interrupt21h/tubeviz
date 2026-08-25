@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
+from tubeviz import __version__
 
 
 def _static(name: str) -> str:
@@ -39,9 +40,9 @@ def test_every_static_form_control_gets_contextual_help_and_cli_help_is_inherite
 
 def test_studio_assets_are_versioned_and_version_visible():
     html = _static("gui.html")
-    assert 'gui.css?v=0.26.10' in html
-    assert 'gui.js?v=0.26.10' in html
-    assert 'v0.26.10' in html
+    assert f"gui.css?v={__version__}" in html
+    assert f"gui.js?v={__version__}" in html
+    assert 'id="studioVersion"' in html
 
 
 def test_help_tooltip_uses_body_portal():

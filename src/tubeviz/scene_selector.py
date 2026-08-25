@@ -15,6 +15,10 @@ from .models import CompositeLayer, DirectedTimeline, SceneIntent, SceneSelectio
 from .transforms import TransformConfig, attach_transform_plan
 from .editing import EditConfig, attach_edit_plan
 from .visual_features import index_scene_visual_features
+from .choreography import (
+    effect_compatibility_score, shot_trajectory, trajectory_scene_score,
+    trajectory_transition_score,
+)
 from .visual_director import (
     aligned_excerpt,
     build_visual_direction,
@@ -66,6 +70,15 @@ class SceneSelectorConfig:
     codec_glitch_mode: str = "off"
     codec_glitch_intensity: float = 0.65
     audio_visual_match_weight: float = 1.10
+    # v0.27 phrase-aware multi-shot optimization.
+    sequence_lookahead: int = 5
+    sequence_beam_width: int = 6
+    sequence_candidate_pool: int = 18
+    trajectory_weight: float = 0.85
+    anticipation_weight: float = 0.75
+    effect_compatibility_weight: float = 0.60
+    preference_learning: bool = True
+    preference_weight: float = 0.35
 
 
 _SECTION_DESCRIPTORS = {
@@ -264,6 +277,132 @@ def _choose_scene(
         ),
     )
 
+
+
+def _preference_score(candidate: SceneCandidate, profile: dict[str, object] | None) -> float:
+    if not profile or not candidate.visual_features:
+        return 0.0
+    keys = list(profile.get("keys", []))
+    rejected = list(profile.get("rejected_centroid", []))
+    scale = list(profile.get("rejected_scale", []))
+    if not keys or len(keys) != len(rejected):
+        return 0.0
+    values = [float(candidate.visual_features.get(key, .0 if key == "cut_rate" else .5)) for key in keys]
+    # Similarity to a repeatedly rejected region yields a negative score;
+    # distance saturates so a few odd rejects cannot dominate semantic matching.
+    norm_sq = 0.0
+    for i, value in enumerate(values):
+        sigma = float(scale[i]) if i < len(scale) else .2
+        norm_sq += ((value-float(rejected[i]))/max(.08,sigma))**2
+    distance = (norm_sq/max(1,len(values)))**.5
+    rejected_similarity = max(0.0, 1.0-distance/3.0)
+    ready = profile.get("ready_centroid")
+    positive = 0.0
+    if isinstance(ready, list) and len(ready) == len(values):
+        euclid = (sum((values[i]-float(ready[i]))**2 for i in range(len(values)))/len(values))**.5
+        positive = max(0.0, 1.0-euclid/.65)
+    return max(-1.0, min(1.0, .20*positive-.85*rejected_similarity))
+
+
+def _sequence_choose(
+    candidates: list[SceneCandidate],
+    *,
+    section,
+    windows: list[tuple[float, float]],
+    window_index: int,
+    previous: SceneCandidate | None,
+    semantic_scores: dict[int, float],
+    audio_visual_scores: dict[int, float],
+    recent_scene_ids: set[int],
+    recent_clip_ids: set[int],
+    used_clip_counts: Counter[int],
+    preferred_clip_id: int | None,
+    preference_profile: dict[str, object] | None,
+    cfg: SceneSelectorConfig,
+    salt: str,
+) -> SceneCandidate | None:
+    """Beam-search a short scene sequence and return its first scene.
+
+    Greedy per-shot matching can produce individually-good but collectively
+    incoherent cuts. This search scores short future sequences for semantic fit,
+    trajectory progression, effect compatibility, transitions and source reuse.
+    Exact cut times remain owned by the beat-aligned shot planner.
+    """
+    usable = [c for c in candidates if c.duration > 0]
+    if not usable:
+        return None
+    depth = min(max(1, cfg.sequence_lookahead), len(windows)-window_index)
+    beam_width = max(1, cfg.sequence_beam_width)
+    pool_size = max(4, cfg.sequence_candidate_pool)
+    section_span = max(.05, float(section.end-section.start))
+
+    def progress_for(idx: int) -> float:
+        a, b = windows[idx]
+        return min(1.0, max(0.0, ((a+b)*.5-section.start)/section_span))
+
+    p0 = progress_for(window_index)
+    def static_score(c: SceneCandidate, progress: float) -> float:
+        return (
+            semantic_scores.get(c.scene_id, 0.0)
+            + cfg.visual_match_weight * visual_match_score(c, section)
+            + cfg.audio_visual_match_weight * section.audio_semantic_confidence
+              * audio_visual_scores.get(c.scene_id, 0.0)
+            + cfg.trajectory_weight * trajectory_scene_score(c, section, progress)
+            + cfg.effect_compatibility_weight * effect_compatibility_score(c, section)
+            + cfg.preference_weight * _preference_score(c, preference_profile)
+        )
+
+    initial = sorted(usable, key=lambda c: (-static_score(c, p0), c.scene_id))[:pool_size]
+    if preferred_clip_id is not None:
+        preferred = [c for c in usable if c.clip_id == preferred_clip_id]
+        for c in preferred[:4]:
+            if c not in initial:
+                initial.append(c)
+
+    # (score, sequence, local clip counts)
+    beams: list[tuple[float, tuple[SceneCandidate, ...], Counter[int]]] = [(0.0, tuple(), Counter())]
+    for step in range(depth):
+        progress = progress_for(window_index+step)
+        candidates_step = initial if step == 0 else sorted(
+            usable, key=lambda c: (-static_score(c, progress), c.scene_id)
+        )[:pool_size]
+        if step == 0 and preferred_clip_id is not None:
+            preferred_step = [c for c in usable if c.clip_id == preferred_clip_id]
+            fresh_preferred = [c for c in preferred_step if c.scene_id not in recent_scene_ids]
+            if fresh_preferred:
+                preferred_step = fresh_preferred
+            if preferred_step:
+                candidates_step = preferred_step
+        expanded: list[tuple[float, tuple[SceneCandidate, ...], Counter[int]]] = []
+        for score, sequence, local_counts in beams:
+            prev = sequence[-1] if sequence else previous
+            for candidate in candidates_step:
+                base = static_score(candidate, progress)
+                transition = cfg.transition_weight * transition_score(prev, candidate, section)
+                anticipation = cfg.anticipation_weight * trajectory_transition_score(prev, candidate, section, progress)
+                # Cooldowns are soft inside the lookahead: impossible hard filters can
+                # collapse a beam in small libraries, while penalties preserve escape paths.
+                penalty = 0.0
+                if candidate.scene_id in recent_scene_ids:
+                    penalty += .80
+                if candidate.clip_id in recent_clip_ids:
+                    penalty += .48
+                total_uses = used_clip_counts.get(candidate.clip_id, 0) + local_counts.get(candidate.clip_id, 0)
+                penalty += min(.85, total_uses*.10*max(.25, cfg.novelty_weight))
+                if sequence and candidate.clip_id == sequence[-1].clip_id:
+                    penalty += .38
+                if preferred_clip_id is not None and step == 0 and candidate.clip_id == preferred_clip_id:
+                    base += .80
+                jitter = _seed_unit(cfg.selection_seed, f"beam:{salt}:{step}:{candidate.scene_id}") * max(0.0, cfg.selection_variation)
+                discount = .88**step
+                next_counts = local_counts.copy()
+                next_counts[candidate.clip_id] += 1
+                expanded.append((score + discount*(base+transition+anticipation+jitter-penalty), sequence+(candidate,), next_counts))
+        expanded.sort(key=lambda item: (-item[0], tuple(c.scene_id for c in item[1])))
+        beams = expanded[:beam_width]
+        if not beams:
+            break
+    return beams[0][1][0] if beams and beams[0][1] else None
 
 def _composition_mode(
     label: str,
@@ -471,6 +610,7 @@ def build_scene_plan(
     embedder: OpenClipEmbedder | None = None
     all_embeddings: dict[int, np.ndarray] = {}
     global_candidates = library.scene_candidates(min_duration=cfg.min_scene_seconds)
+    preference_profile = library.visual_preference_profile() if cfg.preference_learning and cfg.preference_weight > 0 else None
     if cfg.visual_auto_index and any(candidate.visual_features is None for candidate in global_candidates):
         # One-time backfill for libraries created before visual fingerprints
         # existed. Features are persisted, so subsequent analysis is cheap.
@@ -590,25 +730,41 @@ def build_scene_plan(
                     + cfg.audio_visual_match_weight
                     * section.audio_semantic_confidence
                     * audio_visual_scores.get(candidate.scene_id, 0.0)
+                    + cfg.trajectory_weight * trajectory_scene_score(
+                        candidate, section,
+                        ((shot_start + shot_end) * .5 - section.start) / max(.05, section.end-section.start),
+                    )
+                    + cfg.effect_compatibility_weight * effect_compatibility_score(candidate, section)
+                    + cfg.preference_weight * _preference_score(candidate, preference_profile)
                 )
                 for candidate in candidates
             }
-            selected = _choose_scene(
-                candidates,
-                target_duration=shot_duration,
-                salt=salt,
-                recent_scene_ids=set(recent_scenes),
-                recent_clip_ids=set(recent_clips),
-                semantic_scores=shot_scores,
-                preferred_clip_id=preferred_clip,
-                ordinal=occurrence,
-                selection_seed=cfg.selection_seed,
-                selection_variation=cfg.selection_variation,
-                used_clip_counts=used_clip_counts,
-                target_unique_clips=target_unique_clips,
-                novelty_weight=cfg.novelty_weight,
-                novelty_candidate_fraction=cfg.novelty_candidate_fraction,
-            )
+            selected = None
+            if cfg.sequence_lookahead > 1 and len(candidates) > 1 and preferred_clip is None:
+                selected = _sequence_choose(
+                    candidates, section=section, windows=windows, window_index=local_shot_index,
+                    previous=previous_primary, semantic_scores=semantic_scores,
+                    audio_visual_scores=audio_visual_scores, recent_scene_ids=set(recent_scenes),
+                    recent_clip_ids=set(recent_clips), used_clip_counts=used_clip_counts,
+                    preferred_clip_id=preferred_clip, preference_profile=preference_profile, cfg=cfg, salt=salt,
+                )
+            if selected is None:
+                selected = _choose_scene(
+                    candidates,
+                    target_duration=shot_duration,
+                    salt=salt,
+                    recent_scene_ids=set(recent_scenes),
+                    recent_clip_ids=set(recent_clips),
+                    semantic_scores=shot_scores,
+                    preferred_clip_id=preferred_clip,
+                    ordinal=occurrence,
+                    selection_seed=cfg.selection_seed,
+                    selection_variation=cfg.selection_variation,
+                    used_clip_counts=used_clip_counts,
+                    target_unique_clips=target_unique_clips,
+                    novelty_weight=cfg.novelty_weight,
+                    novelty_candidate_fraction=cfg.novelty_candidate_fraction,
+                )
 
             if selected is None:
                 fallback_key = "*"
@@ -695,6 +851,7 @@ def build_scene_plan(
                 transition=transition_score(previous_primary, selected, section),
                 occurrence=occurrence,
                 shot_index_in_section=local_shot_index,
+                shot_progress=((shot_start + shot_end) * .5 - section.start) / max(.05, section.end-section.start),
                 vector_enabled=cfg.vector_effects,
                 vector_intensity=cfg.vector_intensity,
                 codec_glitch_mode=cfg.codec_glitch_mode,

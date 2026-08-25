@@ -184,6 +184,7 @@ def _track_summary(track: TrackAnalysis) -> list[dict[str, Any]]:
                 [key, round(value, 4)] for key, value in top_audio_concepts(section, 7)
             ],
             "semantic_confidence": round(section.audio_semantic_confidence, 3),
+            "trajectory": section.trajectory.model_dump(mode="json") if section.trajectory else None,
             "baseline": section.ai_direction.model_dump(mode="json") if section.ai_direction else None,
         })
     return out
@@ -211,7 +212,7 @@ def _director_prompt(track: TrackAnalysis) -> str:
         "You are the high-level music-video director for tubeviz. Plan the visual arc of the whole track. "
         "Do NOT select filenames, clip IDs, or exact cut times. The deterministic optimizer owns those. "
         "Use callbacks and controlled evolution: avoid changing visual worlds arbitrarily every section. "
-        "Reserve the strongest contrast/effects for builds, drops, mutations and payoffs. Return JSON only.\n\n"
+        "Use the supplied trajectory fields (build/drop/release probability, tension slope, anticipation, withholding) to create coherent escalation and payoff. Reserve the strongest contrast/effects for builds, drops, mutations and payoffs; keep pre-drop withholding when it creates useful contrast. Return JSON only.\n\n"
         f"Required schema example:\n{json.dumps(schema, indent=2)}\n\n"
         f"Track analysis:\n{json.dumps(_track_summary(track), indent=2)}"
     )

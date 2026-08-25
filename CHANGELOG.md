@@ -1,4 +1,67 @@
+# 0.29.2 — Intuitive Studio ranges
+
+- Replaced ambiguous normalized numeric controls with bounded sliders for directing, effects, and acquisition-quality thresholds.
+- Added live numeric readouts and human-readable endpoint/recommended-range labels.
+- Kept element IDs and exact numeric values unchanged so CLI generation and saved workflows remain compatible.
+
+# 0.29.1 — Manual URL semantic scene ingestion
+
+- Manual YouTube URL ingest now automatically detects scenes, generates thumbnails, indexes temporal visual features, creates OpenCLIP scene embeddings, and assigns zero-shot semantic labels by default.
+- Added semantic labels for crowd, dancing, nightlife, city, tunnels, transport, industrial, architecture, nature, water, abstract imagery, lights, human closeups, performance, moving POV, macro, space, fire, smoke, text-heavy footage, talking heads, and static presentations.
+- Added Manual Ingest Studio controls for OpenCLIP device/model/weights and explicit opt-outs for semantic embeddings or scene classification.
+- Semantic labels are persisted in each scene's visual-feature record so downstream tooling and future Studio inspection can reuse them without re-running inference.
+
+## 0.29.0
+
+- Replaced permissive preview dynamicness proxy with optical-flow motion coverage and temporal-diversity analysis.
+- Added explicit hard gates for text occupancy, persistent text overlays, face dominance, motion coverage, temporal diversity, and aesthetic quality.
+- Added OpenCV-based text-region detection without OCR and bundled face-dominance detection.
+- Long videos now default to eight stratified randomized probes and a 45-second yt-dlp range around the strongest passing region rather than downloading a huge bounded chunk.
+- Probe selection filters quality failures before ranking, so a flashy title card cannot win merely by having high pixel activity.
+- Studio exposes every quality threshold and long-video excerpt length.
+- Per-probe logs report the measurements responsible for acceptance/rejection.
+
 # Changelog
+
+## 0.28.2
+
+- Make preview dynamicness a hard ingest gate via `--min-dynamic-score`, preventing semantic/theme similarity from rescuing nearly static footage.
+- Reweight music-video fitness toward actual motion and motion entropy, with an explicit static-content penalty.
+- Keep long finite YouTube search results eligible by default: probe randomized source windows, choose the strongest region, and download only a bounded range with yt-dlp.
+- Add `--sample-long-videos` / `--no-sample-long-videos` and `--long-video-segment-attempts`.
+- Reinterpret automatic-discovery `--hard-max-duration` as the maximum downloaded clip/segment duration when long-video sampling is enabled.
+- Expose the new dynamic and long-source controls in Studio and Command Center.
+
+
+## 0.28.1 - Visual brief planner and Studio version fix
+
+- Fixed deterministic visual-brief fallback producing paragraph-sized YouTube searches.
+- Added strict short-query normalization for deterministic and LLM acquisition plans.
+- Negative concepts are kept out of YouTube queries and applied downstream as semantic rejection signals.
+- Acquisition query count is now filled to the requested target when an LLM returns too few queries.
+- Added Studio acquisition-planner endpoint/model/API-key controls; API keys are passed through `TUBEVIZ_LLM_API_KEY` rather than argv.
+- Studio version now comes from `tubeviz.__version__` instead of stale hard-coded 0.27.0 values.
+- Added regression tests for the Delilah-style long visual brief and LLM query shortfalls.
+
+## 0.27.0
+
+### Added
+
+- Added phrase-level tension/build/drop/release trajectory analysis with anticipation, time-to-peak, pre-drop withholding, and continuous visual targets.
+- Added multi-shot beam-search scene planning with configurable lookahead, beam width, candidate pool, trajectory weight, and transition anticipation weight.
+- Added effect/footage compatibility scoring so transform families are matched to source motion/complexity rather than indiscriminately applied.
+- Added persisted whole-song `visual_arc` and per-section trajectory metadata.
+- Added `tubeviz choreography inspect` with text and JSON output.
+- Added optional MERT (`m-a-p/MERT-v1-95M`) music-representation analysis for section novelty/velocity; MERT remains opt-in and uses the existing audio-AI dependency set.
+- Added `tubeviz music-ai doctor`.
+- Added soft preference learning from manually rejected clips using persisted visual features.
+- Added curated Studio controls/help for choreography, sequence planning, MERT and preference-learning parameters; Command Center remains complete automatically.
+
+### Changed
+
+- Visual transform/vector/codec strength now follows phrase trajectory, including deliberate pre-drop restraint and impact amplification.
+- The optional whole-song LLM director now receives trajectory metadata and explicit build/drop/release guidance.
+- CLAP/OpenCLIP/MERT `auto` device resolution validates PyTorch's compiled CUDA architecture list against the detected GPU and falls back safely when incompatible.
 
 ## 0.26.10
 
@@ -379,3 +442,16 @@ Initial releases established:
 - deterministic scene planning and motif-aware source reuse;
 - the FastAPI/WebSocket interactive visualizer;
 - browser video crossfades and indexed scene-range looping.
+
+## 0.28.0 - Theme-first AI acquisition
+
+- Added natural-language `--visual-brief` ingestion with optional `--audio` conditioning.
+- Added structured OpenAI-compatible LLM acquisition planning with deterministic fallback.
+- Added library-coverage context so discovery can seek underrepresented footage rather than blindly repeating saturated concepts.
+- Added explicit positive/negative visual vocabulary for dynamic music-video suitability.
+- Added strategic yt-dlp partial-video preview downloads before full source acquisition.
+- Added OpenCLIP + temporal visual music-video fitness scoring and `--min-video-fitness` rejection.
+- Added automatic weak intro/outro scene trimming after scene visual indexing.
+- Added target-aware query quota distribution and disables redundant second-level query expansion for generated acquisition plans.
+- Added Studio Visual Brief, preview-gate, fitness and auto-trim controls plus Command Center parity.
+- Search-term ingestion remains supported as the legacy/manual discovery path.

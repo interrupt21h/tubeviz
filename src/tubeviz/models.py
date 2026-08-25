@@ -52,6 +52,38 @@ class SectionAIDirection(BaseModel):
     notes: str = ""
 
 
+class SectionTrajectory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tension: float = Field(default=0.0, ge=0.0, le=1.0)
+    tension_slope: float = Field(default=0.0, ge=-1.0, le=1.0)
+    build_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    drop_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    release_probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    time_to_peak: float | None = Field(default=None, ge=0.0)
+    phase: str = "space"
+    anticipation: float = Field(default=0.0, ge=0.0, le=1.0)
+    withholding: float = Field(default=0.0, ge=0.0, le=1.0)
+    target_motion: float = Field(default=0.5, ge=0.0, le=1.0)
+    target_complexity: float = Field(default=0.5, ge=0.0, le=1.0)
+    target_contrast: float = Field(default=0.35, ge=0.0, le=1.0)
+    target_edit_density: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class VisualArcPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section_index: int = Field(ge=0)
+    start: float = Field(ge=0.0)
+    end: float = Field(gt=0.0)
+    phase: str
+    intensity: float = Field(default=0.0, ge=0.0, le=1.0)
+    build: float = Field(default=0.0, ge=0.0, le=1.0)
+    payoff: float = Field(default=0.0, ge=0.0, le=1.0)
+    continuity: float = Field(default=0.5, ge=0.0, le=1.0)
+    visual_world: str = ""
+
+
 class AudioSemanticWindow(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -88,6 +120,9 @@ class Section(BaseModel):
     audio_semantic_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     audio_semantic_entropy: float = Field(default=1.0, ge=0.0, le=1.0)
     ai_direction: SectionAIDirection | None = None
+    trajectory: SectionTrajectory | None = None
+    music_embedding_novelty: float = Field(default=0.0, ge=0.0, le=1.0)
+    music_embedding_velocity: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class TrackAnalysis(BaseModel):
@@ -107,6 +142,10 @@ class TrackAnalysis(BaseModel):
     audio_ai_model: str | None = None
     audio_ai_concepts: list[str] = Field(default_factory=list)
     audio_ai_windows: list[AudioSemanticWindow] = Field(default_factory=list)
+    visual_arc: list[VisualArcPoint] = Field(default_factory=list)
+    music_ai_model: str | None = None
+    music_ai_device: str | None = None
+    music_ai_warning: str | None = None
 
 
 class MotifOccurrence(BaseModel):

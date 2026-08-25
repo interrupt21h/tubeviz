@@ -2,31 +2,74 @@
 
 # tubeviz
 
+## v0.29 acquisition quality
+
+Theme-first discovery now uses a quality-over-quantity preview gate. Candidate regions are measured with optical flow, temporal diversity, text-region occupancy/persistence, face dominance, and an exposure/sharpness/color aesthetic heuristic. These are hard gates: semantic similarity cannot rescue a static, caption-heavy, presenter-dominated probe. Long sources remain eligible; Tubeviz probes eight stratified randomized regions by default and downloads only a 45-second yt-dlp time range around the strongest passing region.
+
+Useful controls include `--max-text-overlay-fraction`, `--max-persistent-text-fraction`, `--min-motion-coverage`, `--min-temporal-diversity`, `--max-face-dominance`, `--min-aesthetic-score`, `--long-video-segment-attempts`, and `--long-video-excerpt-seconds`. Studio exposes the same controls.
+
+
+
+## v0.28.2: stronger dynamic-footage gating and long-source sampling
+
+Search ingestion now treats **dynamicness as a hard acceptance gate**, not merely one component of semantic fitness. A thematically relevant but nearly static source is rejected when its best sampled window does not meet `--min-dynamic-score` (default `0.24`).
+
+Long finite YouTube results are no longer automatically discarded just because the source duration exceeds `--hard-max-duration`. With `--sample-long-videos` enabled (the default), Tubeviz probes randomized time windows across the source, scores them for music-video fitness/dynamicness, chooses the strongest region, and uses yt-dlp range downloading to ingest only a bounded segment. `--hard-max-duration` therefore acts as the maximum downloaded clip/segment duration for automatic discovery.
+
+```bash
+tubeviz ingest \
+  --visual-brief 'euphoric nocturnal electronic energy, kinetic city movement and club silhouettes' \
+  --library ./library \
+  --preview-gate \
+  --min-video-fitness 0.18 \
+  --min-dynamic-score 0.24 \
+  --hard-max-duration 600 \
+  --sample-long-videos \
+  --long-video-segment-attempts 4
+```
+
+For a 45-minute candidate with a 600-second maximum, Tubeviz can sample multiple randomized windows and download a selected 10-minute range instead of rejecting all 45-minute sources. Use `--no-sample-long-videos` to restore strict source-duration rejection.
+
+
 **tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts, analyzes music for rhythm/tempo/structure/vibe, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders the result through either the native C++/FFmpeg backend or the browser renderer.
 
-Current version: **0.26.10**
+Current version: **0.28.1**
 
 ## Sample videos
 
-See what tubeviz produces in these example renders:
+These are complete videos produced with tubeviz:
 
-- [Tubeviz - Andrew Bayer feat. Alison May - Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
-- [Tubeviz - Step It Up - Stereo MC's](https://youtu.be/nrYzxJzPYbE)
+- [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
+- [Tubeviz — Step It Up — Stereo MC's](https://youtu.be/nrYzxJzPYbE)
 
 
-## What’s new in 0.26.10
+## What’s new in 0.28.x
 
-The current release completes the recent Studio usability, authentication, manual-ingest, and codec-materialization work:
+### 0.28.1 acquisition-planner reliability fixes
 
-- **Complete GUI/CLI parity:** Studio’s **Command Center** is generated from the live `argparse` tree, exposing every non-GUI leaf command and its current options without maintaining a second option list.
-- **Manual YouTube URL ingestion:** paste one or more explicit YouTube URLs into the full-width Studio editor or use `tubeviz ingest-url`; manually selected footage goes through the same normalization, scene detection, duplicate checks, thumbnails, and visual indexing as discovered clips.
-- **Hugging Face authentication:** Studio inherits `HF_TOKEN` when present or accepts a session-only token under **Project → AI credentials**. A token entered in Studio is passed to child jobs through their environment rather than command-line arguments or job metadata.
-- **Contextual help throughout Studio:** curated controls have tubeviz-specific `?` help, while Command Center help is derived from the current CLI parser, including defaults and choices. Tooltips are rendered in a document-level floating layer so cards and scroll containers cannot crop them.
-- **Reliable Studio upgrades:** HTML/static assets are served with no-cache headers, CSS/JavaScript URLs are versioned, and the running Studio version is visible in the header.
-- **Safer FFglitch materialization:** fractional FFglitch parameters are embedded directly in generated QuickJS rather than sent through FFglitch 0.10.2’s integer-only setup-parameter parser. Codec MP4s are finalized locally and transactionally published to the library, with automatic fallback when FFmpeg `+faststart` cannot reopen/shift an output.
-- **Current CLAP compatibility:** audio-semantic feature extraction supports current Hugging Face `BaseModelOutputWithPooling` returns as well as older tensor/tuple forms.
-- **Single native source tree:** `src/tubeviz/native_src/` is the canonical C++ renderer source; the old duplicate top-level native tree is gone.
-- **Apache-2.0 licensing:** the repository includes `LICENSE`, `NOTICE`, SPDX metadata, and explicit third-party media/dependency guidance.
+- Visual briefs are never sent to YouTube as paragraph-sized search strings. Both LLM and deterministic planner output are normalized into short, searchable queries.
+- Negative guidance such as “avoid text/logos/talking heads” remains in OpenCLIP rejection scoring instead of contaminating YouTube search syntax.
+- `--acquisition-query-count` is honored by filling LLM shortfalls with diverse deterministic queries.
+- Studio exposes the acquisition planner LLM endpoint/model/key in the normal AI Ingest workflow.
+- Studio displays its runtime version from `tubeviz.__version__`; the stale hard-coded v0.27 label is removed.
+
+
+v0.28 adds theme-first, audio-informed, library-aware AI footage acquisition with progressive metadata/thumbnail/preview gates, music-video fitness scoring, and automatic weak intro/outro trimming. The v0.27 choreography intelligence remains fully included.
+
+## Choreography intelligence introduced in 0.27.0
+
+v0.27 makes scene choice and effects **phrase-aware** rather than merely reactive to the current beat/section:
+
+- **Build/drop/release trajectory model:** every musical section now carries tension, tension slope, build/drop/release probabilities, anticipation, time-to-peak, pre-drop withholding, and continuous targets for motion, complexity, contrast, and edit density.
+- **Multi-shot beam-search planning:** the scene selector evaluates short future shot sequences (five shots by default) instead of greedily choosing every shot in isolation. Sequence scoring combines semantics, CLAP↔OpenCLIP alignment, motion/complexity trajectory, transition progression, source reuse, and novelty.
+- **Anticipation and payoff:** builds ramp nonlinearly toward future peaks; the last portion of a strong build can deliberately simplify/withhold effects before the impact, while drops get stronger contrast, transform, vector, bloom and codec treatment.
+- **Effect/footage compatibility:** source scenes are scored for whether their natural motion, complexity, entropy and internal cut rate are suitable for the intended `dream`, `liquid`, `analog`, `fracture`, `hyper`, `prismatic`, or `cinematic` treatment.
+- **Whole-song visual arc:** trajectory metadata is persisted in the timeline and supplied to the optional LLM director so higher-level treatment plans can reason about future escalation and release without owning exact clip IDs or cut times.
+- **Optional MERT music representations:** `--music-ai` uses `m-a-p/MERT-v1-95M` to measure music-specific embedding novelty/velocity between windows. These structural signals reinforce transitions and drop detection without pretending MERT is a text-semantic model.
+- **Preference learning from curation:** after enough manual rejects exist, tubeviz builds a soft negative visual-feature profile and gently avoids scenes resembling repeatedly rejected footage. It is a weighted ranking signal, not a blacklist.
+- **Safer `auto` AI devices:** CLAP, OpenCLIP and MERT now verify that the installed PyTorch wheel actually contains kernels for the detected CUDA compute capability. Unsupported GPUs automatically fall back to CPU instead of crashing with `no kernel image is available for execution on the device`. Explicit unsupported `cuda` requests fail early with a useful diagnostic.
+- **Studio controls:** trajectory strength, anticipation horizon, lookahead depth, beam width, effect compatibility, preference learning and optional MERT are available in the curated Analyze panel and through Command Center.
+- **Choreography inspection:** `tubeviz choreography inspect timeline.json` shows the build/drop/release decisions stored in a timeline.
 
 
 ## Manually add a YouTube clip
@@ -45,7 +88,7 @@ Multiple URLs can be imported in one invocation:
 tubeviz ingest-url URL1 URL2 URL3 --library ./library --term hand-picked
 ```
 
-Manual URL ingestion still runs the normal tubeviz pipeline: yt-dlp metadata extraction, duplicate detection, download, FFmpeg normalization, scene detection, thumbnails, and decoded visual-feature indexing. It accepts the same browser-cookie and network controls needed for accessible YouTube content:
+Manual URL ingestion runs the full tubeviz scene-understanding pipeline by default: yt-dlp metadata extraction, duplicate detection, download, FFmpeg normalization, scene detection, thumbnails, decoded temporal visual-feature indexing, OpenCLIP scene embeddings, and zero-shot semantic classification. Scene labels include useful visual concepts such as crowd, dancing, nightlife, city, tunnel, transport, industrial, architecture, abstract, lights, moving POV, macro, fire/smoke, plus negative classes such as text-heavy, talking-head, and static-presentation. It accepts the same browser-cookie and network controls needed for accessible YouTube content:
 
 ```bash
 tubeviz ingest-url 'https://youtu.be/VIDEO_ID' \
@@ -309,7 +352,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.26.10**.
+For this release, the header and `tubeviz.__version__` should report **0.28.1**.
 
 ```mermaid
 flowchart LR
@@ -419,7 +462,10 @@ network timeout
 fragment concurrency and retries
 keep audio
 skip scene detection
-skip visual indexing
+skip temporal visual indexing
+OpenCLIP semantic device / model / weights
+skip semantic embeddings
+skip automatic scene classification
 force reprocessing
 verbose yt-dlp
 ```
@@ -1141,6 +1187,130 @@ palette and effect treatment, creating an introduce → mutate → payoff visual
 arc rather than simple clip repetition.
 
 
+
+## Phrase-aware choreography and multi-shot planning
+
+The v0.27 choreography layer reasons about **where the music is going**, not only
+what is happening at the current instant. Each section receives a trajectory:
+
+```text
+tension / tension slope
+build probability
+drop probability
+release probability
+time to next peak
+anticipation
+pre-drop withholding
+motion / complexity / contrast / edit-density targets
+```
+
+```mermaid
+flowchart LR
+    DSP["DSP + section features"] --> TRAJ["Trajectory model"]
+    CLAP["CLAP semantics"] --> TRAJ
+    MERT["optional MERT novelty / velocity"] --> TRAJ
+    TRAJ --> ARC["Whole-song visual arc"]
+    ARC --> BEAM["Multi-shot beam search"]
+    LIB["Candidate scenes"] --> BEAM
+    PREF["Manual-reject preference profile"] --> BEAM
+    BEAM --> FX["Effect compatibility + visual direction"]
+    FX --> TL["Directed timeline"]
+```
+
+The default analysis enables phrase-aware choreography automatically. Useful
+controls are:
+
+```bash
+--choreography
+--trajectory-strength 0.85
+--anticipation-seconds 12
+--visual-arc-strength 0.70
+--sequence-lookahead 5
+--sequence-beam-width 6
+--sequence-candidate-pool 18
+--trajectory-weight 0.85
+--anticipation-weight 0.75
+--effect-compatibility-weight 0.60
+--preference-learning
+--preference-weight 0.35
+```
+
+The sequence optimizer retains multiple possible edits for a short horizon and
+scores the **sequence**, including how its motion/complexity and transition
+contrast evolve toward an approaching payoff. Musical timing remains
+beat-aligned and deterministic.
+
+A strong build can therefore progress approximately like:
+
+```text
+wide / clean / longer
+        ↓
+more motion
+        ↓
+more visual complexity
+        ↓
+shorter beat-aligned shots
+        ↓
+stronger transition contrast
+        ↓
+brief pre-drop withholding
+        ↓
+DROP: high-contrast source change + impact treatment
+```
+
+Inspect the stored plan:
+
+```bash
+tubeviz choreography inspect timelines/connected.json
+```
+
+JSON form:
+
+```bash
+tubeviz choreography inspect timelines/connected.json --json
+```
+
+### Optional MERT music representations
+
+CLAP remains tubeviz's audio/text semantic model. MERT serves a different
+purpose: music-specific representation **dynamics**. With MERT enabled, tubeviz
+measures how rapidly the learned musical state is changing and how novel a
+section is relative to the preceding one. Abrupt representation changes can
+support a visual-world change; stable embeddings favor continuity.
+
+```bash
+tubeviz analyze song.mp3 \
+  --library ./library \
+  --music-ai \
+  --music-ai-model m-a-p/MERT-v1-95M \
+  --music-ai-device auto \
+  --music-ai-window 8 \
+  --music-ai-hop 4 \
+  --audio-ai \
+  --semantic \
+  --output song.json
+```
+
+Check the optional runtime/device first:
+
+```bash
+tubeviz music-ai doctor
+```
+
+MERT's current Hugging Face model implementation requires
+`trust_remote_code=True`; tubeviz therefore keeps it explicitly opt-in. The
+`m-a-p/MERT-v1-95M` model weights are separately licensed (currently
+CC-BY-NC-4.0 on the model card) and are **not** redistributed by tubeviz. Review
+the model's license before using it in a commercial workflow.
+
+### CUDA compatibility-aware `auto`
+
+`torch.cuda.is_available()` does not guarantee that an installed PyTorch wheel
+contains kernels for the actual GPU. tubeviz now compares
+`torch.cuda.get_device_capability()` with `torch.cuda.get_arch_list()` before
+selecting CUDA automatically. For example, a Pascal `sm_61` GPU paired with a
+wheel that only contains `sm_75+` kernels falls back to CPU rather than failing
+inside CLAP/OpenCLIP/MERT inference.
 
 ## Audio-semantic AI choreography
 
@@ -2093,3 +2263,50 @@ licenses, platform terms, and other requirements.
 ## Version history
 
 Release history is maintained separately in [CHANGELOG.md](CHANGELOG.md).
+
+## Theme-first AI footage acquisition (v0.28)
+
+Search-term files remain supported, but the preferred ingest path is now a natural-language **visual brief**. Tubeviz can combine that brief with the song's DSP analysis and a summary of the existing library, ask an OpenAI-compatible LLM for a structured acquisition plan, and then progressively spend more compute/bandwidth only on candidates that survive each gate.
+
+```mermaid
+flowchart TD
+    B["Visual brief"] --> P["LLM acquisition planner"]
+    A["Optional audio"] --> P
+    L["Existing library coverage"] --> P
+    P --> Q["Diverse role-aware YouTube queries"]
+    Q --> M["Metadata gate"]
+    M --> T["OpenCLIP thumbnail semantic + negative scoring"]
+    T --> V["Strategic partial-video preview"]
+    V --> F["Temporal music-video fitness\nmotion + complexity + entropy + semantic fit"]
+    F -->|reject| X["Skip before full download"]
+    F -->|pass| D["Full source download"]
+    D --> S["Scene detection + visual/semantic indexing"]
+    S --> R["Automatic weak intro/outro trim"]
+    R --> LIB["Curated clip library"]
+```
+
+Example:
+
+```bash
+tubeviz ingest \
+  --visual-brief 'Dark futuristic techno: neon tunnels, liquid chrome, rhythmic machinery, surreal architecture, rave silhouettes and euphoric high-motion drops. Avoid text, logos, talking heads, tutorials and static footage.' \
+  --audio audio/connected.mp3 \
+  --library ./library \
+  --target-clips 40 \
+  --acquisition-query-count 24 \
+  --ai-llm-base-url http://localhost:8000/v1 \
+  --ai-llm-model YOUR_MODEL \
+  --preview-gate \
+  --preview-samples 4 \
+  --preview-seconds 4 \
+  --min-video-fitness 0.18 \
+  --auto-trim
+```
+
+With `--visual-brief`, AI discovery and the preview gate are enabled automatically. The acquisition planner distributes the requested overall target across its generated searches rather than treating every generated query as an independent large quota. If no LLM is configured, tubeviz uses a deterministic cinematography-oriented planner instead.
+
+The preview gate samples strategic points across each hydrated candidate before committing to a full download. OpenCLIP evaluates the preview against positive visual concepts and explicit negative concepts such as title cards, logos, talking heads, tutorials, presentations and static footage. Temporal visual analysis separately measures useful motion, motion variation, complexity, entropy and cut activity. These signals form a music-video fitness score; low-fitness candidates are rejected before the expensive full ingest path.
+
+After accepted footage is normalized and scene-indexed, tubeviz can automatically move the saved usable In/Out points past low-fitness edge scene runs. This is intended to suppress common title/logo lead-ins and static credit/outro material while preserving the existing Studio manual trim editor for correction or override.
+
+Studio exposes the same workflow in **AI Ingest** with a Visual brief editor, optional legacy terms file, acquisition-query count, preview gate, minimum video fitness and AI auto-trim controls. The Command Center continues to expose the complete current argparse surface.

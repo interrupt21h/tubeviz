@@ -8,6 +8,7 @@ import numpy as np
 
 from .library import SceneCandidate
 from .models import CodecEffect, ColorDirection, Section, VectorEffect, VisualDirection
+from .choreography import shot_trajectory
 
 
 _VIBE_HUE = {
@@ -569,6 +570,7 @@ def build_visual_direction(
     transition: float,
     occurrence: int,
     shot_index_in_section: int,
+    shot_progress: float = 0.5,
     vector_enabled: bool = True,
     vector_intensity: float = 1.0,
     codec_glitch_mode: str = "off",
@@ -616,6 +618,15 @@ def build_visual_direction(
         .40*section.energy + .22*section.onset_density + .18*section.noisiness
         + .20*section.percussive_ratio
     )
+    trajectory = shot_trajectory(section, shot_progress)
+    # Phrase-aware trajectory adds anticipation and payoff without replacing the
+    # underlying audio-reactive curves. A pre-drop withholding window deliberately
+    # reduces visual clutter so the subsequent impact has somewhere to go.
+    withhold = trajectory["withhold"]
+    impact = trajectory["impact"]
+    tension = _clamp(tension * (1.0 - .30*withhold) + .22*trajectory["density"] + .18*impact)
+    saturation_scale = _clamp(saturation_scale * (1.0 - .18*withhold) * (1.0 + .14*impact), .50, 2.0)
+    contrast_scale = _clamp(contrast_scale * (1.0 + .18*trajectory["contrast"] + .22*impact - .16*withhold), .70, 2.0)
     # Continuous curves rather than on/off effect selection.
     automation = {
         "hue": _curve((0, hue_shift*.35), (.55, hue_shift*.72), (1, hue_shift)),
@@ -628,8 +639,16 @@ def build_visual_direction(
         "bloom": _curve((0, .02), (.75, .08+.22*e), (.96, .55*e), (1, .08)),
     }
 
+    if withhold > .0:
+        for key in ("spectral_warp", "chromatic", "feedback", "flow", "glitch", "bloom"):
+            automation[key] = [(p, _clamp(v * (1.0 - .62*withhold))) for p, v in automation[key]]
+    if impact > .0:
+        for key, gain in (("spectral_warp", .36), ("chromatic", .42), ("glitch", .34), ("bloom", .50)):
+            automation[key] = [(p, _clamp(v + gain*impact*(1.0-abs(.16-p)))) for p, v in automation[key]]
+
     ai_vector_scale = section.ai_direction.vector_intensity if section.ai_direction is not None else 1.0
     ai_codec_scale = section.ai_direction.codec_intensity if section.ai_direction is not None else 1.0
+    trajectory_fx_scale = max(.20, 1.0 + .30*trajectory["density"] + .45*impact - .58*withhold)
 
     return VisualDirection(
         rhythm_alignment=rhythm_alignment,
@@ -657,8 +676,8 @@ def build_visual_direction(
             [
                 effect.model_copy(
                     update={
-                        "amount": _clamp(effect.amount * vector_intensity * ai_vector_scale),
-                        "opacity": _clamp(effect.opacity * min(1.5, vector_intensity * ai_vector_scale)),
+                        "amount": _clamp(effect.amount * vector_intensity * ai_vector_scale * trajectory_fx_scale),
+                        "opacity": _clamp(effect.opacity * min(1.5, vector_intensity * ai_vector_scale * trajectory_fx_scale)),
                     }
                 )
                 for effect in _vector_effects(
@@ -674,7 +693,7 @@ def build_visual_direction(
         ),
         codec_effects=_codec_effects(
             candidate, section, mode=codec_glitch_mode,
-            intensity=codec_glitch_intensity * ai_codec_scale, occurrence=occurrence,
+            intensity=codec_glitch_intensity * ai_codec_scale * trajectory_fx_scale, occurrence=occurrence,
             shot_index=shot_index_in_section, narrative_role=narrative_role,
         ),
     )

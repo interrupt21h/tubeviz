@@ -5,12 +5,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.26.10">
+<link rel="stylesheet" href="/static/gui.css?v=0.29.2">
 </head>
 <body>
 <header>
   <div>
-    <h1>tubeviz <span>studio</span> <small class="studio-version">v0.26.10</small></h1>
+    <h1>tubeviz <span>studio</span> <small id="studioVersion" class="studio-version">v…</small></h1>
     <p>AI clip library · music direction · native rendering</p>
   </div>
   <div id="nativeBadge" class="badge">native: checking…</div>
@@ -58,39 +58,50 @@
       <div class="grid two tight">
         <label>Section bars <input id="sectionBars" type="number" value="8"></label>
         <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
-        <label>Transform <input id="transformIntensity" type="number" step=".1" value="1.2"></label>
-        <label>Composition <input id="compositionIntensity" type="number" step=".1" value="1.2"></label>
+        <label class="slider-field">Transform <span class="slider-value" data-for="transformIntensity"></span><input id="transformIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>subtle 0</span><b>balanced 0.8–1.3</b><span>extreme 2</span></span></label>
+        <label class="slider-field">Composition <span class="slider-value" data-for="compositionIntensity"></span><input id="compositionIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>single-source 0</span><b>balanced 0.7–1.3</b><span>layered 2</span></span></label>
         <label>Target unique <input id="targetUnique" type="number" value="0"></label>
-        <label>Novelty <input id="noveltyWeight" type="number" step=".05" value=".65"></label>
-        <label>Visual match <input id="visualMatchWeight" type="number" step=".05" value="1.25"></label>
-        <label>Transition intelligence <input id="transitionWeight" type="number" step=".05" value=".70"></label>
-        <label>Vector intensity <input id="vectorIntensity" type="number" step=".1" value="1.0"></label>
+        <label class="slider-field">Novelty <span class="slider-value" data-for="noveltyWeight"></span><input id="noveltyWeight" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>coherent 0</span><b>recommended .45–.80</b><span>varied 1.5</span></span></label>
+        <label class="slider-field">Visual match <span class="slider-value" data-for="visualMatchWeight"></span><input id="visualMatchWeight" type="range" min="0" max="2" step=".05" value="1.25"><span class="slider-scale"><span>loose 0</span><b>recommended 1.0–1.5</b><span>strict 2</span></span></label>
+        <label class="slider-field">Transition intelligence <span class="slider-value" data-for="transitionWeight"></span><input id="transitionWeight" type="range" min="0" max="1.5" step=".05" value=".70"><span class="slider-scale"><span>independent 0</span><b>recommended .5–.9</b><span>strong 1.5</span></span></label>
+        <label class="slider-field">Trajectory strength <span class="slider-value" data-for="trajectoryStrength"></span><input id="trajectoryStrength" type="range" min="0" max="1.5" step=".05" value=".85"><span class="slider-scale"><span>flat 0</span><b>recommended .65–1.0</b><span>dramatic 1.5</span></span></label>
+        <label>Anticipation <input id="anticipationSeconds" type="number" step="1" value="12"></label>
+        <label>Shot lookahead <input id="sequenceLookahead" type="number" min="1" max="12" value="5"></label>
+        <label>Beam width <input id="sequenceBeamWidth" type="number" min="1" max="20" value="6"></label>
+        <label class="slider-field">FX compatibility <span class="slider-value" data-for="effectCompatibilityWeight"></span><input id="effectCompatibilityWeight" type="range" min="0" max="1.5" step=".05" value=".60"><span class="slider-scale"><span>ignore 0</span><b>recommended .4–.8</b><span>strict 1.5</span></span></label>
+        <label class="slider-field">Preference weight <span class="slider-value" data-for="preferenceWeight"></span><input id="preferenceWeight" type="range" min="0" max="1" step=".05" value=".35"><span class="slider-scale"><span>off 0</span><b>recommended .2–.5</b><span>strong 1</span></span></label>
+        <label class="slider-field">Vector intensity <span class="slider-value" data-for="vectorIntensity"></span><input id="vectorIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>off 0</span><b>recommended .5–1.1</b><span>extreme 2</span></span></label>
         <label>Codec glitch
           <select id="codecGlitch"><option value="off">off</option><option value="subtle">subtle</option><option value="musical">musical</option><option value="aggressive">aggressive</option></select>
         </label>
-        <label>Codec intensity <input id="codecGlitchIntensity" type="number" step=".05" value=".65"></label>
+        <label class="slider-field">Codec intensity <span class="slider-value" data-for="codecGlitchIntensity"></span><input id="codecGlitchIntensity" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>subtle 0</span><b>recommended .35–.8</b><span>destructive 1.5</span></span></label>
         <label>Min shot <input id="minShot" type="number" step=".05" value=".65"></label>
         <label>Max shot <input id="maxShot" type="number" step=".25" value="6"></label>
         <label>Max excerpt <input id="maxExcerpt" type="number" step=".25" value="5"></label>
         <label>Semantic device <input id="semanticDevice" value="auto"></label>
         <label>Audio AI device <input id="audioAiDevice" value="auto"></label>
-        <label>Audio↔visual weight <input id="audioVisualWeight" type="number" step=".05" value="1.10"></label>
+        <label>Music AI device <input id="musicAiDevice" value="auto"></label>
+        <label>MERT model <input id="musicAiModel" value="m-a-p/MERT-v1-95M"></label>
+        <label class="slider-field">Audio↔visual weight <span class="slider-value" data-for="audioVisualWeight"></span><input id="audioVisualWeight" type="range" min="0" max="2" step=".05" value="1.10"><span class="slider-scale"><span>ignore 0</span><b>recommended .8–1.3</b><span>dominant 2</span></span></label>
         <label>CLAP window <input id="audioAiWindow" type="number" step="1" value="8"></label>
         <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
         <label>AI director URL <input id="aiDirectorUrl" placeholder="http://localhost:8000/v1"></label>
         <label>AI director model <input id="aiDirectorModel" placeholder="local model name"></label>
         <label>AI director API key <input id="aiDirectorApiKey" type="password" placeholder="optional for local endpoints"></label>
-        <label>AI director strength <input id="aiDirectorStrength" type="number" step=".05" value=".75"></label>
+        <label class="slider-field">AI director strength <span class="slider-value" data-for="aiDirectorStrength"></span><input id="aiDirectorStrength" type="range" min="0" max="1" step=".05" value=".75"><span class="slider-scale"><span>off 0</span><b>recommended .55–.85</b><span>full 1</span></span></label>
       </div>
       <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
       <label class="check"><input id="audioAi" type="checkbox" checked> CLAP audio-semantic director</label>
+      <label class="check"><input id="musicAi" type="checkbox"> MERT music-structure embeddings (optional)</label>
       <label class="check"><input id="aiDirector" type="checkbox"> Whole-song LLM visual director</label>
       <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
       <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
+      <label class="check"><input id="choreography" type="checkbox" checked> Build/drop trajectory choreography and multi-shot lookahead</label>
+      <label class="check"><input id="preferenceLearning" type="checkbox" checked> Learn soft visual preferences from manually rejected clips</label>
       <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
       <label class="check"><input id="vectorEffects" type="checkbox" checked> Vector scene graph: contours, flow, fracture, portals and glyphs</label>
       <label class="check"><input id="codecPreviewMaterialize" type="checkbox"> Materialize true FFglitch effects for browser preview</label>
-      <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
+      <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button id="musicAiDoctorBtn">Music AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
     </article>
 
     <article class="card workflow-card render-card">
@@ -122,24 +133,53 @@
 
     <article class="card workflow-card ingest-card">
       <div class="card-kicker">01 · SOURCE</div><h2>AI Ingest</h2>
-      <label>Search terms file <input id="termsPath" placeholder="search_terms.txt"></label>
+      <label>Visual brief <textarea id="visualBrief" rows="4" placeholder="Dark futuristic techno; neon tunnels, liquid chrome, rhythmic machinery, euphoric high-motion drops. Avoid text, talking heads and static footage."></textarea></label>
+      <label>Search terms file <input id="termsPath" placeholder="Optional legacy mode: search_terms.txt"></label>
       <div class="grid two tight">
         <label>READY / term <input id="resultsPerTerm" type="number" value="5"></label>
-        <label>Max duration <input id="hardMaxDuration" type="number" value="600"></label>
+        <label>Max clip / segment <input id="hardMaxDuration" type="number" value="600"></label>
         <label>AI device <input id="aiDevice" value="auto"></label>
         <label>Candidate pool <input id="aiCandidates" type="number" value="100"></label>
         <label>Queries / seed <input id="aiQueries" type="number" value="8"></label>
+        <label>Acquisition queries <input id="acquisitionQueries" type="number" value="24"></label>
+        <label>Target clips <input id="targetClips" type="number" value="40"></label>
+        <label class="slider-field">Min video fitness <span class="slider-value" data-for="minVideoFitness"></span><input id="minVideoFitness" type="range" min="0" max="0.6" step="0.01" value="0.18"><span class="slider-scale"><span>permissive 0</span><b>recommended .18–.30</b><span>very strict .60</span></span></label>
+        <label class="slider-field">Min dynamic score <span class="slider-value" data-for="minDynamicScore"></span><input id="minDynamicScore" type="range" min="0" max="0.7" step="0.01" value="0.24"><span class="slider-scale"><span>static allowed 0</span><b>recommended .24–.38</b><span>very kinetic .70</span></span></label>
+        <label class="slider-field">Max text occupancy <span class="slider-value" data-for="maxTextOverlay"></span><input id="maxTextOverlay" type="range" min="0" max="0.5" step="0.01" value="0.10"><span class="slider-scale"><span>no text 0</span><b>recommended .04–.12</b><span>text-heavy .50</span></span></label>
+        <label class="slider-field">Max persistent text <span class="slider-value" data-for="maxPersistentText"></span><input id="maxPersistentText" type="range" min="0" max="0.25" step="0.005" value="0.045"><span class="slider-scale"><span>none 0</span><b>recommended .02–.06</b><span>overlay-heavy .25</span></span></label>
+        <label class="slider-field">Min motion coverage <span class="slider-value" data-for="minMotionCoverage"></span><input id="minMotionCoverage" type="range" min="0" max="0.8" step="0.01" value="0.20"><span class="slider-scale"><span>localized 0</span><b>recommended .20–.40</b><span>full-frame .80</span></span></label>
+        <label class="slider-field">Min temporal diversity <span class="slider-value" data-for="minTemporalDiversity"></span><input id="minTemporalDiversity" type="range" min="0" max="0.6" step="0.01" value="0.12"><span class="slider-scale"><span>repetitive 0</span><b>recommended .12–.25</b><span>highly varied .60</span></span></label>
+        <label class="slider-field">Max face dominance <span class="slider-value" data-for="maxFaceDominance"></span><input id="maxFaceDominance" type="range" min="0" max="1" step="0.01" value="0.42"><span class="slider-scale"><span>no faces 0</span><b>recommended .25–.45</b><span>face fills frame 1</span></span></label>
+        <label class="slider-field">Min aesthetic score <span class="slider-value" data-for="minAestheticScore"></span><input id="minAestheticScore" type="range" min="0" max="0.7" step="0.01" value="0.22"><span class="slider-scale"><span>anything 0</span><b>recommended .20–.35</b><span>very selective .70</span></span></label>
+        <label>Long-video probes <input id="longVideoAttempts" type="number" min="1" value="8"></label>
+        <label>Long-video excerpt sec <input id="longVideoExcerptSeconds" type="number" min="5" value="45"></label>
         <label>Browser cookies <input id="cookiesBrowser" placeholder="chrome"></label>
       </div>
       <label class="check"><input id="aiDiscovery" type="checkbox" checked> AI pre-download ranking</label>
       <label class="check"><input id="visualIndexScenes" type="checkbox" checked> Analyze motion, palette and visual accents</label>
+      <label class="check"><input id="previewGate" type="checkbox" checked> Preview candidates before full download</label>
+      <label class="check"><input id="sampleLongVideos" type="checkbox" checked> Sample long videos and download only the strongest bounded segment</label>
+      <label class="check"><input id="autoTrim" type="checkbox" checked> AI auto-trim weak intro/outro scene runs</label>
+      <details class="settings-group">
+        <summary>Acquisition planner LLM</summary>
+        <div class="settings-body">
+          <label>OpenAI-compatible base URL <input id="aiLlmBaseUrl" placeholder="http://localhost:8000/v1"></label>
+          <label>Model <input id="aiLlmModel" placeholder="your-model-name"></label>
+          <label class="field-label" for="aiLlmApiKey">API key (optional)</label>
+          <div class="secret-input-row">
+            <input id="aiLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Optional; passed only to the child process">
+            <button id="toggleAiLlmKey" type="button" class="secret-toggle" aria-pressed="false">Show typed key</button>
+          </div>
+          <p class="card-note">If URL/model are blank, Tubeviz uses its deterministic short-query planner. API keys are passed via <code>TUBEVIZ_LLM_API_KEY</code>, never in argv/job history.</p>
+        </div>
+      </details>
       <button class="primary" id="ingestBtn">Ingest Clips</button>
       <p class="card-note">This streamlined panel exposes common ingest settings. Every ingest option is available in Command Center.</p>
     </article>
 
     <article class="card workflow-card manual-card">
       <div class="card-kicker">01B · CURATE</div>
-      <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Hand-pick source footage and run it through the same normalization, scene detection, visual indexing, and duplicate checks as searched clips.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
+      <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Paste hand-picked YouTube URLs. By default Tubeviz normalizes them, detects scene cuts, creates thumbnails, measures temporal visual features, embeds every scene with OpenCLIP, and assigns semantic scene labels automatically.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
       <div class="url-editor">
         <label class="field-label" for="manualUrls">YouTube URLs</label>
         <textarea id="manualUrls" rows="7" spellcheck="false" placeholder="Paste one YouTube URL per line
@@ -164,6 +204,9 @@ https://youtu.be/..."></textarea>
             <label>FPS <input id="manualFps" type="number" value="30"></label>
             <label>Scene threshold <input id="manualSceneThreshold" type="number" step=".01" value="0.40"></label>
             <label>Min scene seconds <input id="manualMinScene" type="number" step=".1" value="1.5"></label>
+            <label>Semantic device <input id="manualSemanticDevice" value="auto"></label>
+            <label>Semantic model <input id="manualSemanticModel" value="ViT-B-32"></label>
+            <label>Semantic weights <input id="manualSemanticPretrained" value="laion2b_s34b_b79k"></label>
             <label>Socket timeout <input id="manualSocketTimeout" type="number" step="1" value="20"></label>
             <label>Concurrent fragments <input id="manualFragments" type="number" value="4"></label>
             <label>Download retries <input id="manualRetries" type="number" value="2"></label>
@@ -172,7 +215,9 @@ https://youtu.be/..."></textarea>
           <div class="option-grid manual-checks">
             <label class="check"><input id="manualKeepAudio" type="checkbox"> Keep source audio</label>
             <label class="check"><input id="manualNoScenes" type="checkbox"> Skip scene detection/thumbnails</label>
-            <label class="check"><input id="manualNoVisualIndex" type="checkbox"> Skip visual-feature indexing</label>
+            <label class="check"><input id="manualNoVisualIndex" type="checkbox"> Skip temporal visual-feature indexing</label>
+            <label class="check"><input id="manualNoSemanticIndex" type="checkbox"> Skip OpenCLIP scene embeddings</label>
+            <label class="check"><input id="manualNoSceneClassification" type="checkbox"> Skip automatic semantic scene classification</label>
             <label class="check"><input id="manualForce" type="checkbox"> Force redownload/reprocess</label>
             <label class="check"><input id="manualVerbose" type="checkbox"> Verbose yt-dlp logging</label>
           </div>
@@ -292,6 +337,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.26.10"></script>
+<script src="/static/gui.js?v=0.29.2"></script>
 </body>
 </html>

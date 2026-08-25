@@ -285,6 +285,161 @@ class YouTubeSource:
         self._cleanup_partial_files(originals_dir, result.source_id)
         raise DownloadFailure("; ".join(errors), status=last_status)
 
+    def download_range(
+        self,
+        result: SearchResult,
+        originals_dir: Path,
+        *,
+        start: float,
+        end: float,
+    ) -> tuple[Path, Path | None, dict[str, Any]]:
+        """Download only one finite source range using yt-dlp's download_ranges.
+
+        This is used for long search results so source duration does not
+        unnecessarily eliminate otherwise useful footage.
+        """
+        reason = self.live_rejection_reason(result.metadata)
+        if reason:
+            raise DownloadFailure(reason, status="live_stream")
+        if not self.has_finite_vod_format(result.metadata):
+            raise DownloadFailure(
+                "no finite HTTP/HTTPS VOD format is available; refusing HLS/live-manifest download",
+                status="no_finite_format",
+            )
+        duration = float(result.metadata.get("duration") or 0.0)
+        start = max(0.0, float(start))
+        end = min(duration, float(end)) if duration > 0 else float(end)
+        if end <= start:
+            raise DownloadFailure("invalid download range", status="metadata_error")
+
+        originals_dir.mkdir(parents=True, exist_ok=True)
+        artifact_id = (
+            f"{result.source_id}.seg{int(round(start*1000)):010d}-"
+            f"{int(round(end*1000)):010d}"
+        )
+        output_template = str(originals_dir / f"{artifact_id}.%(ext)s")
+        utils = import_module("yt_dlp.utils")
+        errors: list[str] = []
+        last_status = "download_error"
+
+        existing = self._find_downloaded_media(
+            originals_dir, artifact_id, required=False
+        )
+        if existing is not None:
+            info_json = originals_dir / f"{artifact_id}.info.json"
+            metadata = dict(result.metadata)
+            metadata["_tubeviz_source_duration"] = duration
+            metadata["_tubeviz_segment_start"] = start
+            metadata["_tubeviz_segment_end"] = end
+            metadata["duration"] = end - start
+            return existing, info_json if info_json.exists() else None, metadata
+
+        for attempt_no, format_selector in enumerate(self.format_attempts, start=1):
+            options = self._base_options() | {
+                "format": format_selector,
+                "merge_output_format": "mp4",
+                "outtmpl": {"default": output_template},
+                "writeinfojson": True,
+                "writethumbnail": False,
+                "restrictfilenames": True,
+                "overwrites": True,
+                "continuedl": True,
+                "download_ranges": utils.download_range_func([], [[start, end]]),
+                "force_keyframes_at_cuts": True,
+            }
+            try:
+                with _yt_dlp().YoutubeDL(options) as ydl:
+                    raw = ydl.extract_info(result.url, download=True)
+                    metadata = dict(ydl.sanitize_info(raw))
+                media = self._find_downloaded_media(originals_dir, artifact_id)
+                info_json = originals_dir / f"{artifact_id}.info.json"
+                metadata["_tubeviz_source_duration"] = duration
+                metadata["_tubeviz_segment_start"] = start
+                metadata["_tubeviz_segment_end"] = end
+                metadata["duration"] = end - start
+                return media, info_json if info_json.exists() else None, metadata
+            except Exception as exc:
+                last_status = classify_download_error(exc)
+                errors.append(
+                    f"attempt {attempt_no} format={format_selector!r}: {exc}"
+                )
+                self._cleanup_partial_files(originals_dir, artifact_id)
+
+        self._cleanup_partial_files(originals_dir, artifact_id)
+        raise DownloadFailure("; ".join(errors), status=last_status)
+
+    def download_preview_at(
+        self,
+        result: SearchResult,
+        previews_dir: Path,
+        *,
+        start: float,
+        seconds: float = 4.0,
+        tag: str = "sample",
+    ) -> Path:
+        """Download a single preview window at a specific source time."""
+        duration = float(result.metadata.get("duration") or 0.0)
+        if duration <= 0:
+            raise DownloadFailure(
+                "preview requires finite duration metadata",
+                status="metadata_error",
+            )
+        width = max(1.0, min(float(seconds), duration))
+        start = max(0.0, min(float(start), max(0.0, duration - width)))
+        end = min(duration, start + width)
+        previews_dir.mkdir(parents=True, exist_ok=True)
+        safe_tag = "".join(ch for ch in str(tag) if ch.isalnum() or ch in "-_") or "sample"
+        artifact_id = f"{result.source_id}.{safe_tag}"
+        outtmpl = str(previews_dir / f"{artifact_id}.%(ext)s")
+        utils = import_module("yt_dlp.utils")
+        errors: list[str] = []
+        for fmt in self.format_attempts:
+            options = self._base_options() | {
+                "format": fmt,
+                "merge_output_format": "mp4",
+                "outtmpl": {"default": outtmpl},
+                "download_ranges": utils.download_range_func([], [[start, end]]),
+                "force_keyframes_at_cuts": True,
+                "overwrites": True,
+            }
+            try:
+                with _yt_dlp().YoutubeDL(options) as ydl:
+                    ydl.extract_info(result.url, download=True)
+                return self._find_downloaded_media(previews_dir, artifact_id)
+            except Exception as exc:
+                errors.append(str(exc))
+                self._cleanup_partial_files(previews_dir, artifact_id)
+        raise DownloadFailure(
+            "preview failed: " + "; ".join(errors),
+            status="download_error",
+        )
+
+    def download_preview(self, result: SearchResult, previews_dir: Path, *, seconds: float = 4.0, samples: int = 4) -> Path:
+        """Download a few strategic time ranges without committing to the full source."""
+        duration = float(result.metadata.get("duration") or 0.0)
+        if duration <= 0:
+            raise DownloadFailure("preview requires finite duration metadata", status="metadata_error")
+        previews_dir.mkdir(parents=True, exist_ok=True)
+        outtmpl = str(previews_dir / f"{result.source_id}.%(ext)s")
+        width = max(1.0, min(float(seconds), duration))
+        centers = [duration * f for f in ((.08,.32,.58,.84) if samples >= 4 else (.2,.5,.8))[:max(1,samples)]]
+        ranges = [[max(0.0,c-width/2), min(duration,c+width/2)] for c in centers]
+        utils = import_module("yt_dlp.utils")
+        errors=[]
+        for fmt in self.format_attempts:
+            options = self._base_options() | {
+                "format": fmt, "merge_output_format":"mp4", "outtmpl":{"default":outtmpl},
+                "download_ranges": utils.download_range_func([], ranges),
+                "force_keyframes_at_cuts": True, "overwrites": True,
+            }
+            try:
+                with _yt_dlp().YoutubeDL(options) as ydl: ydl.extract_info(result.url, download=True)
+                media=self._find_downloaded_media(previews_dir,result.source_id)
+                return media
+            except Exception as exc:
+                errors.append(str(exc)); self._cleanup_partial_files(previews_dir,result.source_id)
+        raise DownloadFailure("preview failed: "+"; ".join(errors), status="download_error")
+
     @staticmethod
     def _cleanup_partial_files(directory: Path, source_id: str) -> None:
         for path in directory.glob(f"{source_id}*.part*"):

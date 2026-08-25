@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import random
 from pathlib import Path
 from typing import Iterable
 
@@ -9,8 +11,9 @@ from .library import ClipLibrary, sha256_file
 from .media import detect_scene_boundaries, make_thumbnail, normalize_video, probe, require_media_tools
 from .youtube import DownloadFailure, SearchResult, YouTubeSource
 from .discovery_ai import DiscoveryAIConfig, discover_candidates, rank_candidates, index_clip_scene_embeddings
-from .semantic import OpenClipEmbedder, SemanticConfig
+from .semantic import OpenClipEmbedder, SemanticConfig, classify_scene_thumbnails
 from .visual_features import index_scene_visual_features
+from .acquisition import preview_fitness
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,33 @@ class IngestConfig:
     ai_llm_api_key: str | None = None
     ai_index_scenes: bool = True
     visual_index_scenes: bool = True
+    manual_semantic_index: bool = True
+    manual_semantic_device: str = "auto"
+    manual_semantic_model: str = "ViT-B-32"
+    manual_semantic_pretrained: str = "laion2b_s34b_b79k"
+    manual_classify_scenes: bool = True
+    preview_gate: bool = False
+    preview_seconds: float = 4.0
+    preview_samples: int = 4
+    min_video_fitness: float = 0.18
+    # Dynamic content is a separate hard requirement. A semantically perfect
+    # thumbnail must not rescue an almost-static source.
+    min_dynamic_score: float = 0.24
+    max_text_overlay_fraction: float = 0.10
+    max_persistent_text_fraction: float = 0.045
+    max_face_dominance: float = 0.42
+    min_motion_coverage: float = 0.20
+    min_temporal_diversity: float = 0.12
+    min_aesthetic_score: float = 0.22
+    preview_positive_concepts: tuple[str, ...] = ()
+    # Search results longer than hard_max_duration are sampled rather than
+    # rejected. Tubeviz probes randomized regions and downloads only the best
+    # segment. Disable to restore strict rejection semantics.
+    sample_long_videos: bool = True
+    long_video_segment_attempts: int = 8
+    long_video_excerpt_seconds: float = 45.0
+    auto_trim: bool = True
+    auto_trim_min_fitness: float = 0.22
 
 
 @dataclass
@@ -94,6 +124,8 @@ class IngestSummary:
     scenes: int = 0
     quota_shortfall: int = 0
     manual_rejected: int = 0
+    preview_scored: int = 0
+    preview_rejected: int = 0
 
 
 def read_search_terms(path: str | Path) -> list[str]:
@@ -126,7 +158,11 @@ def _acceptable(result: SearchResult, cfg: IngestConfig) -> tuple[bool, str | No
         if duration < cfg.min_duration:
             return False, f"duration {duration:.1f}s < {cfg.min_duration:.1f}s"
         if cfg.hard_max_duration > 0 and duration > cfg.hard_max_duration:
-            return False, f"duration {duration:.1f}s > hard maximum {cfg.hard_max_duration:.1f}s"
+            if not cfg.sample_long_videos:
+                return False, f"duration {duration:.1f}s > hard maximum {cfg.hard_max_duration:.1f}s"
+            # Long finite VODs are eligible. Only a bounded segment is later
+            # downloaded, so the configured maximum becomes the library clip
+            # length rather than an unnecessarily restrictive source length.
 
     width = metadata.get("width")
     if width is not None and cfg.min_width and int(width) < cfg.min_width:
@@ -177,6 +213,81 @@ def _ai_config(cfg: IngestConfig) -> DiscoveryAIConfig:
     )
 
 
+def _auto_trim_from_scene_fitness(library: ClipLibrary, clip_id: int, source_id: str, *, threshold: float, progress=print) -> None:
+    scenes=library.scene_candidates(clip_id=clip_id,respect_trim=False)
+    if len(scenes) < 2: return
+    good=[]
+    for sc in scenes:
+        f=sc.visual_features or {}
+        score=.42*float(f.get("motion",0))+.18*float(f.get("motion_entropy",0))+.18*float(f.get("complexity",0))+.14*float(f.get("visual_entropy",0))+.08*min(1,float(f.get("cut_rate",0))*2)
+        good.append(score >= threshold)
+    if not any(good): return
+    first=next(i for i,v in enumerate(good) if v); last=len(good)-1-next(i for i,v in enumerate(reversed(good)) if v)
+    start=scenes[first].start_time; end=scenes[last].end_time
+    # Only trim meaningful edge runs; don't nibble tiny boundaries from otherwise good clips.
+    clip_end=scenes[-1].end_time
+    if start < 1.0: start=0.0
+    if clip_end-end < 1.0: end=clip_end
+    if start > 0 or end < clip_end:
+        library.set_clip_trim("youtube",source_id,usable_start=start,usable_end=end)
+        progress(f"  AI auto-trim suggestion applied: {start:.2f}s-{end:.2f}s (edge scenes below fitness {threshold:.2f})")
+
+
+def _preview_sample_starts(
+    source_id: str,
+    *,
+    duration: float,
+    sample_seconds: float,
+    samples: int,
+    randomized: bool,
+) -> list[float]:
+    """Return stable-but-diverse preview starts.
+
+    A source-id-derived RNG makes repeated runs reproducible while ensuring
+    different videos are sampled at different positions.
+    """
+    width = max(1.0, min(float(sample_seconds), duration))
+    latest = max(0.0, duration - width)
+    count = max(1, int(samples))
+    seed = int(hashlib.sha256(source_id.encode("utf-8")).hexdigest()[:16], 16)
+    rng = random.Random(seed)
+    if latest <= 0:
+        return [0.0]
+    if randomized:
+        # Stratified random sampling covers the entire source while avoiding
+        # predictable title-card / midpoint bias.
+        starts: list[float] = []
+        for i in range(count):
+            lo = latest * i / count
+            hi = latest * (i + 1) / count
+            starts.append(rng.uniform(lo, hi))
+        rng.shuffle(starts)
+        return starts
+    # Shorter sources use jittered strategic locations.
+    fractions = (.08, .28, .50, .72, .90)
+    starts = []
+    for i in range(count):
+        frac = fractions[i % len(fractions)]
+        center = duration * frac
+        jitter = rng.uniform(-0.04, 0.04) * duration
+        starts.append(max(0.0, min(latest, center - width / 2 + jitter)))
+    return starts
+
+
+def _segment_around(
+    point: float,
+    *,
+    duration: float,
+    segment_seconds: float,
+) -> tuple[float, float]:
+    width = max(1.0, min(float(segment_seconds), duration))
+    start = max(0.0, min(duration - width, float(point) - width / 2))
+    return start, min(duration, start + width)
+
+
+
+
+
 def ingest_terms(
     terms: Iterable[str],
     library: ClipLibrary,
@@ -202,12 +313,12 @@ def ingest_terms(
     terms = list(terms)
     summary = IngestSummary(terms=len(terms))
 
-    ai_cfg = _ai_config(cfg) if cfg.ai_discovery else None
+    ai_cfg = _ai_config(cfg) if (cfg.ai_discovery or cfg.preview_gate) else None
     ai_embedder = None
     if ai_cfg is not None:
         progress(
-            f"AI discovery: loading OpenCLIP {ai_cfg.model}/{ai_cfg.pretrained} "
-            f"on {ai_cfg.device}"
+            f"{'AI discovery' if cfg.ai_discovery else 'Preview gate'}: loading OpenCLIP "
+            f"{ai_cfg.model}/{ai_cfg.pretrained} on {ai_cfg.device}"
         )
         ai_embedder = OpenClipEmbedder(SemanticConfig(
             model=ai_cfg.model,
@@ -436,6 +547,202 @@ def ingest_terms(
                         "trying because quota is not filled"
                     )
 
+                source_duration = float(hydrated.metadata.get("duration") or 0.0)
+                long_segment = (
+                    cfg.sample_long_videos
+                    and cfg.hard_max_duration > 0
+                    and source_duration > cfg.hard_max_duration
+                )
+                selected_segment: tuple[float, float] | None = None
+
+                if long_segment:
+                    if not hasattr(source, "download_range"):
+                        summary.rejected += 1
+                        reason = (
+                            f"duration {source_duration:.1f}s > hard maximum "
+                            f"{cfg.hard_max_duration:.1f}s and source backend cannot range-download"
+                        )
+                        library.mark_failure(clip_id, "rejected", reason)
+                        progress(f"  reject: {hydrated.source_id}: {reason}")
+                        continue
+                    progress(
+                        f"  long source: {hydrated.source_id}: {source_duration:.1f}s; "
+                        f"will ingest <= {cfg.hard_max_duration:.1f}s segment"
+                    )
+
+                if cfg.preview_gate and ai_embedder is not None:
+                    try:
+                        attempts = (
+                            max(cfg.preview_samples, cfg.long_video_segment_attempts)
+                            if long_segment else cfg.preview_samples
+                        )
+                        starts = _preview_sample_starts(
+                            hydrated.source_id,
+                            duration=max(source_duration, cfg.preview_seconds),
+                            sample_seconds=cfg.preview_seconds,
+                            samples=attempts,
+                            randomized=long_segment,
+                        )
+                        fits: list[tuple[dict, float, float]] = []
+                        progress(
+                            f"  preview gate: {hydrated.source_id} "
+                            f"({len(starts)} {'randomized ' if long_segment else ''}windows)"
+                        )
+                        for sample_no, start in enumerate(starts, start=1):
+                            preview = source.download_preview_at(
+                                hydrated,
+                                library.root / "previews",
+                                start=start,
+                                seconds=cfg.preview_seconds,
+                                tag=f"p{sample_no}",
+                            )
+                            try:
+                                fit = preview_fitness(
+                                    preview,
+                                    duration=min(cfg.preview_seconds, max(.2, source_duration - start)),
+                                    embedder=ai_embedder,
+                                    positive_concepts=list(cfg.preview_positive_concepts)
+                                    or [
+                                        str(hydrated.metadata.get("_tubeviz_seed") or term),
+                                        "dynamic cinematic music video footage",
+                                    ],
+                                    negative_concepts=list(cfg.ai_negative_concepts),
+                                )
+                                summary.preview_scored += 1
+                                fits.append((fit, start, min(source_duration, start + cfg.preview_seconds)))
+                                progress(
+                                    f"    preview {sample_no}/{len(starts)} @{start:.1f}s: "
+                                    f"fitness={fit['score']:.3f} dynamic={fit['dynamic']:.3f} "
+                                    f"motion={fit.get('motion', 0):.3f}"
+                                )
+                            finally:
+                                preview.unlink(missing_ok=True)
+
+                        if not fits:
+                            raise RuntimeError("no preview windows could be scored")
+
+                        # Never let a flashy title card win the best-window race.
+                        # First discard probes that violate explicit visual-quality gates,
+                        # then rank the surviving regions.
+                        from .acquisition_quality import quality_failures
+                        passing=[]
+                        for item in fits:
+                            q=item[0].get("quality") or {}
+                            bad=quality_failures(q, max_text=cfg.max_text_overlay_fraction,
+                                max_persistent_text=cfg.max_persistent_text_fraction,
+                                max_face=cfg.max_face_dominance, min_motion_coverage=cfg.min_motion_coverage,
+                                min_temporal_diversity=cfg.min_temporal_diversity, min_aesthetic=cfg.min_aesthetic_score) if q else ["quality metrics unavailable"]
+                            if not bad: passing.append(item)
+                        if not passing:
+                            best_any=max(fits,key=lambda item: float(item[0].get("score",0)))
+                            q=best_any[0].get("quality") or {}
+                            bad=quality_failures(q, max_text=cfg.max_text_overlay_fraction,
+                                max_persistent_text=cfg.max_persistent_text_fraction,
+                                max_face=cfg.max_face_dominance, min_motion_coverage=cfg.min_motion_coverage,
+                                min_temporal_diversity=cfg.min_temporal_diversity, min_aesthetic=cfg.min_aesthetic_score) if q else ["quality metrics unavailable"]
+                            summary.preview_rejected += 1; summary.rejected += 1
+                            reason="all preview regions failed quality gates: " + "; ".join(bad)
+                            library.mark_failure(clip_id,"rejected",reason); progress(f"  preview reject: {hydrated.source_id}: {reason}"); continue
+                        fits=passing
+                        fits.sort(key=lambda item: (float(item[0]["score"]), float(item[0]["dynamic"])), reverse=True)
+                        fit, best_start, best_end = fits[0]
+                        mean_dynamic = sum(float(item[0]["dynamic"]) for item in fits) / len(fits)
+                        hydrated.metadata["_tubeviz_preview_fitness"] = fit
+                        hydrated.metadata["_tubeviz_preview_mean_dynamic"] = mean_dynamic
+                        from .acquisition_quality import quality_failures
+                        q=fit.get("quality") or {}
+                        failures=quality_failures(
+                            q, max_text=cfg.max_text_overlay_fraction,
+                            max_persistent_text=cfg.max_persistent_text_fraction,
+                            max_face=cfg.max_face_dominance,
+                            min_motion_coverage=cfg.min_motion_coverage,
+                            min_temporal_diversity=cfg.min_temporal_diversity,
+                            min_aesthetic=cfg.min_aesthetic_score,
+                        ) if q else ["quality metrics unavailable"]
+                        progress(
+                            f"    quality: text={q.get('text_overlay_fraction',0):.3f} "
+                            f"persistent={q.get('persistent_text_fraction',0):.3f} "
+                            f"coverage={q.get('motion_coverage',0):.3f} "
+                            f"temporal={q.get('temporal_diversity',0):.3f} "
+                            f"faces={q.get('face_dominance',0):.3f} "
+                            f"aesthetic={q.get('aesthetic_score',0):.3f}"
+                        )
+                        if failures:
+                            summary.preview_rejected += 1; summary.rejected += 1
+                            reason="quality gate: " + "; ".join(failures)
+                            library.mark_failure(clip_id,"rejected",reason)
+                            progress(f"  preview reject: {hydrated.source_id}: {reason}")
+                            continue
+
+                        if float(fit["dynamic"]) < cfg.min_dynamic_score:
+                            summary.preview_rejected += 1
+                            summary.rejected += 1
+                            reason = (
+                                f"dynamic content {fit['dynamic']:.3f} < {cfg.min_dynamic_score:.3f} "
+                                f"(best fitness={fit['score']:.3f}, mean dynamic={mean_dynamic:.3f})"
+                            )
+                            library.mark_failure(clip_id, "rejected", reason)
+                            progress(f"  preview reject: {hydrated.source_id}: {reason}")
+                            continue
+                        if float(fit["score"]) < cfg.min_video_fitness:
+                            summary.preview_rejected += 1
+                            summary.rejected += 1
+                            reason = (
+                                f"preview fitness {fit['score']:.3f} < {cfg.min_video_fitness:.3f} "
+                                f"(dynamic={fit['dynamic']:.3f}, negative={fit['negative']:.3f})"
+                            )
+                            library.mark_failure(clip_id, "rejected", reason)
+                            progress(f"  preview reject: {hydrated.source_id}: {reason}")
+                            continue
+
+                        if long_segment:
+                            midpoint = (best_start + best_end) / 2
+                            selected_segment = _segment_around(
+                                midpoint,
+                                duration=source_duration,
+                                segment_seconds=min(cfg.hard_max_duration, cfg.long_video_excerpt_seconds),
+                            )
+                            hydrated.metadata["_tubeviz_segment_start"] = selected_segment[0]
+                            hydrated.metadata["_tubeviz_segment_end"] = selected_segment[1]
+                            hydrated.metadata["_tubeviz_source_duration"] = source_duration
+                            progress(
+                                f"  segment selected: {selected_segment[0]:.1f}-"
+                                f"{selected_segment[1]:.1f}s around strongest preview "
+                                f"(dynamic={fit['dynamic']:.3f})"
+                            )
+                        progress(
+                            f"  preview pass: fitness={fit['score']:.3f} "
+                            f"dynamic={fit['dynamic']:.3f} mean_dynamic={mean_dynamic:.3f}"
+                        )
+                    except Exception as exc:
+                        progress(
+                            f"  preview warning: {hydrated.source_id}: {exc}; "
+                            "continuing with bounded download"
+                        )
+
+                if long_segment and selected_segment is None:
+                    # Previewing can be disabled or unavailable. Still retain the
+                    # source by choosing a stable randomized segment rather than
+                    # rejecting it solely for being long.
+                    starts = _preview_sample_starts(
+                        hydrated.source_id,
+                        duration=source_duration,
+                        sample_seconds=min(cfg.hard_max_duration, cfg.long_video_excerpt_seconds),
+                        samples=1,
+                        randomized=True,
+                    )
+                    selected_segment = (
+                        starts[0],
+                        min(source_duration, starts[0] + min(cfg.hard_max_duration, cfg.long_video_excerpt_seconds)),
+                    )
+                    hydrated.metadata["_tubeviz_segment_start"] = selected_segment[0]
+                    hydrated.metadata["_tubeviz_segment_end"] = selected_segment[1]
+                    hydrated.metadata["_tubeviz_source_duration"] = source_duration
+                    progress(
+                        f"  random segment selected: {selected_segment[0]:.1f}-"
+                        f"{selected_segment[1]:.1f}s"
+                    )
+
                 summary.accepted += 1
                 record = library.get_clip_by_id(clip_id)
                 original: Path | None = None
@@ -450,9 +757,22 @@ def ingest_terms(
                             f"  download: {hydrated.source_id} "
                             f"{hydrated.metadata.get('title', '')}"
                         )
-                        original, info_json, downloaded_metadata = source.download(
-                            hydrated, library.originals_dir
-                        )
+                        if selected_segment is not None:
+                            progress(
+                                f"  download segment: {hydrated.source_id} "
+                                f"{selected_segment[0]:.1f}-{selected_segment[1]:.1f}s "
+                                f"{hydrated.metadata.get('title', '')}"
+                            )
+                            original, info_json, downloaded_metadata = source.download_range(
+                                hydrated,
+                                library.originals_dir,
+                                start=selected_segment[0],
+                                end=selected_segment[1],
+                            )
+                        else:
+                            original, info_json, downloaded_metadata = source.download(
+                                hydrated, library.originals_dir
+                            )
                         original_hash = sha256_file(original)
                         canonical = library.find_by_original_sha256(
                             original_hash, exclude_clip_id=clip_id
@@ -515,6 +835,9 @@ def ingest_terms(
                                 force=cfg.force,
                                 progress=progress,
                             )
+                            if cfg.auto_trim:
+                                _auto_trim_from_scene_fitness(library, clip_id, hydrated.source_id,
+                                    threshold=cfg.auto_trim_min_fitness, progress=progress)
                         if cfg.ai_discovery and cfg.ai_index_scenes and ai_cfg is not None and ai_embedder is not None:
                             summary.ai_scene_embeddings += index_clip_scene_embeddings(
                                 library,
@@ -678,6 +1001,17 @@ def ingest_urls(
                 if cfg.visual_index_scenes and scene_count:
                     summary.visual_feature_scenes += index_scene_visual_features(
                         library, clip_id=clip_id, force=cfg.force, progress=progress)
+                if scene_count and (cfg.manual_semantic_index or cfg.manual_classify_scenes):
+                    semantic_cfg = SemanticConfig(model=cfg.manual_semantic_model, pretrained=cfg.manual_semantic_pretrained, device=cfg.manual_semantic_device)
+                    embedder = OpenClipEmbedder(semantic_cfg)
+                    if getattr(embedder, "device_warning", None):
+                        progress(f"  semantic device: {embedder.device_warning}")
+                    if cfg.manual_semantic_index:
+                        summary.ai_scene_embeddings += index_clip_scene_embeddings(
+                            library, clip_id, config=DiscoveryAIConfig(model=semantic_cfg.model, pretrained=semantic_cfg.pretrained, device=semantic_cfg.device),
+                            embedder=embedder, progress=progress)
+                    if cfg.manual_classify_scenes:
+                        classify_scene_thumbnails(library, clip_id=clip_id, embedder=embedder, progress=progress)
                 progress(f"  ready: {hydrated.source_id} ({scene_count} scenes)")
             else:
                 progress(f"  ready: {hydrated.source_id}")

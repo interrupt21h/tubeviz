@@ -23,3 +23,6 @@
 @media(max-width:650px){.secret-input-row{grid-template-columns:1fr}.secret-toggle{width:100%}.url-editor-footer{align-items:flex-start;flex-direction:column}.url-editor-footer button{width:100%}.manual-actions .primary{width:100%}.studio-tooltip{max-width:calc(100vw - 20px)}}
 
 .studio-version{font-size:10px;color:var(--muted);font-weight:600;vertical-align:middle;margin-left:5px;letter-spacing:.02em}
+
+/* v0.29.2 intuitive bounded controls */
+.slider-field{position:relative;padding-top:1px}.slider-field>.slider-value{float:right;color:#dff7ff;background:#102633;border:1px solid #285269;border-radius:999px;padding:2px 7px;font:600 10px/1.35 ui-monospace,SFMono-Regular,monospace}.slider-field>input[type="range"]{padding:0;height:24px;border:0;background:transparent;accent-color:var(--accent);cursor:pointer}.slider-field>input[type="range"]::-webkit-slider-runnable-track{height:6px;border-radius:999px;background:linear-gradient(90deg,#253443,#315d70)}.slider-field>input[type="range"]::-webkit-slider-thumb{margin-top:-5px}.slider-scale{display:flex;justify-content:space-between;gap:8px;margin-top:1px;color:#657485;font-size:9px;line-height:1.2}.slider-scale b{color:#8fb8c7;font-weight:600;text-align:center}.slider-scale span:last-child{text-align:right}.slider-field:focus-within .slider-value{border-color:#55ccec;color:#fff}
