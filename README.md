@@ -12,64 +12,194 @@ These are complete videos produced with tubeviz:
 
 ## Overview
 
-**tubeviz** is an AI-directed, video-first music visualizer. It builds a persistent local clip library from search concepts and manually supplied sources, analyzes music for rhythm, structure, semantic character, and phrase-level energy, selects short source excerpts intelligently, plans beat-aligned edits and transforms, previews them interactively, and renders through either the native C++/FFmpeg backend or the browser renderer.
+**tubeviz** is an AI-directed, video-first music-visualization and automated-editing system. It turns a music track and a reusable collection of source footage into a reproducible, beat-aligned video edit. Unlike an audio-reactive shader that merely changes parameters on a single image, tubeviz reasons across the whole production: it acquires and curates footage, detects useful scenes, analyzes musical structure and meaning, plans a visual arc, selects source excerpts, composes layers and effects, supports interactive review, and renders a final encoded video.
+
+The central artifact is a versioned, Pydantic-validated **directed timeline**. It separates expensive or subjective planning from playback and rendering. The same JSON plan can therefore be inspected, served in the browser, re-cut against an updated library, materialized into caches, or rendered by either backend without repeating the entire workflow.
+
+Tubeviz is designed around five principles:
+
+- **Music-aware direction:** beats, bars, variable tempo, onsets, sections, timbre, energy, motifs, phrase trajectories, and optional learned audio semantics all influence the edit.
+- **Footage-first visuals:** source video remains primary; compositing, transforms, vector treatments, and codec effects are scheduled to support it.
+- **Reusable local intelligence:** normalized media, detected scenes, thumbnails, semantic embeddings, visual measurements, provenance, curation state, and trim ranges persist in a SQLite-backed library.
+- **Deterministic plans, controllable variation:** a stored timeline is reproducible, while seeds, reshuffling, library replanning, and configurable novelty create alternate cuts deliberately.
+- **One engine, several interfaces:** Studio and the CLI invoke the same command implementation; preview and both final-render paths consume the same timeline model.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Requirements and installation](#requirements)
+- [Studio GUI](#quick-start-studio-gui)
+- [End-to-end CLI workflow](#end-to-end-cli-workflow)
+- [Theme-first footage acquisition](#theme-first-ai-footage-acquisition)
+- [Music analysis and choreography](#phrase-aware-choreography-and-multi-shot-planning)
+- [Visual direction and effects](#visual-director-motion-palette-rhythm-and-narrative-matching)
+- [Rendering](#8-render-a-final-video)
+- [Library layout](#library-layout)
+- [Troubleshooting](#troubleshooting)
+- [Command reference](#command-reference)
+- [Development](#development)
 
 ## Architecture
 
+### System context
+
 ```mermaid
-flowchart LR
-    TERMS["Search terms"] --> INGEST["tubeviz ingest"]
-    YT["yt-dlp / YouTube"] --> INGEST
-    AI["OpenCLIP + optional LLM"] --> INGEST
-    INGEST --> LIB[("Clip library\nSQLite + normalized media\nscenes + embeddings")]
+flowchart TB
+    subgraph Inputs
+        BRIEF["Visual brief or search terms"]
+        URLS["Curated YouTube URLs"]
+        AUDIO["Music track"]
+    end
 
-    AUDIO["Music file"] --> ANALYZE["tubeviz analyze"]
-    LIB --> ANALYZE
-    ANALYZE --> TL["Timeline JSON\nbeats + variable BPM\nvibe + scene plan\ntransforms + edit cues"]
+    subgraph Tubeviz
+        STUDIO["Studio and CLI"]
+        INGEST["Acquisition and ingest"]
+        LIB[("Persistent clip library")]
+        PLAN["Analysis and direction"]
+        TL[("Directed timeline JSON")]
+        PREVIEW["Interactive preview"]
+        RENDER["Browser or native renderer"]
+    end
 
-    TL --> SERVE["tubeviz serve"]
-    LIB --> SERVE
-    AUDIO --> SERVE
-    SERVE --> LIVE["Interactive browser visualizer"]
-
-    TL --> NATIVE["Native C++ renderer"]
-    TL --> BROWSER["Offline browser renderer"]
-    LIB --> NATIVE
-    LIB --> BROWSER
-    AUDIO --> NATIVE
-    AUDIO --> BROWSER
-    NATIVE --> OUT["Final video"]
-    BROWSER --> OUT
-
-    GUI["tubeviz gui"] --> INGEST
-    GUI --> ANALYZE
-    GUI --> SERVE
-    GUI --> NATIVE
-    GUI --> BROWSER
-    GUI --> LIB
+    BRIEF --> STUDIO
+    URLS --> STUDIO
+    AUDIO --> STUDIO
+    STUDIO --> INGEST
+    INGEST --> LIB
+    STUDIO --> PLAN
+    AUDIO --> PLAN
+    LIB --> PLAN
+    PLAN --> TL
+    TL --> PREVIEW
+    TL --> RENDER
+    LIB --> PREVIEW
+    LIB --> RENDER
+    AUDIO --> PREVIEW
+    AUDIO --> RENDER
+    RENDER --> OUTPUT["Encoded music video"]
 ```
 
-### Music-to-video direction
+Studio is an orchestration layer, not a parallel implementation. Its curated workflows and parser-generated Command Center launch validated CLI argument vectors. The CLI coordinates the Python planning pipeline, external media tools, the FastAPI preview service, and the native renderer.
+
+### Acquisition and library pipeline
 
 ```mermaid
 flowchart TD
-    A["Audio"] --> B["Librosa analysis"]
-    B --> C["Beat / onset detection"]
-    B --> D["Variable-tempo curve"]
-    B --> E["Sections / motifs / vibe"]
-    C --> F["Beat-aligned shot planner"]
-    D --> F
-    E --> G["SceneIntent"]
-    L["Library scenes"] --> G
-    V["OpenCLIP embeddings"] --> G
-    G --> H["Novelty + reuse-aware selection"]
-    H --> F
-    F --> I["Short source excerpts"]
-    I --> J["Transform + composition director"]
-    E --> J
-    J --> K["Timeline cues"]
-    K --> R["Video-first renderer"]
+    S["Brief, terms, or URLs"] --> D["Discover with yt-dlp"]
+    D --> M{"Metadata policy"}
+    M -->|reject| R1["Record reason"]
+    M -->|candidate| P["Strategic preview probes"]
+    P --> Q{"Motion, text, face,\ndiversity, aesthetics"}
+    Q -->|reject| R1
+    Q -->|pass| DL["Download chosen range"]
+    DL --> N["FFmpeg normalization"]
+    N --> SC["Scene detection and thumbnails"]
+    SC --> VF["Temporal visual features"]
+    SC --> OC["OpenCLIP embeddings and labels"]
+    VF --> DB[("SQLite metadata")]
+    OC --> DB
+    N --> MEDIA["Original and normalized media"]
+    DB --> CURATE["Trim, reject, restore, inspect"]
 ```
+
+Automatic discovery uses progressively more expensive gates: cheap metadata screening precedes partial media probes, and full download/indexing is reserved for footage that survives quality checks. Explicit `ingest-url` sources enter the same downstream normalization, scene, feature, and semantic-indexing pipeline while bypassing search ranking.
+
+### Music-to-edit planning
+
+```mermaid
+flowchart TB
+    A["Decoded audio"] --> DSP["Librosa DSP analysis"]
+    DSP --> GRID["Beats, bars, onsets, tempo curve"]
+    DSP --> FORM["Sections, key, vibe, motifs"]
+    A -. optional .-> CLAP["CLAP semantic windows"]
+    A -. optional .-> MERT["MERT representations"]
+    FORM --> TRAJ["Build, drop, release trajectory"]
+    CLAP --> TRAJ
+    MERT --> TRAJ
+    TRAJ --> INTENT["Per-section visual intent"]
+    GRID --> SHOTS["Beat-quantized shot windows"]
+    INTENT --> SELECT["Lookahead scene selection"]
+    LIBSCENES[("Indexed library scenes")] --> SELECT
+    SELECT --> SHOTS
+    SHOTS --> DIRECT["Layers, transforms, color, vectors, codec cues"]
+    DIRECT --> TL[("Directed timeline JSON")]
+```
+
+The selector evaluates sequences rather than isolated clips. Semantic relevance, phrase trajectory, motion/effect compatibility, transition quality, learned curation preferences, novelty, reuse cooldowns, and deterministic variation contribute to the selected path. Exact edits remain quantized to the musical grid even when optional AI supplies higher-level treatment ideas.
+
+### Timeline contract and render paths
+
+```mermaid
+flowchart TD
+    TL[("DirectedTimeline")]
+    TL --> TRACK["Track analysis\nevents, tempo, sections, arc"]
+    TL --> EDIT["Cues, motifs, memory"]
+    TL --> SCENES["Scene plan\nsource ranges and layers"]
+    SCENES --> DIR["Transforms, color, vectors, codec effects"]
+
+    TL --> SERVER["FastAPI + WebSocket clock"]
+    SERVER --> CANVAS["Interactive Canvas preview"]
+
+    TL --> BROWSER["Playwright frame capture"]
+    BROWSER --> FFMPEG1["FFmpeg mux and encode"]
+
+    TL --> MANIFEST["Native manifest adapter"]
+    MANIFEST --> CPP["C++20 sequential decode and composite"]
+    CPP --> RAW["Raw RGB24 stream"]
+    RAW --> FFMPEG2["FFmpeg mux and encode"]
+
+    FFMPEG1 --> VIDEO["Final video"]
+    FFMPEG2 --> VIDEO
+```
+
+The browser path offers visual parity with the interactive Canvas renderer. The native path avoids browser screenshots: C++ decodes source video sequentially through FFmpeg libraries, composites simultaneous layers, emits raw RGB frames, and pipes them directly to FFmpeg for final encoding. `tubeviz render --backend auto` prefers a usable native renderer and falls back to the browser path.
+
+### Persistent data model
+
+```mermaid
+erDiagram
+    CLIP ||--o{ CLIP_TERM : discovered_by
+    SEARCH_TERM ||--o{ CLIP_TERM : groups
+    CLIP ||--o{ SCENE : contains
+    SCENE ||--o{ SCENE_EMBEDDING : represents
+    SCENE ||--o| VISUAL_FEATURES : measures
+
+    CLIP {
+        int id PK
+        string source_id
+        string status
+        string normalized_path
+        float usable_start
+        float usable_end
+    }
+    SEARCH_TERM {
+        int id PK
+        string term
+    }
+    CLIP_TERM {
+        int clip_id FK
+        int term_id FK
+        int rank
+    }
+    SCENE {
+        int id PK
+        int clip_id FK
+        float start_time
+        float end_time
+    }
+    SCENE_EMBEDDING {
+        int scene_id FK
+        string model
+        int dim
+    }
+    VISUAL_FEATURES {
+        int scene_id FK
+        int version
+        string data_json
+    }
+```
+
+Clip status and provenance are retained even when a candidate is rejected. Non-destructive `usable_start` and `usable_end` bounds let the editor exclude weak intros, outros, title cards, or other unwanted regions without rewriting the source or invalidating its stable scene fingerprints.
 
 ## Manually add a YouTube clip
 
@@ -145,11 +275,17 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-For development, semantic selection, AI ingest, and browser rendering:
+For development, semantic selection, AI ingest, learned audio analysis, and browser rendering:
 
 ```bash
-pip install -e '.[dev,semantic,render]'
+pip install -e '.[dev,semantic,audio-ai,render]'
 ```
+
+The extras can also be installed independently: `semantic` adds OpenCLIP and
+Pillow, `audio-ai` adds PyTorch and Transformers for CLAP/MERT, `render` adds
+Playwright, and `dev` adds the test dependencies. Core DSP analysis, library
+management, preview serving, and native rendering do not require the learned-AI
+extras.
 
 If using Playwright's Chromium:
 
@@ -164,7 +300,7 @@ tubeviz --help
 ffmpeg -version
 ```
 
-#### Codec-cache filesystems and MP4 faststart
+### Codec-cache filesystems and MP4 faststart
 
 Codec-glitch shots are finalized in tubeviz's local temporary directory and only then published to `library/codec-glitch/`. This avoids FFmpeg's `+faststart` in-place MP4 rewrite running directly on NFS, FUSE, network, merger, or other mounted library filesystems. If the optional faststart pass still fails locally, tubeviz retries without faststart; cached shots do not require a front-loaded `moov` atom. Cache publication uses a same-directory temporary file plus `fsync` and atomic `os.replace`, so interrupted materialization cannot expose a partially written MP4.
 
@@ -178,7 +314,7 @@ bitstream editor; `fflive` is for live playback/glitching and `ffgac` is an
 FFmpeg variant with extra glitch-oriented functionality. tubeviz only requires
 `ffedit`.
 
-#### Linux x86-64
+### Linux x86-64
 
 The official prebuilt archive is:
 
@@ -216,7 +352,7 @@ install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name fflive -print 
 install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name ffgac -print -quit)" ~/.local/bin/ffgac
 ```
 
-#### Linux aarch64
+### Linux aarch64
 
 FFglitch also publishes an official Linux aarch64 archive:
 
@@ -227,14 +363,14 @@ https://ffglitch.org/pub/bin/linux-aarch64/ffglitch-0.10.2-linux-aarch64.7z
 Extract it with `7z`, copy `ffedit` to a directory on `PATH`, and verify with
 `tubeviz codec doctor`.
 
-#### macOS and Windows
+### macOS and Windows
 
 Official FFglitch 0.10.2 archives are also published for macOS x86-64, macOS
 aarch64/Apple silicon, and Windows x86-64. Install `ffedit` from the appropriate
 archive and ensure the executable is on `PATH` before starting tubeviz. See the
 FFglitch Download page for the current official archive links.
 
-#### What tubeviz does with FFglitch
+### What tubeviz does with FFglitch
 
 tubeviz does **not** send arbitrary YouTube/H.264/WebM files directly to
 `ffedit`. FFglitch features are codec-specific. tubeviz first prepares a short,
@@ -296,7 +432,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.28.1**.
+For this release, the header and `tubeviz.__version__` should report **0.29.3**.
 
 ```mermaid
 flowchart LR
@@ -2136,8 +2272,11 @@ Top-level commands:
 | Command | Purpose |
 |---|---|
 | `tubeviz ingest` | Search, download, normalize, scene-index and optionally AI-rank footage |
+| `tubeviz ingest-url` | Import explicit YouTube URLs through the complete scene-understanding pipeline |
 | `tubeviz library` | Inspect, curate, delete, report on and embed the persistent library |
 | `tubeviz analyze` | Analyze music and produce the directed timeline |
+| `tubeviz choreography` | Inspect stored phrase trajectories and the whole-song visual arc |
+| `tubeviz music-ai` | Diagnose optional MERT music-representation support |
 | `tubeviz materialize` | Bake selected source transforms into cached media |
 | `tubeviz render` | Render final video with native/browser/auto backend |
 | `tubeviz codec` | Inspect, materialize and diagnose FFglitch codec-space effects |
