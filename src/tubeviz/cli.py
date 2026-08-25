@@ -149,6 +149,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
                     cache_dir=args.ai_director_cache_dir,
                     force=args.ai_director_force,
                     semantic_strength=args.ai_director_strength,
+                    reasoning_effort=args.ai_director_reasoning_effort,
+                    max_completion_tokens=args.ai_director_max_completion_tokens,
                 ),
             )
     if getattr(args, "choreography", True):
@@ -1278,6 +1280,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--ai-director-cache-dir")
     analyze.add_argument("--ai-director-force", action="store_true")
     analyze.add_argument("--ai-director-strength", type=float, default=0.75, help="How strongly the whole-song LLM plan may alter the deterministic CLAP baseline")
+    analyze.add_argument("--ai-director-reasoning-effort", choices=("none", "low", "medium", "high", "xhigh", "max"), default="none", help="Native OpenAI GPT-5.6 reasoning effort; 'none' avoids spending the director output budget on hidden reasoning")
+    analyze.add_argument("--ai-director-max-completion-tokens", type=int, default=8192, help="Native OpenAI Chat Completions budget for the whole-song JSON plan")
     analyze.add_argument("--no-transforms", action="store_true", help="Disable per-scene video transform planning")
     analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Transform strength; 0 disables, 1 normal, up to 2 aggressive")
     analyze.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")

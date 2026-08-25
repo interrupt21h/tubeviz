@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tubeviz"
-version = "0.29.2"
+version = "0.29.3"
 description = "AI-directed music visualizer with a searchable local video clip library"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]

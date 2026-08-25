@@ -6,6 +6,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,8 @@ class AIDirectorConfig:
     cache_dir: str | None = None
     force: bool = False
     semantic_strength: float = 0.75
+    reasoning_effort: str = "none"
+    max_completion_tokens: int = 8192
 
 
 _EFFECT_FAMILIES = {"dream", "liquid", "analog", "fracture", "hyper", "prismatic", "cinematic"}
@@ -223,6 +226,42 @@ def _endpoint(base_url: str) -> str:
     return base if base.endswith("/chat/completions") else base + "/chat/completions"
 
 
+def _is_native_openai(base_url: str) -> bool:
+    try:
+        return (urlsplit(base_url).hostname or "").lower() == "api.openai.com"
+    except ValueError:
+        return False
+
+
+def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": cfg.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return strict JSON only. You direct themes and intensity; you never choose media files.",
+            },
+            {"role": "user", "content": _director_prompt(track)},
+        ],
+    }
+
+    if _is_native_openai(cfg.base_url or ""):
+        # GPT-5.6 reasoning tokens and visible output share the Chat Completions
+        # completion budget. The director needs structured creative planning, not
+        # deep hidden reasoning, so disable reasoning and leave enough room for a
+        # whole-song JSON plan. Do not send legacy sampling parameters here.
+        payload.update({
+            "reasoning_effort": cfg.reasoning_effort,
+            "max_completion_tokens": max(512, int(cfg.max_completion_tokens)),
+            "response_format": {"type": "json_object"},
+        })
+    else:
+        # Keep the existing generic OpenAI-compatible/vLLM request shape.
+        payload["temperature"] = 0.35
+
+    return payload
+
+
 def _extract_json(content: str) -> dict[str, Any]:
     text = content.strip()
     if text.startswith("```"):
@@ -241,14 +280,7 @@ def _extract_json(content: str) -> dict[str, Any]:
 def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
     if not cfg.base_url or not cfg.model:
         raise RuntimeError("--ai-director requires --ai-director-base-url and --ai-director-model")
-    payload = {
-        "model": cfg.model,
-        "messages": [
-            {"role": "system", "content": "Return strict JSON only. You direct themes and intensity; you never choose media files."},
-            {"role": "user", "content": _director_prompt(track)},
-        ],
-        "temperature": 0.35,
-    }
+    payload = _request_payload(track, cfg)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if cfg.api_key:
@@ -257,12 +289,44 @@ def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=cfg.timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+    except urllib.error.HTTPError as exc:
+        try:
+            response_body = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            response_body = ""
+        request_id = exc.headers.get("x-request-id") if exc.headers else None
+        detail = f"HTTP {exc.code} {exc.reason}"
+        if request_id:
+            detail += f"; x-request-id={request_id}"
+        if response_body:
+            try:
+                parsed = json.loads(response_body)
+                response_body = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+            except (TypeError, ValueError):
+                pass
+            detail += f"; response={response_body}"
+        raise RuntimeError(f"AI director request failed: {detail}") from exc
+    except urllib.error.URLError as exc:
         raise RuntimeError(f"AI director request failed: {exc}") from exc
+
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError("AI director response has no choices")
-    return _extract_json(str(choices[0].get("message", {}).get("content", "")))
+
+    choice = choices[0]
+    message = choice.get("message") or {}
+    content = str(message.get("content") or "")
+    if not content.strip():
+        usage = data.get("usage") or {}
+        completion_details = usage.get("completion_tokens_details") or {}
+        raise RuntimeError(
+            "AI director returned no content "
+            f"(finish_reason={choice.get('finish_reason')!r}, "
+            f"completion_tokens={usage.get('completion_tokens')!r}, "
+            f"reasoning_tokens={completion_details.get('reasoning_tokens')!r}). "
+            "The completion budget may have been exhausted before visible JSON was emitted."
+        )
+    return _extract_json(content)
 
 
 def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: float) -> SectionAIDirection:

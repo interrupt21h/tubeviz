@@ -54,3 +54,80 @@ def test_audio_ai_subcommands_parse():
     inspect = parser.parse_args(["audio-ai", "inspect", "timeline.json", "--top", "3"])
     assert inspect.timeline == "timeline.json"
     assert inspect.top == 3
+
+
+def _track():
+    from tubeviz.models import TrackAnalysis
+
+    return TrackAnalysis(
+        source="song.wav",
+        duration=8,
+        sample_rate=22050,
+        hop_length=512,
+        tempo_bpm=124,
+        beats=[],
+        bars=[],
+        sections=[section()],
+        events=[],
+    )
+
+
+def test_native_openai_payload_uses_gpt56_reasoning_profile():
+    from tubeviz.ai_music_director import _request_payload
+
+    payload = _request_payload(
+        _track(),
+        AIDirectorConfig(
+            enabled=True,
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.6-terra",
+        ),
+    )
+    assert payload["model"] == "gpt-5.6-terra"
+    assert payload["reasoning_effort"] == "none"
+    assert payload["max_completion_tokens"] == 8192
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "temperature" not in payload
+    assert "max_tokens" not in payload
+
+
+def test_generic_openai_compatible_payload_preserves_legacy_shape():
+    from tubeviz.ai_music_director import _request_payload
+
+    payload = _request_payload(
+        _track(),
+        AIDirectorConfig(
+            enabled=True,
+            base_url="http://localhost:8000/v1",
+            model="local-model",
+        ),
+    )
+    assert payload["temperature"] == 0.35
+    assert "reasoning_effort" not in payload
+    assert "max_completion_tokens" not in payload
+    assert "response_format" not in payload
+
+
+def test_native_openai_completion_budget_has_safe_floor():
+    from tubeviz.ai_music_director import _request_payload
+
+    payload = _request_payload(
+        _track(),
+        AIDirectorConfig(
+            enabled=True,
+            base_url="https://api.openai.com/v1/chat/completions",
+            model="gpt-5.6-terra",
+            max_completion_tokens=1,
+        ),
+    )
+    assert payload["max_completion_tokens"] == 512
+
+
+def test_ai_director_cli_openai_defaults_parse():
+    args = build_parser().parse_args([
+        "analyze", "song.mp3", "--audio-ai", "--ai-director",
+        "--ai-director-base-url", "https://api.openai.com/v1",
+        "--ai-director-model", "gpt-5.6-terra",
+    ])
+    assert args.ai_director_reasoning_effort == "none"
+    assert args.ai_director_max_completion_tokens == 8192

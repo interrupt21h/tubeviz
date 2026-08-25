@@ -1446,6 +1446,22 @@ If authentication is required:
 --ai-director-api-key "$OPENAI_API_KEY"
 ```
 
+For native OpenAI GPT-5.6 models, use the OpenAI base URL rather than the full
+Chat Completions path. tubeviz automatically selects the GPT-5.6-compatible
+request profile and keeps generic/local vLLM compatibility unchanged:
+
+```bash
+--ai-director-base-url https://api.openai.com/v1 \
+--ai-director-model gpt-5.6-terra \
+--ai-director-api-key "$OPENAI_API_KEY" \
+--ai-director-reasoning-effort none \
+--ai-director-max-completion-tokens 8192
+```
+
+`none` is the default reasoning effort for the AI director because its job is to
+produce a structured whole-song visual plan; this prevents hidden reasoning from
+consuming the completion budget before visible JSON is emitted.
+
 The returned JSON is schema-validated and unknown fields are discarded. The
 LLM plan is blended with the deterministic CLAP baseline; low CLAP confidence
 reduces how strongly the language model may redirect a section. Plans are
