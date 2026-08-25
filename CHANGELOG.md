@@ -1,14 +1,7 @@
-# 0.29.3 — Native OpenAI GPT-5.6 director compatibility
-
-- Native `https://api.openai.com` AI-director requests now use GPT-5.6-compatible Chat Completions parameters: `reasoning_effort`, `max_completion_tokens`, and JSON response mode.
-- The OpenAI director defaults to `reasoning_effort=none` so hidden reasoning does not consume the whole-song JSON output budget, with an 8192-token completion ceiling.
-- Generic OpenAI-compatible and local vLLM endpoints preserve the prior `temperature=0.35` request shape.
-- HTTP errors now include the OpenAI response body and `x-request-id` when available instead of collapsing useful 400/429 diagnostics into `HTTP Error`.
-- Empty completions report finish reason and reasoning/completion token usage, making exhausted output budgets obvious.
-- Added `--ai-director-reasoning-effort` and `--ai-director-max-completion-tokens`.
-
 # 0.29.2 — Intuitive Studio ranges
 
+- Reorganized README as evergreen product documentation: screenshot first, followed by sample videos, architecture, installation, workflows, and reference material.
+- Removed duplicated release/change narratives from README; release notes and implementation-change history now live exclusively in CHANGELOG.md.
 - Replaced ambiguous normalized numeric controls with bounded sliders for directing, effects, and acquisition-quality thresholds.
 - Added live numeric readouts and human-readable endpoint/recommended-range labels.
 - Kept element IDs and exact numeric values unchanged so CLI generation and saved workflows remain compatible.
