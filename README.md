@@ -1363,6 +1363,11 @@ than failing inside CLAP, OpenCLIP, or MERT inference.
 tubeviz transforms **rendered video** rather than placing small rectangular clips over a
 conventional procedural visualizer.
 
+Visual treatment is deliberately heterogeneous: most shots preserve their source hue, strong
+color grades and mask/symmetry effects are sparse, and a section rotates through compatible
+effect families instead of applying one permanent visual style. Circular/portal masks are
+reserved for rare explicit accents rather than used as a default composition.
+
 Depending on backend support and timeline direction, the effect system includes:
 
 - crop/zoom/pan, mirror, rotation, playback-rate treatment;
