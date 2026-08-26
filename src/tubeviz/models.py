@@ -408,6 +408,11 @@ class CreativeEffectPlan(BaseModel):
     texture_bloom: float = Field(default=0.0, ge=0.0, le=1.0)
     texture_streaks: float = Field(default=0.0, ge=0.0, le=1.0)
     palette_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Fraction of the source image's original color/tonal identity that should be
+    # preserved.  Active v0.33.5 plans normally live around 0.8-0.95; disabled
+    # creative rendering explicitly uses 1.0.  The non-1.0 model default keeps
+    # older v0.33 timelines conservative when loaded by a newer renderer.
+    source_fidelity: float = Field(default=0.90, ge=0.0, le=1.0)
     abstraction: float = Field(default=0.0, ge=0.0, le=1.0)
     hero_kind: str | None = None
     hero_amount: float = Field(default=0.0, ge=0.0, le=1.0)

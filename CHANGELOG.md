@@ -1,3 +1,15 @@
+# 0.33.5 — Source-faithful color and temporal rendering
+
+- Replaced the browser renderer's fixed `hue-rotate(±105–125deg)`/`screen` chromatic overlays with true RGB-channel displacement using the source frame's real red, green, and blue samples. This covers prismatic shift, flow RGB, temporal RGB, chroma delay, RGB split, and treble beat-warp accents.
+- Changed vibe color direction from absolute hue targets (which repeatedly drove euphoric/hypnotic footage toward purple/fuchsia) to small source-relative hue biases. AI target hues now act as bounded nudges rather than palette replacement.
+- Removed duplicated `ColorDirection` hue/saturation/contrast/brightness from per-source transforms. Music-directed grading is now applied once after composition.
+- Added per-shot `source_fidelity` to `CreativeEffectPlan`. Normal footage retains roughly 80–95% of its source color identity; rare hero moments may relax that briefly, while disabling Creative FX preserves the source completely.
+- Added the same source-fidelity/post-composite color model to the native renderer and extended the native manifest by appending backward-compatible color fields.
+- Ordinary scene changes now clear browser delay/feedback history and native previous-frame creative input. Cross-shot temporal inheritance is reserved for explicit temporal hero treatments such as `flow_melt`, `subject_echo`, `time_prism`, and `recursive_portal`.
+- Native palette treatment is disabled when a scene has no source palette instead of falling back to an arbitrary synthetic color.
+- Added regression tests for bounded source-relative hue direction, true-channel browser effects, source-fidelity scaling, and the extended native manifest.
+- Aligned the Library-detail screenshot helper default with the documented `screenshots/screenshot-library-detail.png` filename.
+
 # 0.33.4 — Robust Library card actions
 
 - Fix Library **Play / Trim** buttons for clips whose titles contain double quotes or other characters that can terminate an inline HTML event-handler attribute. The visible failure happened on the quoted `She said:"..."` clip, making the bug look position-dependent.

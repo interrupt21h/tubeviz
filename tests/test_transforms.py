@@ -46,6 +46,7 @@ def test_transform_planning_is_deterministic_and_energy_aware():
     assert a.edge > 0
     assert a.strobe > 0
     assert a.shutter > 0
+    assert abs(a.hue_degrees) <= 10.0
 
 
 def test_zero_transform_intensity_is_identity():

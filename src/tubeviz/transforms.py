@@ -98,24 +98,10 @@ def plan_transform(
     saturation = _clamp(1.0 + (saturation_target - 1.0) * intensity, 0.3, 2.5)
     contrast = _clamp(1.0 + (contrast_target - 1.0) * intensity, 0.5, 2.2)
     css_brightness = _clamp(1.0 + (brightness_target - 1.0) * intensity, 0.5, 1.8)
-    color = selection.direction.color
-    if color.palette or selection.direction.motion_match > 0.0:
-        hue = _clamp(
-            hue * 0.35 + color.hue_shift_degrees * (0.35 + 0.35 * intensity),
-            -180.0, 180.0,
-        )
-        saturation = _clamp(
-            saturation * (0.72 + 0.28 * color.saturation_scale),
-            0.25, 3.0,
-        )
-        contrast = _clamp(
-            contrast * (0.78 + 0.22 * color.contrast_scale),
-            0.45, 2.5,
-        )
-        css_brightness = _clamp(
-            css_brightness * (0.82 + 0.18 * color.brightness_scale),
-            0.45, 2.0,
-        )
+    # ColorDirection is applied once, after composition, by the renderer.  Do not
+    # bake it into every source layer as well: doing so previously doubled hue and
+    # saturation steering and made unrelated clips converge on the same palette.
+    # The small stable `hue` above remains a shot-local transform only.
     feedback = _clamp(
         intensity * (0.05 + 0.18 * energy + 0.20 * tonal + 0.08 * mutation)
         * (1.25 if vibe in {"hypnotic", "dream"} else 1.0),
@@ -203,7 +189,7 @@ def plan_transform(
         brightness=css_brightness,
         contrast=contrast,
         saturation=saturation,
-        hue_degrees=_clamp(hue, -45.0, 45.0),
+        hue_degrees=_clamp(hue, -10.0, 10.0),
         blur_px=_clamp(blur, 0.0, 3.0),
         grayscale=grayscale,
         feedback=feedback,
@@ -327,8 +313,9 @@ def _ffmpeg_filters(transform: VideoTransform, cfg: MaterializeConfig) -> list[s
     if abs(transform.rotation_degrees) > 0.05:
         radians = transform.rotation_degrees * 3.141592653589793 / 180.0
         filters.append(f"rotate={radians:.9f}:fillcolor=black")
-    if abs(transform.hue_degrees) > 0.05:
-        filters.append(f"hue=h={transform.hue_degrees:.4f}")
+    materialized_hue = _clamp(transform.hue_degrees, -10.0, 10.0)
+    if abs(materialized_hue) > 0.05:
+        filters.append(f"hue=h={materialized_hue:.4f}")
     # ffmpeg eq brightness is additive (-1..1), unlike CSS brightness multiplier.
     eq_brightness = _clamp(transform.brightness - 1.0, -0.5, 0.5)
     filters.append(

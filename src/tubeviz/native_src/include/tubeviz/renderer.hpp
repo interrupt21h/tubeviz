@@ -28,7 +28,7 @@ public:
 private:
     const Shot* shot_at(double time, std::size_t& index) const;
     std::vector<std::uint8_t> render_layer(const Layer& layer, double shot_time, double now);
-    std::vector<std::uint8_t> render_shot(const Shot& shot, double now);
+    std::vector<std::uint8_t> render_shot(const Shot& shot, double now, bool allow_previous_effects);
     Decoder& decoder_for(const std::string& path);
     void trim_decoders(const Shot& shot);
     void warm_shot(const Shot& shot);

@@ -56,6 +56,11 @@ const [flowPrev,flowPrevCtx]=offscreen(false);
 const [depthProbe,depthProbeCtx]=offscreen(false);
 const [subjectMask,subjectMaskCtx]=offscreen(true);
 const [subjectLayer,subjectLayerCtx]=offscreen(true);
+// Low-resolution true RGB channel compositor.  Channel separation is deliberately
+// performed on real R/G/B samples instead of hue-rotated full-frame copies, which
+// previously pushed many unrelated clips toward fluorescent magenta.
+const [channelSample,channelSampleCtx]=offscreen(false);
+const [channelOut,channelOutCtx]=offscreen(false);
 const delayBuffers=[delayA,delayB,delayC];
 const vectorGeometryCache=new Map();
 const vectorEchoHistory=[];
@@ -64,7 +69,7 @@ let vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
 let vectorFlowInitialized=false;
 let creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
 const delayCtx=[delayACtx,delayBCtx,delayCCtx];
-let delayWrite=0;
+let delayWrite=0,delayCount=0,historyReady=false;
 
 function resize(){
   width=canvas.width=videoFx.width=Math.floor(innerWidth*devicePixelRatio);
@@ -79,11 +84,15 @@ function resize(){
   flowProbe.width=64;flowProbe.height=36;flowPrev.width=64;flowPrev.height=36;
   flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,64,36);
   depthProbe.width=16;depthProbe.height=9;subjectMask.width=16;subjectMask.height=9;creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
+  channelSample.width=channelOut.width=Math.max(120,Math.min(280,Math.floor(width/6)));
+  channelSample.height=channelOut.height=Math.max(68,Math.round(channelSample.width*height/Math.max(1,width)));
   vectorGeometryCache.clear();vectorEchoHistory.length=0;
   vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
   vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
   posterCanvas.width=Math.max(96,Math.min(320,Math.floor(width/5)));
   posterCanvas.height=Math.max(54,Math.min(180,Math.floor(height/5)));
+  delayWrite=0;delayCount=0;historyReady=false;
+  historyCtx.fillStyle='#000';historyCtx.fillRect(0,0,width,height);
 }
 addEventListener('resize',resize); resize();
 
@@ -143,13 +152,17 @@ async function loadBank(bankIndex,scene){
 
 let activationGeneration=0;
 async function activateScene(scene,{immediate=false}={}){
-  if(!scene){activeScene=null;pauseAll();bankState[0]=[];bankState[1]=[];return;}
+  if(!scene){activeScene=null;pauseAll();bankState[0]=[];bankState[1]=[];resetTemporalFxState(false);return;}
   const gen=++activationGeneration,next=activeBank<0?0:1-activeBank;
   try{
     await loadBank(next,scene);if(gen!==activationGeneration)return;
     const duration=immediate?0:Math.max(0,scene.crossfade_seconds??1.25);
     transition=activeBank<0?null:{from:activeBank,to:next,start:clockNowMs(),duration:duration*1000};
     if(activeBank<0||duration===0){if(activeBank>=0)banks[activeBank].forEach(v=>v.pause());activeBank=next;transition=null;}
+    // Ordinary scene changes start with clean temporal/color history.  Only the
+    // explicitly cross-shot hero treatments are allowed to inherit old frames.
+    const temporalHero=['flow_melt','subject_echo','time_prism','recursive_portal'].includes(scene?.direction?.creative?.hero_kind??'');
+    resetTemporalFxState(temporalHero);
     activeScene={...scene};focusLayer=0;resetVectorMotionState();
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
@@ -177,7 +190,11 @@ function transformedRect(t,rect){
 function drawLayer(target,state,rect,alpha=1,blend=null){
   const{video,transform:t,layer}=state;if(video.readyState<2)return;
   target.save();target.globalAlpha=alpha*(layer.opacity??.75);target.globalCompositeOperation=blend||layer.blend_mode||t.blend_mode||'source-over';
-  if('filter' in target)target.filter=`brightness(${t.brightness??1}) contrast(${t.contrast??1}) saturate(${t.saturation??1}) hue-rotate(${t.hue_degrees??0}deg) blur(${t.blur_px??0}px) grayscale(${t.grayscale??0})`;
+  // Clamp legacy timeline hue transforms as well.  New planners already emit only
+  // subtle shot-local hue variation, but this keeps older v0.33 timelines from
+  // reintroducing the pre-fix full-palette rotation when previewed by a new server.
+  const layerHue=Math.max(-10,Math.min(10,Number(t.hue_degrees??0)));
+  if('filter' in target)target.filter=`brightness(${t.brightness??1}) contrast(${t.contrast??1}) saturate(${t.saturation??1}) hue-rotate(${layerHue}deg) blur(${t.blur_px??0}px) grayscale(${t.grayscale??0})`;
   target.beginPath();target.rect(rect.x,rect.y,rect.w,rect.h);target.clip();
   target.translate(rect.x+rect.w/2,rect.y+rect.h/2);target.rotate((t.rotation_degrees??0)*Math.PI/180);target.scale(t.mirror?-1:1,1);target.translate(-(rect.x+rect.w/2),-(rect.y+rect.h/2));
   const d=transformedRect(t,rect),vw=video.videoWidth||width,vh=video.videoHeight||height,scale=Math.max(d.w/vw,d.h/vh),dw=vw*scale,dh=vh*scale;
@@ -241,6 +258,41 @@ function drawBank(bankIndex,alpha){
 }
 
 function snapshot(){scratchCtx.clearRect(0,0,width,height);scratchCtx.drawImage(videoFx,0,0);}
+function sourceFidelity(){
+  const base=Math.max(0,Math.min(1,Number(activeScene?.direction?.creative?.source_fidelity??.90)));
+  // Hero moments may temporarily relax fidelity, but never turn a normal shot into
+  // a permanent color replacement.  The envelope returns to the source immediately.
+  const hero=(typeof heroEnvelope==='function')?heroEnvelope():0;
+  return Math.max(.58,Math.min(1,base-.16*hero));
+}
+function channelPixels(source){
+  const w=channelSample.width,h=channelSample.height;
+  channelSampleCtx.clearRect(0,0,w,h);
+  channelSampleCtx.drawImage(source,0,0,w,h);
+  try{return channelSampleCtx.getImageData(0,0,w,h).data;}catch(_){return null;}
+}
+function applyTrueRgbChannels(redSource,greenSource,blueSource,redDx=0,redDy=0,blueDx=0,blueDy=0,alpha=.2){
+  if(alpha<=.005)return false;
+  const w=channelOut.width,h=channelOut.height;
+  const r=channelPixels(redSource);if(!r)return false;
+  const g=greenSource===redSource?r:channelPixels(greenSource);if(!g)return false;
+  const b=blueSource===redSource?r:(blueSource===greenSource?g:channelPixels(blueSource));if(!b)return false;
+  const image=channelOutCtx.createImageData(w,h),d=image.data;
+  const rdx=Math.round(redDx*w/Math.max(1,width)),rdy=Math.round(redDy*h/Math.max(1,height));
+  const bdx=Math.round(blueDx*w/Math.max(1,width)),bdy=Math.round(blueDy*h/Math.max(1,height));
+  for(let y=0;y<h;y++){
+    const ry=Math.max(0,Math.min(h-1,y-rdy)),by=Math.max(0,Math.min(h-1,y-bdy));
+    for(let x=0;x<w;x++){
+      const rx=Math.max(0,Math.min(w-1,x-rdx)),bx=Math.max(0,Math.min(w-1,x-bdx));
+      const i=(y*w+x)*4,ri=(ry*w+rx)*4,bi=(by*w+bx)*4;
+      d[i]=r[ri];d[i+1]=g[i+1];d[i+2]=b[bi+2];d[i+3]=255;
+    }
+  }
+  channelOutCtx.putImageData(image,0,0);
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=Math.max(0,Math.min(1,alpha));fx.imageSmoothingEnabled=true;
+  fx.drawImage(channelOut,0,0,width,height);fx.restore();
+  return true;
+}
 function applyShutter(amount){
   if(amount<=.03)return;const now=clockNowMs(),interval=26+amount*150;
   if(now>=shutterNext){holdCtx.drawImage(videoFx,0,0);shutterNext=now+interval;return;}
@@ -387,7 +439,9 @@ function applyEdge(amount){
   if(amount<=.035)return;snapshot();edgeCtx.clearRect(0,0,width,height);edgeCtx.save();if('filter'in edgeCtx)edgeCtx.filter='grayscale(1) contrast(2.2)';edgeCtx.drawImage(scratch,0,0);edgeCtx.globalCompositeOperation='difference';const d=(1.5+amount*5)*devicePixelRatio;edgeCtx.drawImage(scratch,d,d);edgeCtx.restore();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.10+.52*amount;fx.drawImage(edgeCanvas,0,0);fx.restore();
 }
 function applyRgbSplit(amount){
-  if(amount<=.02)return;snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.18+amount*.30;const d=amount*18*devicePixelRatio;fx.drawImage(scratch,d,0);fx.drawImage(scratch,-d,0);fx.restore();
+  if(amount<=.02)return;snapshot();
+  const d=width*(.0015+.010*amount);
+  applyTrueRgbChannels(scratch,scratch,scratch,d,0,-d,0,.12+.28*amount);
 }
 function applyPixel(amount){
   if(amount<=.03)return;const scale=Math.max(.06,1-amount*.88);snapshot();scratchCtx.imageSmoothingEnabled=false;posterCtx.imageSmoothingEnabled=false;posterCtx.clearRect(0,0,posterCanvas.width,posterCanvas.height);posterCtx.drawImage(scratch,0,0,posterCanvas.width*scale,posterCanvas.height*scale);fx.save();fx.imageSmoothingEnabled=false;fx.globalAlpha=.45+.45*amount;fx.drawImage(posterCanvas,0,0,posterCanvas.width*scale,posterCanvas.height*scale,0,0,width,height);fx.restore();fx.imageSmoothingEnabled=true;scratchCtx.imageSmoothingEnabled=true;
@@ -396,7 +450,7 @@ function applyGlitch(amount){
   if(amount<=.02)return;snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.12+amount*.35;for(let i=0;i<2+Math.floor(amount*12);i++){const h=Math.max(2,(4+rand()*45*amount)*devicePixelRatio),y=rand()*Math.max(1,height-h),dx=(rand()-.5)*width*.11*amount;fx.drawImage(scratch,0,y,width,h,dx,y,width,h);}fx.restore();
 }
 function applyFeedback(amount){
-  if(amount<=.02)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.04+amount*.18;const d=amount*18*devicePixelRatio;fx.drawImage(history,-d,-d,width+d*2,height+d*2);fx.restore();
+  if(amount<=.02||!historyReady)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.04+amount*.18;const d=amount*18*devicePixelRatio;fx.drawImage(history,-d,-d,width+d*2,height+d*2);fx.restore();
 }
 function applyScanlines(amount){
   if(amount<=.02)return;fx.save();fx.globalAlpha=.05+amount*.18;fx.fillStyle='#000';const step=Math.max(3,Math.floor((5-amount*2)*devicePixelRatio));for(let y=0;y<height;y+=step)fx.fillRect(0,y,width,Math.max(1,devicePixelRatio));fx.restore();
@@ -413,11 +467,20 @@ function captureDelayFrame(){
   const c=delayCtx[delayWrite];
   c.clearRect(0,0,delayBuffers[delayWrite].width,delayBuffers[delayWrite].height);
   c.drawImage(videoFx,0,0,delayBuffers[delayWrite].width,delayBuffers[delayWrite].height);
-  delayWrite=(delayWrite+1)%delayBuffers.length;
+  delayWrite=(delayWrite+1)%delayBuffers.length;delayCount=Math.min(delayBuffers.length,delayCount+1);
 }
 function delayed(age=1){
+  // Immediately after a scene cut, use the current shot until enough new history
+  // exists.  This prevents stale/black delay frames from tinting the new source.
+  if(delayCount<age)return scratch;
   const idx=(delayWrite-age+delayBuffers.length*4)%delayBuffers.length;
   return delayBuffers[idx];
+}
+function resetTemporalFxState(preserve=false){
+  if(preserve)return;
+  delayWrite=0;delayCount=0;historyReady=false;
+  for(let i=0;i<delayBuffers.length;i++){const c=delayCtx[i],b=delayBuffers[i];c.clearRect(0,0,b.width,b.height);}
+  historyCtx.clearRect(0,0,width,height);
 }
 function applySlitScan(amount){
   if(amount<=.025)return;
@@ -524,15 +587,9 @@ function applyBlockDisplace(amount){
   fx.restore();
 }
 function applyChromaDelay(amount){
-  if(amount<=.025)return;
-  fx.save();fx.globalCompositeOperation='screen';
-  const d1=delayed(1),d2=delayed(2),shift=width*.010*amount;
-  fx.globalAlpha=.08+.18*amount;
-  if('filter'in fx)fx.filter='hue-rotate(115deg) saturate(2)';
-  fx.drawImage(d1,shift,0,width,height);
-  if('filter'in fx)fx.filter='hue-rotate(-115deg) saturate(2)';
-  fx.drawImage(d2,-shift,0,width,height);
-  fx.restore();
+  if(amount<=.025)return;snapshot();
+  const d1=delayed(1),d2=delayed(2),shift=width*(.001+.009*amount);
+  applyTrueRgbChannels(d1,scratch,d2,shift,0,-shift,0,.08+.22*amount);
 }
 function applyVhsTracking(amount){
   if(amount<=.025)return;
@@ -612,14 +669,8 @@ function applyBeatWarp(amount,low,mid,high){
   }
 
   if(treble>.02){
-    fx.save();fx.globalCompositeOperation='screen';
-    const shift=width*(.003+.014*treble);
-    fx.globalAlpha=.04+.15*treble;
-    if('filter'in fx)fx.filter='hue-rotate(105deg) saturate(1.8)';
-    fx.drawImage(scratch,shift,0,width,height);
-    if('filter'in fx)fx.filter='hue-rotate(-105deg) saturate(1.8)';
-    fx.drawImage(scratch,-shift,0,width,height);
-    fx.restore();
+    const shift=width*(.001+.009*treble);
+    applyTrueRgbChannels(scratch,scratch,scratch,shift,0,-shift,0,.06+.18*treble);
   }
 }
 function applyTempoWarp(amount){
@@ -708,14 +759,17 @@ function applyFlowWarpCreative(amount){
 }
 function applyFlowRgbCreative(amount){
   if(amount<=.02)return;const flow=updateOpticalFlow().field;if(!flow.length)return;snapshot();
-  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.035+.13*amount;
-  for(const [hue,sign] of [[110,1],[-120,-1]]){if('filter'in fx)fx.filter=`hue-rotate(${hue}deg) saturate(1.9)`;for(const v of flow.slice(0,28)){const pw=width*.08,ph=height*.10,px=v.x*width,py=v.y*height,sx=Math.max(0,Math.min(width-pw,px-pw/2)),sy=Math.max(0,Math.min(height-ph,py-ph/2));fx.drawImage(scratch,sx,sy,pw,ph,sx+sign*v.vx*width*.026*amount,sy+sign*v.vy*height*.035*amount,pw,ph);}}
-  fx.restore();
+  let vx=0,vy=0,weight=0;
+  for(const v of flow.slice(0,28)){const w=Math.max(.01,Number(v.strength??0));vx+=Number(v.vx??0)*w;vy+=Number(v.vy??0)*w;weight+=w;}
+  if(weight<=0)return;vx/=weight;vy/=weight;
+  const mag=Math.hypot(vx,vy)||1;vx/=mag;vy/=mag;
+  const shift=width*(.001+.010*amount);
+  applyTrueRgbChannels(scratch,scratch,scratch,vx*shift,vy*shift,-vx*shift,-vy*shift,.07+.23*amount);
 }
 function applyTemporalRgbCreative(amount){
-  if(amount<=.02)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.16*amount;const shift=width*.007*amount;
-  if('filter'in fx)fx.filter='hue-rotate(115deg) saturate(2.0)';fx.drawImage(delayed(1),shift,0,width,height);
-  if('filter'in fx)fx.filter='hue-rotate(-125deg) saturate(2.0)';fx.drawImage(delayed(2),-shift,0,width,height);fx.restore();
+  if(amount<=.02)return;snapshot();
+  const shift=width*(.001+.007*amount);
+  applyTrueRgbChannels(delayed(1),scratch,delayed(2),shift,0,-shift,0,.08+.24*amount);
 }
 function applyTemporalSmearCreative(amount){
   if(amount<=.02)return;snapshot();const bands=18+Math.floor(amount*24),sh=height/bands;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.20*amount;
@@ -754,7 +808,7 @@ function applyBackgroundWarpCreative(amount){
   fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.17*amount;const dx=Math.sin(phase*.8)*width*.020*amount,dy=Math.cos(phase*.67)*height*.014*amount;fx.drawImage(scratch,dx,dy,width,height);fx.drawImage(scratch,-dx*.65,-dy*.65,width,height);fx.restore();preserveCreativeSubject((c.subject_preserve??0)*amount);
 }
 function applyRecursiveFeedbackCreative(amount){
-  if(amount<=.02)return;const c=activeScene?.direction?.creative??{},target=creativeTarget(),scale=1+Number(c.feedback_scale??.004)*(.35+.9*amount),rot=Number(c.feedback_rotation??0)*Math.PI/180*amount;
+  if(amount<=.02||!historyReady)return;const c=activeScene?.direction?.creative??{},target=creativeTarget(),scale=1+Number(c.feedback_scale??.004)*(.35+.9*amount),rot=Number(c.feedback_rotation??0)*Math.PI/180*amount;
   fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.025+.13*amount;fx.translate(target.x,target.y);fx.rotate(rot);fx.scale(scale,scale);fx.translate(-target.x,-target.y);fx.drawImage(history,0,0,width,height);fx.restore();
 }
 function applyLocalSymmetryCreative(amount){
@@ -787,14 +841,19 @@ function applyHeroCreative(){
 
 function applyDirectedColor(){
   const dir=activeScene?.direction;if(!dir)return;
-  const color=dir.color??{},hue=automationValue('hue',color.hue_shift_degrees??0);
-  const sat=automationValue('saturation',color.saturation_scale??1);
-  const contrast=color.contrast_scale??1,brightness=color.brightness_scale??1;
+  const color=dir.color??{},rawHue=automationValue('hue',color.hue_shift_degrees??0);
+  // Defensive clamp for timelines planned by older releases with absolute hue LUTs.
+  const hue=Math.max(-28,Math.min(28,Number(rawHue)));
+  const sat=Math.max(.65,Math.min(1.55,Number(automationValue('saturation',color.saturation_scale??1))));
+  const contrast=Math.max(.72,Math.min(1.55,Number(color.contrast_scale??1))),brightness=Math.max(.72,Math.min(1.35,Number(color.brightness_scale??1)));
   if(Math.abs(hue)<.2&&Math.abs(sat-1)<.01&&Math.abs(contrast-1)<.01&&Math.abs(brightness-1)<.01)return;
+  const room=Math.max(0,1-sourceFidelity());
+  if(room<.005)return;
   snapshot();
   fx.save();
   if('filter'in fx)fx.filter=`hue-rotate(${hue}deg) saturate(${sat}) contrast(${contrast}) brightness(${brightness})`;
-  fx.globalAlpha=.28+.34*Math.min(1,Math.abs(hue)/90+.25*Math.abs(sat-1));
+  const colorDelta=Math.min(1,Math.abs(hue)/28+.55*Math.abs(sat-1)+.35*Math.abs(contrast-1)+.25*Math.abs(brightness-1));
+  fx.globalAlpha=Math.min(.34,.025+room*(.48+.34*colorDelta));
   fx.globalCompositeOperation='source-over';
   fx.drawImage(scratch,0,0,width,height);
   fx.restore();
@@ -816,18 +875,16 @@ function applySpectralDisplacement(amount){
   fx.restore();
 }
 function applyPrismaticShift(amount){
-  if(amount<=.015)return;
-  snapshot();
-  const color=activeScene?.direction?.color??{};
-  const shift=width*(.002+.018*amount);
-  const angle=(color.target_hue??180)*Math.PI/180;
-  const dx=Math.cos(angle)*shift,dy=Math.sin(angle)*shift*.5;
-  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.08+.25*amount;
-  if('filter'in fx)fx.filter='hue-rotate(95deg) saturate(1.7)';
-  fx.drawImage(scratch,dx,dy,width,height);
-  if('filter'in fx)fx.filter='hue-rotate(-110deg) saturate(1.8)';
-  fx.drawImage(scratch,-dx,-dy,width,height);
-  fx.restore();
+  if(amount<=.015)return;snapshot();
+  // True chromatic aberration: move the source's existing red/blue channels.
+  // Never synthesize color by hue-rotating and screen-blending whole frames.
+  const c=activeScene?.direction?.creative??{},fidelity=sourceFidelity();
+  amount*=Math.max(.18,Math.min(1,.18+(1-fidelity)*3.4));
+  if(amount<=.01)return;
+  let vx=Number(c.camera_drift_x??0),vy=Number(c.camera_drift_y??0),mag=Math.hypot(vx,vy);
+  if(mag<.08){const a=phase*.31+Number(activeScene?.section_index??0)*.73;vx=Math.cos(a);vy=Math.sin(a)*.65;}else{vx/=mag;vy/=mag;}
+  const shift=width*(.001+.010*amount);
+  applyTrueRgbChannels(scratch,scratch,scratch,vx*shift,vy*shift,-vx*shift,-vy*shift,.08+.25*amount);
 }
 function resetVectorMotionState(){
   vectorFlowInitialized=false;vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
@@ -1357,7 +1414,7 @@ function applyPostFx(){
   renderVectorSceneGraph();
 
   historyCtx.globalAlpha=.92;
-  historyCtx.drawImage(videoFx,0,0);
+  historyCtx.drawImage(videoFx,0,0);historyReady=true;
 }
 function renderVideo(){
   if(clockNowMs()<freezeUntil){fx.drawImage(freezeCanvas,0,0);return;}
@@ -1574,11 +1631,14 @@ async function seekOfflineBank(bankIndex,scene,t){
 async function prepareOfflineScene(index){
   if(index===offlineLoadedScene)return;
   pauseAll();bankState[0]=[];bankState[1]=[];
-  if(index<0){activeBank=-1;activeScene=null;offlineLoadedScene=index;return;}
+  if(index<0){activeBank=-1;activeScene=null;offlineLoadedScene=index;resetTemporalFxState(false);return;}
   const current=timeline.scene_plan[index];
   if(index>0)await loadBank(0,timeline.scene_plan[index-1]);
   await loadBank(1,current);
-  activeBank=1;activeScene={...current};focusLayer=0;transition=null;offlineLoadedScene=index;resetVectorMotionState();
+  activeBank=1;
+  const temporalHero=['flow_melt','subject_echo','time_prism','recursive_portal'].includes(current?.direction?.creative?.hero_kind??'');
+  resetTemporalFxState(temporalHero);
+  activeScene={...current};focusLayer=0;transition=null;offlineLoadedScene=index;resetVectorMotionState();
 }
 function processOfflineCues(t){
   while(offlineCueIndex<timeline.cues.length&&timeline.cues[offlineCueIndex].time<=t+1e-9){

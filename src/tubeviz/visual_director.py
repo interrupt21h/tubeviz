@@ -12,16 +12,20 @@ from .models import CodecEffect, ColorDirection, Section, VectorEffect, VisualDi
 from .choreography import shot_trajectory
 
 
-_VIBE_HUE = {
-    "ambient": 205.0,
-    "hypnotic": 275.0,
-    "dark": 235.0,
-    "heavy": 338.0,
-    "driving": 192.0,
-    "euphoric": 315.0,
-    "fractured": 112.0,
-    "groove": 28.0,
-    "neutral": 210.0,
+# Musical vibe is a *relative* color bias, not an absolute LUT target.  Earlier
+# versions steered common EDM states toward fixed purple/magenta hues (for example
+# euphoric -> 315 degrees), which could erase the source palette across unrelated
+# footage.  These bounded offsets keep the source hue authoritative.
+_VIBE_HUE_BIAS = {
+    "ambient": -6.0,
+    "hypnotic": 8.0,
+    "dark": -8.0,
+    "heavy": 10.0,
+    "driving": -5.0,
+    "euphoric": 12.0,
+    "fractured": -11.0,
+    "groove": 6.0,
+    "neutral": 0.0,
 }
 
 _EFFECT_FAMILY = {
@@ -581,28 +585,34 @@ def build_visual_direction(
 ) -> VisualDirection:
     f = candidate.visual_features or {}
     source_hue = float(f.get("dominant_hue", 0.0)) % 360.0
-    base_target = _VIBE_HUE.get(section.vibe, _VIBE_HUE["neutral"])
+    vibe_bias = _VIBE_HUE_BIAS.get(section.vibe, _VIBE_HUE_BIAS["neutral"])
+    ai_bias = 0.0
     if section.ai_direction is not None and section.ai_direction.target_hue is not None:
-        w = .28 + .42 * section.audio_semantic_confidence
-        # Circular shortest-path interpolation.
-        delta = _shortest_hue_delta(base_target, section.ai_direction.target_hue)
-        base_target = (base_target + delta*w) % 360.0
-    # Evolve hue with harmonic/structural location rather than a static LUT.
-    target_hue = (
-        base_target
-        + section.index * 17.0
-        + shot_index_in_section * 5.0
-        + max(0, occurrence - 1) * 23.0
-    ) % 360.0
-    hue_shift = _shortest_hue_delta(source_hue, target_hue)
-
-    saturation_scale = _clamp(
-        .82 + .75 * section.energy + .25 * section.brightness,
-        .55, 1.85
+        # AI palette direction may gently pull the footage toward a requested hue,
+        # but can no longer replace the source palette.  Even high-confidence plans
+        # are capped at a modest +/-18 degree contribution.
+        delta = _shortest_hue_delta(source_hue, section.ai_direction.target_hue)
+        w = .06 + .10 * _clamp(section.audio_semantic_confidence)
+        ai_bias = _clamp(delta * w, -18.0, 18.0)
+    # Small bounded structural drift keeps consecutive shots from receiving an
+    # identical grade while avoiding the old unbounded section-index hue walk.
+    structural_bias = (
+        4.0 * math.sin((section.index + 1) * .83)
+        + 2.5 * math.sin((shot_index_in_section + 1) * 1.37)
+        + min(3.5, max(0, occurrence - 1) * 1.5)
     )
-    contrast_scale = _clamp(.90 + .50 * section.energy + .18 * section.noisiness, .75, 1.75)
-    brightness_scale = _clamp(.82 + .36 * section.brightness + .16 * section.energy, .68, 1.38)
-    chroma = _clamp(.06 + .55*section.energy + .30*section.noisiness)
+    hue_shift = _clamp(vibe_bias + ai_bias + structural_bias, -28.0, 28.0)
+    target_hue = (source_hue + hue_shift) % 360.0
+
+    # Tonal direction is intentionally moderate.  Source fidelity in the creative
+    # plan further controls how much of this post-composite grade is visible.
+    saturation_scale = _clamp(
+        .92 + .30 * section.energy + .10 * section.brightness,
+        .78, 1.42
+    )
+    contrast_scale = _clamp(.95 + .30 * section.energy + .10 * section.noisiness, .82, 1.42)
+    brightness_scale = _clamp(.90 + .16 * section.brightness + .07 * section.energy, .80, 1.24)
+    chroma = _clamp(.015 + .16 * section.energy + .10 * section.noisiness, 0.0, .36)
     family = _EFFECT_FAMILY.get(section.vibe, "cinematic")
     if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
         if section.audio_semantic_confidence >= .18:
@@ -632,10 +642,10 @@ def build_visual_direction(
     contrast_scale = _clamp(contrast_scale * (1.0 + .18*trajectory["contrast"] + .22*impact - .16*withhold), .70, 2.0)
     # Continuous curves rather than on/off effect selection.
     automation = {
-        "hue": _curve((0, hue_shift*.35), (.55, hue_shift*.72), (1, hue_shift)),
-        "saturation": _curve((0, 1.0), (.5, saturation_scale), (1, saturation_scale*(1.0+.10*tension))),
+        "hue": _curve((0, hue_shift*.20), (.55, hue_shift*.55), (1, hue_shift*.82)),
+        "saturation": _curve((0, 1.0), (.5, saturation_scale), (1, saturation_scale*(1.0+.05*tension))),
         "spectral_warp": _curve((0, .08*e), (.65, .20+.36*tension), (.92, .58*tension), (1, .12*e)),
-        "chromatic": _curve((0, .04*e), (.72, .22*chroma), (.94, .72*chroma), (1, .10*e)),
+        "chromatic": _curve((0, .01*e), (.72, .12*chroma), (.94, .42*chroma), (1, .035*e)),
         "feedback": _curve((0, .05), (.55, .08+.32*(1-section.percussive_ratio)), (1, .04+.18*e)),
         "flow": _curve((0, .08+.12*e), (.5, .18+.34*e), (1, .10+.20*e)),
         "glitch": _curve((0, .02), (.72, .08+.28*section.noisiness), (.96, .55*section.noisiness), (1, .04)),
@@ -646,7 +656,7 @@ def build_visual_direction(
         for key in ("spectral_warp", "chromatic", "feedback", "flow", "glitch", "bloom"):
             automation[key] = [(p, _clamp(v * (1.0 - .62*withhold))) for p, v in automation[key]]
     if impact > .0:
-        for key, gain in (("spectral_warp", .36), ("chromatic", .42), ("glitch", .34), ("bloom", .50)):
+        for key, gain in (("spectral_warp", .36), ("chromatic", .18), ("glitch", .34), ("bloom", .50)):
             automation[key] = [(p, _clamp(v + gain*impact*(1.0-abs(.16-p)))) for p, v in automation[key]]
 
     ai_vector_scale = section.ai_direction.vector_intensity if section.ai_direction is not None else 1.0

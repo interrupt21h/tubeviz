@@ -111,7 +111,7 @@ def test_native_manifest_serializes_creative_treatment(tmp_path: Path):
         flow_warp=.7, temporal_echo=.4, camera_energy=.6,
         camera_target_x=.63, camera_target_y=.41, depth_parallax=.5,
         subject_preserve=.8, feedback=.35, local_symmetry=.2,
-        palette_strength=.5, hero_kind="depth_burst", hero_amount=.85,
+        palette_strength=.5, source_fidelity=.87, hero_kind="depth_burst", hero_amount=.85,
         hero_start=.05, hero_end=.45,
         semantic=SemanticVisualProfile(person=.7, subject_radius=.31),
         automation={"flow_warp": [(0, .1), (.5, .8), (1, .2)]},
@@ -131,6 +131,9 @@ def test_native_manifest_serializes_creative_treatment(tmp_path: Path):
     assert float(fields[14]) == .8
     assert fields[28] == "depth_burst"
     assert float(fields[29]) == .85
-    assert len(fields) == 93
+    assert len(fields) == 98
     # Extended v0.33 manifest carries per-channel four-point envelopes.
     assert float(fields[37]) < float(fields[38])
+    assert float(fields[93]) == .87
+    assert float(fields[94]) == 0.0
+    assert float(fields[95]) == 1.0

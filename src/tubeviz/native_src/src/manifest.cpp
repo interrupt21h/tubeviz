@@ -202,6 +202,16 @@ Manifest load_manifest(const std::string& path) {
                 read_envelope(c.streaks_envelope);
                 read_envelope(c.palette_envelope);
             }
+            // v0.33.5 appends source fidelity and the single post-composite
+            // music-directed color grade.  Older 37/93-field records keep the
+            // conservative defaults in CreativeEffect.
+            if (f.size() >= 98) {
+                c.source_fidelity = as_double(f, 93, 0.90);
+                c.color_hue_shift = as_double(f, 94, 0.0);
+                c.color_saturation = as_double(f, 95, 1.0);
+                c.color_contrast = as_double(f, 96, 1.0);
+                c.color_brightness = as_double(f, 97, 1.0);
+            }
         } else if (f[0] == "VEC") {
             if (!current) throw std::runtime_error("VEC before SHOT at line " + std::to_string(line_no));
             if (f.size() < 17) throw std::runtime_error("invalid VEC line " + std::to_string(line_no));

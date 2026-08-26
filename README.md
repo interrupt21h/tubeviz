@@ -12,8 +12,6 @@ rendering a final encoded video.
 
 Complete videos produced with tubeviz:
 
-- [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
-- [Tubeviz - Night Tapes - Drifting](https://youtu.be/Z5qFih1OKeo)
 - [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
 - [Tubeviz — Step It Up — Stereo MC's](https://youtu.be/nrYzxJzPYbE)
 
@@ -28,6 +26,7 @@ Complete videos produced with tubeviz:
 - [Curating the library](#curating-the-library)
 - [Analyzing music and building the edit](#analyzing-music-and-building-the-edit)
 - [Visual direction](#visual-direction)
+- [Semantic temporal creative renderer](#semantic-temporal-creative-renderer)
 - [Vector scene graph](#vector-scene-graph)
 - [FFglitch codec-space effects](#ffglitch-codec-space-effects)
 - [Previewing interactively](#previewing-interactively)
@@ -876,6 +875,35 @@ fingerprints, trimming, semantic embeddings, and later selection are all shared.
 
 ![tubeviz Studio — Library](screenshots/screenshot-library.png)
 
+The screenshot helper can also capture an open Library item inspector, including the video, In/Out editor, and AI visual-analysis panel:
+
+```bash
+python scripts/screenshot_studio.py --tab library-details
+```
+
+By default it opens the first playable clip, expands the inspector to its complete content height, and writes `screenshots/screenshot-library-detail.png`. The generated image includes the full video/trim editor and all available AI metadata rather than clipping at the modal's normal viewport scrollbar. Choose a specific clip by title substring or playable-clip index, and optionally control the displayed frame:
+
+```bash
+python scripts/screenshot_studio.py \
+  --tab library-details \
+  --clip-match "Floating Through Breathing Woods" \
+  --clip-time 47
+
+python scripts/screenshot_studio.py \
+  --tab library-details \
+  --clip-index 2
+```
+
+For a screenshot that intentionally matches the normal on-screen scrollable inspector instead, use `--viewport-details`:
+
+```bash
+python scripts/screenshot_studio.py \
+  --tab library-details \
+  --viewport-details
+```
+
+`--full-details` remains accepted for compatibility with v0.33.2 scripts, but full-height capture is now the default.
+
 ```bash
 tubeviz library stats --library ./library
 tubeviz library list --library ./library --limit 50
@@ -1035,7 +1063,7 @@ Key analysis groups:
 | Variable BPM | `--tempo-window-seconds`, `--tempo-smoothing-seconds`, `--tempo-curve-seconds`, `--tempo-change-bpm`, `--min-tempo`, `--max-tempo`, `--tempo-octave-min`, `--tempo-octave-max` |
 | Scene selection | `--library`, `--scene-crossfade`, `--clip-opacity`, `--min-play-scene-seconds` |
 | Semantic retrieval | `--semantic`, `--semantic-model`, `--semantic-pretrained`, `--semantic-device` |
-| Effects | `--no-transforms`, `--transform-intensity`, `--max-video-layers`, `--composition-intensity` |
+| Effects | `--no-transforms`, `--transform-intensity`, `--creative-effects`, `--creative-intensity`, `--max-video-layers`, `--composition-intensity` |
 | Alternate cuts | `--selection-seed`, `--selection-variation`, `--reshuffle` |
 | Diversity | `--target-unique-clips`, `--novelty-weight`, `--novelty-candidate-fraction`, `--clip-reuse-cooldown`, `--scene-reuse-cooldown` |
 | Dynamic editing | `--dynamic-shots`, `--min-shot-seconds`, `--max-shot-seconds`, `--source-excerpt-max-seconds` |
@@ -1502,17 +1530,149 @@ bloom
 ```
 
 These effects operate on the already-composited video frame. Spectral displacement moves
-strips of the actual footage through a continuously changing field, and prismatic
-shifting separates hue-biased image copies toward the directed target color. Color
-treatment is therefore a shot-level evolving grade, not a random static hue filter.
+strips of the actual footage through a continuously changing field, while prismatic,
+flow-RGB, temporal-RGB, chroma-delay, and beat accents displace the source frame's real
+red/green/blue channels rather than screen-blending fixed hue-rotated copies. Musical
+color direction is a bounded source-relative grade, so a forest remains recognizably
+green and a blue scene remains predominantly blue unless a sparse hero treatment earns
+a stronger departure.
 
-The native backend receives the directed base color treatment, including hue rotation,
-plus the major automation peaks as timed ripple, chroma, vortex, and bloom cues.
+The native backend receives the same source-fidelity and post-composite color direction
+plus timed creative trajectories so native and browser rendering follow the same phrase
+shape rather than merely sharing static peak values.
 
 Visual motif callbacks also carry narrative roles. A recurring musical motif can return
 to a remembered source family while changing excerpt, transform, palette, and effect
 treatment, producing an introduce → mutate → payoff visual arc instead of simple clip
 repetition.
+
+## Semantic temporal creative renderer
+
+The v0.33 creative renderer sits between ordinary video transforms and the sparse vector/
+codec punctuation layers. Its rule is intentionally conservative: **keep the source
+recognizable most of the time, then let distortion grow when the musical phrase earns
+it.** A shot therefore receives one coherent `CreativeEffectPlan` instead of a random
+set of independent filters.
+
+The plan carries:
+
+```text
+flow warp / trails / motion-following RGB
+temporal echo / channel memory / time smear
+saliency-targeted virtual camera energy and drift
+content-derived depth/parallax and atmospheric separation
+semantic subject preservation and background warp
+recursive feedback scale/rotation
+local focal-point symmetry
+source-derived bloom and light streaks
+palette propagation
+source-fidelity target
+abstraction state
+rare hero-effect kind/window/amount
+independent per-channel automation curves
+```
+
+The planner combines musical section state, build/drop trajectory, onset density, bass and
+percussive balance, the scene's persistent motion/color/complexity fingerprint, semantic
+metadata, motif recurrence and optional whole-song AI direction. `source_fidelity` normally
+keeps roughly 80–95% of the source's color identity intact and can relax briefly for rare
+hero moments; music/AI hue requests are small relative biases rather than absolute palette
+replacement. Effects ramp through a shot instead of switching on at a beat. Builds generally rise toward the end of a shot,
+breakdowns use wider/softer envelopes, withholding suppresses visual clutter before an
+impact, and payoff shots can hit early and decay.
+
+```mermaid
+flowchart LR
+    MUSIC["Section + phrase trajectory"] --> PLAN["CreativeEffectPlan"]
+    VIS["Motion / palette / complexity"] --> PLAN
+    AI["Scene semantics + focal point"] --> PLAN
+    LLM["Optional creative trajectory"] --> PLAN
+    PLAN --> CAM["Virtual camera"]
+    PLAN --> FLOW["Optical-flow deformation"]
+    PLAN --> TIME["Temporal memory"]
+    PLAN --> DEPTH["Depth / foreground separation"]
+    PLAN --> TEX["Feedback / texture / palette"]
+    PLAN --> HERO["Sparse hero punctuation"]
+    CAM --> FRAME["Recognizable source-led frame"]
+    FLOW --> FRAME
+    TIME --> FRAME
+    DEPTH --> FRAME
+    TEX --> FRAME
+    HERO --> FRAME
+```
+
+### Semantic focal points and foreground protection
+
+When clip AI enhancement is enabled, storyboard analysis now asks for a normalized focal
+point, approximate subject scale, depth character, and visible foreground/background
+regions for each sampled scene. The renderer blends that image-derived focal point with
+measured motion direction. Existing libraries without the newer metadata fall back to a
+deterministic saliency estimate, so no migration is required.
+
+For person/face/text-heavy footage, destructive spatial effects are reduced and the
+foreground is restored after deformation. Browser rendering builds a coarse content mask
+from focal proximity plus local source-color continuity; native rendering applies the same
+idea directly against the source pixels. This lets water, architecture, sky, or moving
+background structure distort while a meaningful subject remains readable.
+
+### Optical flow, temporal memory and depth
+
+The browser path reuses its low-resolution live optical-flow field as a deformation input:
+flow patches stretch along actual source motion, color channels can separate in the same
+direction, and delayed frames form trails rather than drawing the vectors themselves. The
+native CPU path estimates local motion from temporal luminance change plus spatial
+gradients against the previous output frame and uses that field for source deformation.
+
+Both renderers also build a small content-derived depth field from perspective, luminance,
+color variation and semantic focal information. It is deliberately lightweight — there is
+no mandatory neural depth dependency during final render — but it provides scene-aware
+2.5D parallax, background movement and depth fog instead of a fixed horizontal-band
+illusion.
+
+### Feedback, source texture and palette continuity
+
+Recursive feedback is centered on the semantic target and slowly scales/rotates previous
+output, so it can accumulate organic structures without permanently centering the image.
+Bloom and streak layers are synthesized from bright regions of the footage itself, and
+palette treatment uses the indexed source palette rather than unrelated random colors.
+Local symmetry is likewise restricted to a moving focal region instead of turning every
+frame into a full-screen centered kaleidoscope.
+
+### Rare hero moments
+
+Hero effects are globally budgeted across the song and kept at least roughly ten seconds
+apart. Depending on semantics and effect family, selected shots can become:
+
+- `subject_echo` — temporal copies around a protected foreground subject;
+- `flow_melt` — optical-flow deformation that carries motion across the shot;
+- `depth_burst` — exaggerated depth separation with recursive feedback;
+- `time_prism` — delayed RGB/time slices plus local symmetry;
+- `recursive_portal` — focal symmetry, source texture and recursive feedback.
+
+The selector favors payoff/build/peak moments but remains deterministic for a stored
+timeline. These are intentionally rare; normal footage provides the contrast that makes a
+hero moment read as an event.
+
+### AI director trajectories
+
+The whole-song director may optionally return section-level start/end targets for
+`abstraction`, `camera_energy`, `temporal`, `feedback`, `depth`, `flow`, and `palette`.
+Tubeviz never lets the LLM directly execute an effect. Instead, each requested trajectory
+is blended with measured audio confidence and the deterministic creative planner, then
+serialized into the timeline. This keeps rendering reproducible and bounded while letting
+the AI describe a visual arc rather than name arbitrary filters.
+
+Controls:
+
+```text
+--creative-effects / --no-creative-effects
+--creative-intensity 1.0
+```
+
+`--creative-intensity 0` produces an inert creative plan while preserving semantic metadata.
+Values around `0.7–1.2` are designed to remain source-led; values above `1` progressively
+raise the effect ceilings. Studio exposes the same controls as **Creative FX**. Legacy
+`--transform-intensity`, vector effects, and codec-space FFglitch remain separate controls.
 
 ## Vector scene graph
 

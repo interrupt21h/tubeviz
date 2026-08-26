@@ -14,6 +14,14 @@
 #endif
 
 namespace tubeviz {
+namespace {
+
+bool temporal_hero(const CreativeEffect& c) {
+    return c.hero_kind == "flow_melt" || c.hero_kind == "subject_echo" ||
+           c.hero_kind == "time_prism" || c.hero_kind == "recursive_portal";
+}
+
+} // namespace
 
 Renderer::Renderer(
     Manifest manifest,
@@ -100,7 +108,7 @@ std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot
     return frame;
 }
 
-std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now) {
+std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bool allow_previous_effects) {
     auto output = render_layer(shot.primary, shot.time, now);
     if (shot.primary.opacity < 0.999) {
         for (auto& c : output) c = static_cast<std::uint8_t>(c * std::clamp(shot.primary.opacity, 0.0, 1.0));
@@ -123,7 +131,7 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now) {
     );
     apply_creative_effects(
         output,
-        has_previous_output_ ? &previous_output_ : nullptr,
+        (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr,
         width_,
         height_,
         shot.creative,
@@ -133,7 +141,7 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now) {
     apply_vector_effects(
         output,
         have_portal_companion ? &portal_companion : nullptr,
-        has_previous_output_ ? &previous_output_ : nullptr,
+        (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr,
         width_,
         height_,
         shot.vector_effects,
@@ -176,7 +184,9 @@ int Renderer::run() {
             trim_decoders(*shot);
         }
 
-        auto output = render_shot(*shot, now);
+        const bool shot_changed = shot_index != previous_shot_index_;
+        const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative);
+        auto output = render_shot(*shot, now, allow_previous_effects);
         apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
 
         if (shot_index != previous_shot_index_ && shot->crossfade > 0.0 && frame_index > 0 && !previous_output_.empty()) {

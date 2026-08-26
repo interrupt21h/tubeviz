@@ -122,6 +122,7 @@ def test_creative_effects_can_be_disabled_without_losing_semantic_metadata():
     assert c.camera_energy == 0
     assert c.feedback == 0
     assert c.palette_strength == 0
+    assert c.source_fidelity == 1.0
     assert c.hero_kind is None
     assert c.semantic.person > 0
 
@@ -134,6 +135,8 @@ def test_creative_intensity_scales_treatment():
     assert high.flow_warp > low.flow_warp
     assert high.camera_energy > low.camera_energy
     assert high.feedback > low.feedback
+    assert high.source_fidelity < low.source_fidelity
+    assert .66 <= high.source_fidelity <= .985
     assert high.automation["flow_warp"][1][1] > low.automation["flow_warp"][1][1]
 
 
@@ -208,3 +211,28 @@ def test_cli_exposes_independent_creative_renderer_controls():
     ])
     assert args.creative_effects is False
     assert args.creative_intensity == 1.35
+
+
+def test_music_color_bias_stays_source_relative_and_bounded():
+    c = candidate()
+    c.visual_features["dominant_hue"] = 118
+    d = direction(c, section(vibe="euphoric"))
+    assert -28.0 <= d.color.hue_shift_degrees <= 28.0
+    delta = ((d.color.target_hue - 118 + 180) % 360) - 180
+    assert abs(delta) <= 28.0
+    # Euphoric used to force an absolute 315-degree target regardless of source.
+    assert abs(((d.color.target_hue - 315 + 180) % 360) - 180) > 80
+
+
+def test_browser_rgb_fx_use_real_channels_not_fixed_hue_overlays():
+    from pathlib import Path
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    assert "applyTrueRgbChannels" in js
+    for old in (
+        "hue-rotate(95deg)", "hue-rotate(-110deg)",
+        "hue-rotate(115deg)", "hue-rotate(-125deg)",
+        "hue-rotate(105deg)", "hue-rotate(-105deg)",
+    ):
+        assert old not in js
+    assert "resetTemporalFxState" in js
+    assert "source_fidelity" in js

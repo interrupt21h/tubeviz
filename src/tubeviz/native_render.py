@@ -299,6 +299,7 @@ def _creative_fields(scene) -> list[str]:
     }
     palette = scene.direction.color.palette
     pr, pg, pb = _hex_rgb(palette[0] if palette else None)
+    palette_peak = channels["palette_strength"][0] if palette else 0.0
     fields = [
         "CREATIVE",
         f"{channels['flow_warp'][0]:.9g}",
@@ -324,7 +325,7 @@ def _creative_fields(scene) -> list[str]:
         str(int(c.symmetry_segments)),
         f"{channels['texture_bloom'][0]:.9g}",
         f"{channels['texture_streaks'][0]:.9g}",
-        f"{channels['palette_strength'][0]:.9g}",
+        f"{palette_peak:.9g}",
         str(pr), str(pg), str(pb),
         c.hero_kind or "-",
         f"{c.hero_amount:.9g}",
@@ -335,6 +336,17 @@ def _creative_fields(scene) -> list[str]:
     ]
     for name in channel_names[:-1]:
         fields.extend(f"{value:.9g}" for value in channels[name][1])
+    # v0.33.5 appends renderer-level source fidelity and the one authoritative
+    # post-composite color grade.  Older native manifests remain valid because
+    # these fields are strictly appended after the v0.33 curve payload.
+    color = scene.direction.color
+    fields.extend([
+        f"{c.source_fidelity:.9g}",
+        f"{color.hue_shift_degrees:.9g}",
+        f"{color.saturation_scale:.9g}",
+        f"{color.contrast_scale:.9g}",
+        f"{color.brightness_scale:.9g}",
+    ])
     return fields
 
 

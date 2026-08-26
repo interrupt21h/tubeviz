@@ -73,15 +73,19 @@ void apply_transform(
     std::uint64_t frame_index
 ) {
     if (rgb.empty()) return;
+    // New timelines emit only subtle shot-local hue, and older timelines are
+    // defensively clamped here so the pre-v0.33.5 absolute color steering cannot
+    // reappear when rendering an existing plan.
+    const double hue_degrees = std::clamp(t.hue_degrees, -10.0, 10.0);
     const bool color = std::abs(t.brightness - 1.0) > 1e-4 ||
                        std::abs(t.contrast - 1.0) > 1e-4 ||
                        std::abs(t.saturation - 1.0) > 1e-4 ||
-                       std::abs(t.hue_degrees) > 1e-4 ||
+                       std::abs(hue_degrees) > 1e-4 ||
                        t.grayscale > 1e-4 || t.noise > 1e-4;
     if (color) {
         const double gray = std::clamp(t.grayscale, 0.0, 1.0);
         const double noise_amount = 28.0 * std::clamp(t.noise, 0.0, 1.0);
-        const double hue = t.hue_degrees * 3.14159265358979323846 / 180.0;
+        const double hue = hue_degrees * 3.14159265358979323846 / 180.0;
         const double hc = std::cos(hue), hs = std::sin(hue);
 #ifdef TUBEVIZ_HAVE_OPENMP
 #pragma omp parallel for schedule(static)
@@ -94,7 +98,7 @@ void apply_transform(
                 r = luma + (r - luma) * t.saturation;
                 g = luma + (g - luma) * t.saturation;
                 b = luma + (b - luma) * t.saturation;
-                if (std::abs(t.hue_degrees) > 1e-4) {
+                if (std::abs(hue_degrees) > 1e-4) {
                     const double yiq_y = 0.299*r + 0.587*g + 0.114*b;
                     const double ii = 0.596*r - 0.274*g - 0.322*b;
                     const double qq = 0.211*r - 0.523*g + 0.312*b;
@@ -537,6 +541,51 @@ inline void copy_pixel(const std::vector<std::uint8_t>& src, std::vector<std::ui
     for (int c = 0; c < 3; ++c) dst[di + c] = clamp8(dst[di + c] * (1.0 - a) + src[si + c] * a);
 }
 
+void native_directed_color(std::vector<std::uint8_t>& rgb, int width, int height,
+                           const CreativeEffect& c, double fidelity) {
+    const double room = std::clamp(1.0 - fidelity, 0.0, 1.0);
+    if (room <= .005) return;
+    const double hue_deg = std::clamp(c.color_hue_shift, -28.0, 28.0);
+    const double sat = std::clamp(c.color_saturation, .5, 1.6);
+    const double contrast = std::clamp(c.color_contrast, .6, 1.6);
+    const double brightness = std::clamp(c.color_brightness, .65, 1.4);
+    const double color_delta = std::min(
+        1.0,
+        std::abs(hue_deg) / 28.0 +
+        .55 * std::abs(sat - 1.0) +
+        .35 * std::abs(contrast - 1.0) +
+        .25 * std::abs(brightness - 1.0)
+    );
+    const double alpha = std::min(.34, .025 + room * (.48 + .34 * color_delta));
+    if (alpha <= .005) return;
+    const auto src = rgb;
+    const double hue = hue_deg * 3.14159265358979323846 / 180.0;
+    const double hc = std::cos(hue), hs = std::sin(hue);
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const auto i = static_cast<std::size_t>((y * width + x) * 3);
+            double r = src[i], g = src[i + 1], b = src[i + 2];
+            const double luma = .2126*r + .7152*g + .0722*b;
+            r = luma + (r-luma)*sat; g = luma + (g-luma)*sat; b = luma + (b-luma)*sat;
+            if (std::abs(hue_deg) > 1e-4) {
+                const double yy=.299*r+.587*g+.114*b;
+                const double ii=.596*r-.274*g-.322*b;
+                const double qq=.211*r-.523*g+.312*b;
+                const double ir=ii*hc-qq*hs, qr=ii*hs+qq*hc;
+                r=yy+.956*ir+.621*qr; g=yy-.272*ir-.647*qr; b=yy-1.106*ir+1.703*qr;
+            }
+            r=(r-127.5)*contrast+127.5;g=(g-127.5)*contrast+127.5;b=(b-127.5)*contrast+127.5;
+            r*=brightness;g*=brightness;b*=brightness;
+            rgb[i]=clamp8(src[i]*(1-alpha)+r*alpha);
+            rgb[i+1]=clamp8(src[i+1]*(1-alpha)+g*alpha);
+            rgb[i+2]=clamp8(src[i+2]*(1-alpha)+b*alpha);
+        }
+    }
+}
+
 void native_virtual_camera(std::vector<std::uint8_t>& rgb, int width, int height,
                            const CreativeEffect& c, double amount, double progress, double phase) {
     if (amount <= .015) return;
@@ -789,6 +838,8 @@ void apply_creative_effects(
     const auto original = rgb;
     const double common_env = creative_envelope(c.envelope, progress);
     const double hero = hero_envelope(c, progress);
+    const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
+    native_directed_color(rgb, width, height, c, fidelity);
 
     const double camera = c.camera_energy * creative_envelope(c.camera_envelope, progress);
     const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress);

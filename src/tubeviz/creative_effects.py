@@ -132,7 +132,7 @@ def build_creative_effect_plan(
     sem = semantic_visual_profile(candidate)
     intensity = _clamp(intensity, 0.0, 2.0)
     if intensity <= 1e-6:
-        return CreativeEffectPlan(semantic=sem)
+        return CreativeEffectPlan(semantic=sem, source_fidelity=1.0)
     energy = _clamp(section.energy)
     density = _clamp(section.onset_density / 0.70)
     bass = _clamp(section.bass_weight)
@@ -170,6 +170,20 @@ def build_creative_effect_plan(
     phrase_drive = _clamp(0.30 * energy + 0.20 * density + 0.16 * bass + 0.14 * target_motion + 0.10 * build + 0.10 * payoff)
     abstraction = _clamp(
         0.06 + 0.30 * target_complexity + 0.18 * noisy + 0.15 * mutation + 0.18 * payoff - 0.25 * withholding
+    )
+
+    # Source fidelity is deliberately high by default.  It is the renderer-level
+    # contract that real footage keeps its own color identity and recognizable
+    # texture until the music earns a stronger transformation.  Semantic subjects
+    # and withholding raise fidelity; abstraction/payoff/mutation lower it modestly.
+    source_fidelity = _clamp(
+        0.94
+        - 0.12 * abstraction
+        - 0.06 * payoff
+        - 0.035 * mutation
+        + 0.045 * max(sem.person, sem.face, sem.text)
+        + 0.04 * withholding,
+        0.76, 0.97,
     )
 
     # Semantic protection: recognisable subjects and text are allowed to move with
@@ -283,6 +297,13 @@ def build_creative_effect_plan(
     abstraction = scaled(abstraction)
     feedback_scale *= min(1.75, intensity)
     feedback_rotation *= min(1.75, intensity)
+    # Intensity scales the *distance from source* rather than directly replacing
+    # source color.  Low creative intensity converges toward pristine footage;
+    # aggressive values can lower fidelity, but still retain a substantial anchor.
+    source_fidelity = _clamp(
+        1.0 - (1.0 - source_fidelity) * max(0.20, min(1.60, intensity)),
+        0.66, 0.985,
+    )
     automation = {
         key: [(p, scaled(v)) for p, v in curve]
         for key, curve in automation.items()
@@ -312,6 +333,7 @@ def build_creative_effect_plan(
         texture_bloom=texture_bloom,
         texture_streaks=texture_streaks,
         palette_strength=palette_strength,
+        source_fidelity=source_fidelity,
         abstraction=abstraction,
         semantic=sem,
         automation=automation,

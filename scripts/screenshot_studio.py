@@ -21,7 +21,7 @@ def build_parser() -> ArgumentParser:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output path; defaults to screenshots/screenshot-<tab>.png",
+        help="Output path; defaults to screenshots/screenshot-<tab>.png (library-details -> screenshot-library-detail.png)",
     )
     parser.add_argument(
         "--tab",
@@ -329,8 +329,9 @@ def expand_library_details(page: Page) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
+    default_tab_name = "library-detail" if args.tab == "library-details" else args.tab
     output = Path(
-        args.output or f"screenshots/screenshot-{args.tab}.png"
+        args.output or f"screenshots/screenshot-{default_tab_name}.png"
     ).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
 

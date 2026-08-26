@@ -77,6 +77,13 @@ struct CreativeEffect {
     double texture_bloom{0.0};
     double texture_streaks{0.0};
     double palette_strength{0.0};
+    // High source fidelity keeps music-directed color a restrained, source-relative
+    // grade.  These values are applied once after source-layer composition.
+    double source_fidelity{0.90};
+    double color_hue_shift{0.0};
+    double color_saturation{1.0};
+    double color_contrast{1.0};
+    double color_brightness{1.0};
     int palette_r{128};
     int palette_g{160};
     int palette_b{220};
