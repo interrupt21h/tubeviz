@@ -1,3 +1,21 @@
+# 0.33.0 — Semantic temporal creative renderer
+
+- Added a first-class `CreativeEffectPlan` to every directed shot. The plan is a coherent visual state with independent automation curves rather than another collection of random per-frame filters.
+- Added content- and motion-aware optical-flow deformation, motion-following chromatic separation, flow trails, temporal RGB memory, frame echo and slit/smear treatments.
+- Added saliency-targeted virtual camera choreography. Camera push/pan behavior follows semantic focal points when available, scene motion direction, beat phase and section trajectory instead of always zooming around frame center.
+- Upgraded OpenAI storyboard analysis to `tubeviz-storyboard-v2`, requesting per-scene normalized focal points, subject scale, depth hints, and foreground/background region descriptions. Existing AI metadata remains valid; re-analysis enriches camera/subject guidance.
+- Added lightweight content-derived depth maps in browser and native renderers. Coarse luminance/color/perspective depth fields drive 2.5D parallax and atmospheric separation without introducing a mandatory depth-model dependency.
+- Added semantic foreground preservation. AI person/face/text semantics, focal point, subject scale, radial continuity, and local source-color continuity protect recognizable subjects while allowing backgrounds to warp more aggressively.
+- Added recursive target-centered feedback, source-derived bloom/light streaks, palette propagation, local focal-point symmetry, and background-only spatial movement.
+- Added five sparse hero treatments — `subject_echo`, `flow_melt`, `depth_burst`, `time_prism`, and `recursive_portal` — selected deterministically from narrative role, musical section, semantics and effect family. Hero shots are globally budgeted and temporally spaced so they remain punctuation rather than constant visual noise.
+- Added section/phrase envelopes for creative effects. Builds escalate, breakdowns breathe, pre-impact withholding creates headroom, and payoff shots front-load controlled impact.
+- Extended the whole-song AI director schema with optional `creative_trajectory` curves (`abstraction`, `camera_energy`, `temporal`, `feedback`, `depth`, `flow`, `palette`). LLM intent is blended with deterministic audio/scene measurements rather than directly selecting filters.
+- Added a shared browser/native creative manifest. Native manifests serialize per-channel four-sample trajectories, preserving different browser automation curves for flow, temporal memory, camera, depth, feedback, symmetry, source texture and palette. A compact common-envelope fallback remains parseable.
+- Added native CPU implementations of virtual camera, content-derived depth/parallax, temporal channel delay/smear, optical-motion deformation, recursive feedback, local symmetry, source-derived texture, palette treatment and hero effects, with small-curve-tail skipping to limit CPU overhead.
+- Added **Creative FX** enable and intensity controls to Studio and `--creative-effects/--no-creative-effects` plus `--creative-intensity` to `analyze`/`serve`. Creative rendering can be tuned independently from legacy transforms and vector scene-graph effects.
+- Kept old timeline compatibility: timelines without `direction.creative` load with an inert default plan, and old native manifests without `CREATIVE` records continue to render.
+- Added regression coverage for semantic focal targeting, subject protection, creative disable/intensity behavior, AI trajectory blending, deterministic/spaced hero scheduling, Studio argument forwarding, and extended native creative-manifest serialization.
+
 # 0.32.1 — Single-source OpenAI configuration
 
 - Made the **AI Settings** tab the single source of truth for the OpenAI base URL, model, and API key used by Studio workflows.

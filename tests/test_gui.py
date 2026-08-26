@@ -52,6 +52,17 @@ def test_gui_analyze_job_builds_safe_argument_vector():
     assert "100" in command
 
 
+def test_gui_analyze_job_forwards_creative_renderer_controls():
+    command = _job_command(JobRequest(
+        kind="analyze", library="./library", audio="audio/song.mp3",
+        output="timelines/song.json",
+        options={"creative_effects": False, "creative_intensity": 1.4},
+    ))
+    joined = " ".join(command)
+    assert "--no-creative-effects" in joined
+    assert "--creative-intensity 1.4" in joined
+
+
 def test_gui_render_job_contains_native_tuning():
     command = _job_command(JobRequest(
         kind="render",

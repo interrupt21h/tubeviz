@@ -94,3 +94,43 @@ def test_native_manifest_prunes_legacy_visible_vector_stack(tmp_path: Path):
     text = write_native_manifest(timeline, library, tmp_path / "native.tsv").read_text()
     kinds = [line.split("\t")[1] for line in text.splitlines() if line.startswith("VEC\t")]
     assert kinds == ["flow_ribbons", "vector_displacement"]
+
+
+def test_native_manifest_serializes_creative_treatment(tmp_path: Path):
+    from tubeviz.models import CreativeEffectPlan, SemanticVisualProfile
+
+    library = tmp_path / "library"
+    originals = library / "originals"
+    originals.mkdir(parents=True)
+    (originals / "a.webm").write_bytes(b"video")
+    track = TrackAnalysis(
+        source=str(tmp_path / "song.wav"), duration=4.0, sample_rate=22050,
+        hop_length=512, tempo_bpm=120, beats=[0, .5], bars=[0], sections=[], events=[],
+    )
+    creative = CreativeEffectPlan(
+        flow_warp=.7, temporal_echo=.4, camera_energy=.6,
+        camera_target_x=.63, camera_target_y=.41, depth_parallax=.5,
+        subject_preserve=.8, feedback=.35, local_symmetry=.2,
+        palette_strength=.5, hero_kind="depth_burst", hero_amount=.85,
+        hero_start=.05, hero_end=.45,
+        semantic=SemanticVisualProfile(person=.7, subject_radius=.31),
+        automation={"flow_warp": [(0, .1), (.5, .8), (1, .2)]},
+    )
+    scene = SceneSelection(
+        section_index=0, time=0, term="test", clip_id=1, scene_id=1,
+        scene_index=0, source_id="a", media_file="originals/a.webm",
+        media_url="/media/originals/a.webm", start=0, end=2, duration=2,
+        direction=VisualDirection(creative=creative),
+    )
+    timeline = DirectedTimeline(track=track, cues=[], scene_plan=[scene])
+    text = write_native_manifest(timeline, library, tmp_path / "native.tsv").read_text()
+    line = next(line for line in text.splitlines() if line.startswith("CREATIVE\t"))
+    fields = line.split("\t")
+    assert float(fields[1]) == .7
+    assert float(fields[8]) == .63
+    assert float(fields[14]) == .8
+    assert fields[28] == "depth_burst"
+    assert float(fields[29]) == .85
+    assert len(fields) == 93
+    # Extended v0.33 manifest carries per-channel four-point envelopes.
+    assert float(fields[37]) < float(fields[38])

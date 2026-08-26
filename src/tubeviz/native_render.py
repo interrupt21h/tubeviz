@@ -260,6 +260,84 @@ def _vector_fields(effect) -> list[str]:
     ]
 
 
+def _hex_rgb(value: str | None) -> tuple[int, int, int]:
+    raw = str(value or "").strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(ch * 2 for ch in raw)
+    if len(raw) != 6:
+        return (128, 160, 220)
+    try:
+        return tuple(int(raw[i:i+2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
+    except ValueError:
+        return (128, 160, 220)
+
+
+def _creative_curve_channel(c, key: str, fallback: float) -> tuple[float, list[float]]:
+    points = c.automation.get(key, [])
+    samples = [_curve_sample(points, p, fallback) for p in (0.0, 1/3, 2/3, 1.0)]
+    peak = max([float(fallback), *samples, 1e-6])
+    return peak, [max(0.0, min(1.0, value / peak)) for value in samples]
+
+
+def _creative_fields(scene) -> list[str]:
+    c = scene.direction.creative
+    # Browser automation is absolute per-channel intensity.  Native receives each
+    # channel's peak plus a normalized four-sample envelope so it can reproduce
+    # different AI/director trajectories instead of applying one generic curve to
+    # every effect.  Fields 33..36 retain the abstraction envelope as a compact
+    # backwards-compatible common envelope; the channel-specific arrays follow it.
+    channel_names = (
+        "flow_warp", "flow_trails", "flow_rgb",
+        "temporal_echo", "temporal_rgb", "temporal_smear",
+        "camera_energy", "depth_parallax", "background_warp",
+        "feedback", "local_symmetry", "texture_bloom",
+        "texture_streaks", "palette_strength", "abstraction",
+    )
+    channels = {
+        name: _creative_curve_channel(c, name, float(getattr(c, name)))
+        for name in channel_names
+    }
+    palette = scene.direction.color.palette
+    pr, pg, pb = _hex_rgb(palette[0] if palette else None)
+    fields = [
+        "CREATIVE",
+        f"{channels['flow_warp'][0]:.9g}",
+        f"{channels['flow_trails'][0]:.9g}",
+        f"{channels['flow_rgb'][0]:.9g}",
+        f"{channels['temporal_echo'][0]:.9g}",
+        f"{channels['temporal_rgb'][0]:.9g}",
+        f"{channels['temporal_smear'][0]:.9g}",
+        f"{channels['camera_energy'][0]:.9g}",
+        f"{c.camera_target_x:.9g}",
+        f"{c.camera_target_y:.9g}",
+        f"{c.camera_drift_x:.9g}",
+        f"{c.camera_drift_y:.9g}",
+        f"{channels['depth_parallax'][0]:.9g}",
+        f"{c.depth_fog:.9g}",
+        f"{c.subject_preserve:.9g}",
+        f"{c.semantic.subject_radius:.9g}",
+        f"{channels['background_warp'][0]:.9g}",
+        f"{channels['feedback'][0]:.9g}",
+        f"{c.feedback_scale:.9g}",
+        f"{c.feedback_rotation:.9g}",
+        f"{channels['local_symmetry'][0]:.9g}",
+        str(int(c.symmetry_segments)),
+        f"{channels['texture_bloom'][0]:.9g}",
+        f"{channels['texture_streaks'][0]:.9g}",
+        f"{channels['palette_strength'][0]:.9g}",
+        str(pr), str(pg), str(pb),
+        c.hero_kind or "-",
+        f"{c.hero_amount:.9g}",
+        f"{c.hero_start:.9g}",
+        f"{c.hero_end:.9g}",
+        f"{channels['abstraction'][0]:.9g}",
+        *(f"{value:.9g}" for value in channels["abstraction"][1]),
+    ]
+    for name in channel_names[:-1]:
+        fields.extend(f"{value:.9g}" for value in channels[name][1])
+    return fields
+
+
 def write_native_manifest(
     timeline: DirectedTimeline,
     library: str | Path,
@@ -341,6 +419,8 @@ def write_native_manifest(
                 *_transform_fields(layer.transform),
             ]
             lines.append("\t".join(fields))
+
+        lines.append("\t".join(_creative_fields(scene)))
 
         for effect in _native_vector_effects(scene):
             lines.append("\t".join(_vector_fields(effect)))

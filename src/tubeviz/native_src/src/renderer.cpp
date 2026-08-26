@@ -121,10 +121,19 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now) {
         (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time),
         0.0, 1.0
     );
+    apply_creative_effects(
+        output,
+        has_previous_output_ ? &previous_output_ : nullptr,
+        width_,
+        height_,
+        shot.creative,
+        progress,
+        now * 0.24
+    );
     apply_vector_effects(
         output,
         have_portal_companion ? &portal_companion : nullptr,
-        previous_output_.empty() ? nullptr : &previous_output_,
+        has_previous_output_ ? &previous_output_ : nullptr,
         width_,
         height_,
         shot.vector_effects,
@@ -181,6 +190,7 @@ int Renderer::run() {
             return 2;
         }
         previous_output_ = output;
+        has_previous_output_ = true;
         previous_shot_index_ = shot_index;
 
         if (frame_index == 0 || frame_index + 1 == total_frames || (frame_index + 1) % std::max<std::uint64_t>(1, static_cast<std::uint64_t>(fps_)) == 0) {

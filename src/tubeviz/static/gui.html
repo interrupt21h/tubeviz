@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.32.1">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.32.1">
+<link rel="stylesheet" href="/static/gui.css?v=0.33.0">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.33.0">
 </head>
 <body>
 <header>
@@ -48,6 +48,7 @@
         <label>Section bars <input id="sectionBars" type="number" value="8"></label>
         <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
         <label class="slider-field">Transform <span class="slider-value" data-for="transformIntensity"></span><input id="transformIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>subtle 0</span><b>balanced 0.8–1.3</b><span>extreme 2</span></span></label>
+        <label class="slider-field">Creative FX <span class="slider-value" data-for="creativeIntensity"></span><input id="creativeIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>restrained 0</span><b>cinematic .7–1.2</b><span>surreal 2</span></span></label>
         <label class="slider-field">Composition <span class="slider-value" data-for="compositionIntensity"></span><input id="compositionIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>single-source 0</span><b>balanced 0.7–1.3</b><span>layered 2</span></span></label>
         <label>Target unique <input id="targetUnique" type="number" value="0"></label>
         <label class="slider-field">Novelty <span class="slider-value" data-for="noveltyWeight"></span><input id="noveltyWeight" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>coherent 0</span><b>recommended .45–.80</b><span>varied 1.5</span></span></label>
@@ -86,6 +87,7 @@
       <label class="check"><input id="choreography" type="checkbox" checked> Build/drop trajectory choreography and multi-shot lookahead</label>
       <label class="check"><input id="preferenceLearning" type="checkbox" checked> Learn soft visual preferences from manually rejected clips</label>
       <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
+      <label class="check"><input id="creativeEffects" type="checkbox" checked> Semantic creative renderer: optical flow, temporal memory, virtual camera, depth, feedback and hero effects</label>
       <label class="check"><input id="vectorEffects" type="checkbox" checked> Vector scene graph: contours, flow, fracture, portals and glyphs</label>
       <label class="check"><input id="codecPreviewMaterialize" type="checkbox"> Materialize true FFglitch effects for browser preview</label>
       <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button id="musicAiDoctorBtn">Music AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
@@ -372,6 +374,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.32.1"></script>
+<script src="/static/gui.js?v=0.33.0"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ from typing import Iterable
 import numpy as np
 
 from .library import SceneCandidate
+from .creative_effects import build_creative_effect_plan
 from .models import CodecEffect, ColorDirection, Section, VectorEffect, VisualDirection
 from .choreography import shot_trajectory
 
@@ -571,6 +572,8 @@ def build_visual_direction(
     occurrence: int,
     shot_index_in_section: int,
     shot_progress: float = 0.5,
+    creative_enabled: bool = True,
+    creative_intensity: float = 1.0,
     vector_enabled: bool = True,
     vector_intensity: float = 1.0,
     codec_glitch_mode: str = "off",
@@ -650,6 +653,17 @@ def build_visual_direction(
     ai_codec_scale = section.ai_direction.codec_intensity if section.ai_direction is not None else 1.0
     trajectory_fx_scale = max(.20, 1.0 + .30*trajectory["density"] + .45*impact - .58*withhold)
 
+    creative = build_creative_effect_plan(
+        candidate,
+        section,
+        family=family,
+        narrative_role=narrative_role,
+        occurrence=occurrence,
+        shot_index=shot_index_in_section,
+        shot_progress=shot_progress,
+        intensity=(creative_intensity if creative_enabled else 0.0),
+    )
+
     return VisualDirection(
         rhythm_alignment=rhythm_alignment,
         transition_score=_clamp(transition, -1.0, 1.0),
@@ -696,4 +710,5 @@ def build_visual_direction(
             intensity=codec_glitch_intensity * ai_codec_scale * trajectory_fx_scale, occurrence=occurrence,
             shot_index=shot_index_in_section, narrative_role=narrative_role,
         ),
+        creative=creative,
     )

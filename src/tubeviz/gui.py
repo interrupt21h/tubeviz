@@ -497,6 +497,9 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--max-video-layers", o.get("max_video_layers", 3))
         _flag(command, "--composition-intensity", o.get("composition_intensity", 1.0))
         _flag(command, "--transform-intensity", o.get("transform_intensity", 1.0))
+        if o.get("creative_effects", True) is False:
+            command.append("--no-creative-effects")
+        _flag(command, "--creative-intensity", o.get("creative_intensity", 1.0))
         _flag(command, "--target-unique-clips", o.get("target_unique_clips", 0))
         _flag(command, "--novelty-weight", o.get("novelty_weight", 0.65))
         _flag(command, "--visual-match-weight", o.get("visual_match_weight", 1.25))

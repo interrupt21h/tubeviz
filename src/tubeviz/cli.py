@@ -619,6 +619,8 @@ def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
         semantic_device=getattr(args, "semantic_device", "auto"),
         transforms=not getattr(args, "no_transforms", False),
         transform_intensity=getattr(args, "transform_intensity", 1.0),
+        creative_effects=getattr(args, "creative_effects", True),
+        creative_intensity=max(0.0, getattr(args, "creative_intensity", 1.0)),
         max_video_layers=getattr(args, "max_video_layers", 3),
         composition_intensity=getattr(args, "composition_intensity", 1.0),
         selection_seed=seed,
@@ -1354,7 +1356,9 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--ai-director-reasoning-effort", choices=("none", "low", "medium", "high", "xhigh", "max"), default="none", help="Native OpenAI GPT-5.6 reasoning effort; 'none' avoids spending the director output budget on hidden reasoning")
     analyze.add_argument("--ai-director-max-completion-tokens", type=int, default=8192, help="Native OpenAI Chat Completions budget for the whole-song JSON plan")
     analyze.add_argument("--no-transforms", action="store_true", help="Disable per-scene video transform planning")
-    analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Transform strength; 0 disables, 1 normal, up to 2 aggressive")
+    analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Legacy transform strength; 0 disables, 1 normal, up to 2 aggressive")
+    analyze.add_argument("--creative-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable semantic/temporal creative rendering: optical flow, virtual camera, depth, feedback, palette, and hero effects")
+    analyze.add_argument("--creative-intensity", type=float, default=1.0, help="Global creative-effect strength; 0 disables, 1 balanced, up to 2 aggressive")
     analyze.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")
     analyze.add_argument("--composition-intensity", type=float, default=1.0, help="Multi-source compositing strength; 0 disables companions")
     analyze.add_argument("--selection-seed", type=int, default=0, help="Reproducible alternate scene-selection seed; 0 preserves the canonical cut")
@@ -1520,6 +1524,8 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--semantic-device", default="auto")
     serve.add_argument("--no-transforms", action="store_true", help="Disable transforms when replanning scenes")
     serve.add_argument("--transform-intensity", type=float, default=1.0, help="Transform strength when replanning")
+    serve.add_argument("--creative-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable semantic/temporal creative effects when replanning")
+    serve.add_argument("--creative-intensity", type=float, default=1.0, help="Creative-effect strength when replanning")
     serve.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")
     serve.add_argument("--composition-intensity", type=float, default=1.0, help="Multi-source compositing strength when replanning")
     serve.add_argument("--selection-seed", type=int, default=0, help="Reproducible alternate scene-selection seed; use with --replan-scenes")

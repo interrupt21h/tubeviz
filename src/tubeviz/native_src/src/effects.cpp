@@ -2,6 +2,7 @@
 #include "tubeviz/effects.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -511,7 +512,336 @@ void apply_native_portal(std::vector<std::uint8_t>& rgb,const std::vector<std::u
     }
 }
 
+
+inline double creative_envelope(const double (&values)[4], double p) {
+    p = std::clamp(p, 0.0, 1.0);
+    const double q = p * 3.0;
+    const int i = std::min(2, static_cast<int>(q));
+    const double f = q - i;
+    return std::clamp(values[i] * (1.0 - f) + values[i + 1] * f, 0.0, 1.0);
+}
+
+inline double hero_envelope(const CreativeEffect& c, double p) {
+    if (c.hero_kind.empty() || c.hero_amount <= .0 || p < c.hero_start || p > c.hero_end) return 0.0;
+    const double q = (p - c.hero_start) / std::max(1e-6, c.hero_end - c.hero_start);
+    auto smooth = [](double x) { x = std::clamp(x, 0.0, 1.0); return x * x * (3.0 - 2.0 * x); };
+    return c.hero_amount * std::min(smooth(q / .16), smooth((1.0 - q) / .22));
+}
+
+inline void copy_pixel(const std::vector<std::uint8_t>& src, std::vector<std::uint8_t>& dst,
+                       int width, int height, int dx, int dy, int sx, int sy, double alpha = 1.0) {
+    if (dx < 0 || dx >= width || dy < 0 || dy >= height || sx < 0 || sx >= width || sy < 0 || sy >= height) return;
+    const auto di = static_cast<std::size_t>((dy * width + dx) * 3);
+    const auto si = static_cast<std::size_t>((sy * width + sx) * 3);
+    const double a = std::clamp(alpha, 0.0, 1.0);
+    for (int c = 0; c < 3; ++c) dst[di + c] = clamp8(dst[di + c] * (1.0 - a) + src[si + c] * a);
+}
+
+void native_virtual_camera(std::vector<std::uint8_t>& rgb, int width, int height,
+                           const CreativeEffect& c, double amount, double progress, double phase) {
+    if (amount <= .015) return;
+    const auto src = rgb;
+    const double ease = .5 - .5 * std::cos(3.141592653589793 * std::clamp(progress, 0.0, 1.0));
+    const double zoom = 1.0 + amount * (.012 + .045 * ease);
+    const double cx = c.target_x * width, cy = c.target_y * height;
+    const double drift_x = std::sin(progress * 5.0 + phase * .08) * c.drift_x * width * .010 * amount;
+    const double drift_y = std::sin(progress * 4.0 + phase * .07) * c.drift_y * height * .008 * amount;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const double sx_f = cx + (x - cx - drift_x) / zoom;
+            const double sy_f = cy + (y - cy - drift_y) / zoom;
+            const int sx = std::clamp(static_cast<int>(std::llround(sx_f)), 0, width - 1);
+            const int sy = std::clamp(static_cast<int>(std::llround(sy_f)), 0, height - 1);
+            const auto di = static_cast<std::size_t>((y * width + x) * 3);
+            const auto si = static_cast<std::size_t>((sy * width + sx) * 3);
+            rgb[di] = src[si]; rgb[di + 1] = src[si + 1]; rgb[di + 2] = src[si + 2];
+        }
+    }
+}
+
+void native_depth_parallax(std::vector<std::uint8_t>& rgb, int width, int height,
+                           const CreativeEffect& c, double amount, double phase) {
+    if (amount <= .015) return;
+    const auto src = rgb;
+    constexpr int cols = 16, rows = 9;
+    std::array<double, cols * rows> depth_map{};
+    const double target_x = c.target_x, target_y = c.target_y;
+    const double subject_r = std::max(.08, c.subject_radius);
+    for (int gy = 0; gy < rows; ++gy) {
+        for (int gx = 0; gx < cols; ++gx) {
+            const int sx = std::clamp(static_cast<int>((gx + .5) / cols * width), 0, width - 1);
+            const int sy = std::clamp(static_cast<int>((gy + .5) / rows * height), 0, height - 1);
+            const auto i = static_cast<std::size_t>((sy * width + sx) * 3);
+            const double r = src[i] / 255.0, g = src[i+1] / 255.0, b = src[i+2] / 255.0;
+            const double mx = std::max({r,g,b}), mn = std::min({r,g,b});
+            const double sat = mx - mn;
+            const double lum = .2126*r + .7152*g + .0722*b;
+            const double nx = (gx + .5) / cols, ny = (gy + .5) / rows;
+            const double radial = std::hypot(nx-target_x, ny-target_y);
+            double depth = .18 + .56*(1.0-ny) + .10*(1.0-sat) + .06*(1.0-lum);
+            const double protect = std::max(0.0, 1.0-radial/subject_r);
+            depth -= .42 * protect * c.subject_preserve;
+            depth_map[static_cast<std::size_t>(gy*cols+gx)] = std::clamp(depth, 0.0, 1.0);
+        }
+    }
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int y = 0; y < height; ++y) {
+        const int gy = std::min(rows-1, y * rows / std::max(1,height));
+        for (int x = 0; x < width; ++x) {
+            const int gx = std::min(cols-1, x * cols / std::max(1,width));
+            const double depth = depth_map[static_cast<std::size_t>(gy*cols+gx)];
+            const double d = (depth - .50) * amount;
+            const int dx = static_cast<int>((c.drift_x * .74 + std::sin(phase*.30 + gy*.51 + gx*.13)*.26) * width * .032 * d);
+            const int dy = static_cast<int>((c.drift_y * .64 + std::cos(phase*.27 + gx*.37)*.18) * height * .022 * d);
+            const int sx = std::clamp(x - dx, 0, width - 1), sy = std::clamp(y - dy, 0, height - 1);
+            const auto di = static_cast<std::size_t>((y * width + x) * 3), si = static_cast<std::size_t>((sy * width + sx) * 3);
+            for (int ch = 0; ch < 3; ++ch) rgb[di + ch] = clamp8(src[di + ch] * .72 + src[si + ch] * .28);
+        }
+    }
+    if (c.depth_fog * amount > .02) {
+        const double fog = c.depth_fog * amount;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (int y = 0; y < height / 2; ++y) {
+            const double a = fog * .11 * (1.0 - static_cast<double>(y) / std::max(1, height / 2));
+            for (int x = 0; x < width; ++x) {
+                const auto i = static_cast<std::size_t>((y * width + x) * 3);
+                rgb[i] = clamp8(rgb[i] * (1-a) + 205 * a);
+                rgb[i+1] = clamp8(rgb[i+1] * (1-a) + 225 * a);
+                rgb[i+2] = clamp8(rgb[i+2] * (1-a) + 255 * a);
+            }
+        }
+    }
+}
+
+void native_flow_warp(std::vector<std::uint8_t>& rgb, const std::vector<std::uint8_t>* previous,
+                      int width, int height, const CreativeEffect& c, double amount) {
+    if (!previous || previous->size() != rgb.size() || amount <= .015) return;
+    const auto src = rgb;
+    const int step = std::max(24, std::min(width, height) / 22);
+    const int radius = std::max(4, step / 3);
+    const double cx = c.target_x * width, cy = c.target_y * height;
+    const double subject_r = c.subject_radius * std::min(width, height);
+    for (int y = step; y < height - step; y += step) {
+        for (int x = step; x < width - step; x += step) {
+            const double cur = luminance(src, width, x, y), prev = luminance(*previous, width, x, y);
+            const double dt = (cur - prev) / 255.0;
+            const double gx = (luminance(src, width, x + radius, y) - luminance(src, width, x - radius, y)) / 255.0;
+            const double gy = (luminance(src, width, x, y + radius) - luminance(src, width, x, y - radius)) / 255.0;
+            const double grad = std::hypot(gx, gy);
+            if (std::abs(dt) < .018 || grad < .015) continue;
+            const double protect = std::hypot(x - cx, y - cy) < subject_r ? 1.0 - c.subject_preserve * .75 : 1.0;
+            if (protect < .12) continue;
+            const double strength = std::clamp((std::abs(dt) * 2.2 + grad * .8) * amount * protect, 0.0, 1.0);
+            const int dx = static_cast<int>(-std::copysign(1.0, dt) * gx / std::max(.01, grad) * width * .024 * strength);
+            const int dy = static_cast<int>(-std::copysign(1.0, dt) * gy / std::max(.01, grad) * height * .030 * strength);
+            const int half = step / 2;
+            for (int py = -half; py <= half; ++py) for (int px = -half; px <= half; ++px) {
+                const int tx = x + px, ty = y + py;
+                copy_pixel(src, rgb, width, height, tx, ty, tx - dx, ty - dy, .18 + .28 * strength);
+            }
+        }
+    }
+}
+
+void native_temporal(std::vector<std::uint8_t>& rgb, const std::vector<std::uint8_t>* previous,
+                     int width, int height, const CreativeEffect& c, double echo, double rgb_delay, double smear, double flow_trails) {
+    if (!previous || previous->size() != rgb.size()) return;
+    if (echo > .015 || flow_trails > .015) {
+        const double a = std::clamp(.06 + .20 * std::max(echo, flow_trails), 0.0, .28);
+        blend_layer(rgb, *previous, a, flow_trails > echo ? "screen" : "normal");
+    }
+    if (rgb_delay > .015) {
+        const auto src = rgb;
+        const int shift = std::max(1, static_cast<int>(width * .008 * rgb_delay));
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            const auto i = static_cast<std::size_t>((y * width + x) * 3);
+            const int xr = std::clamp(x + shift, 0, width - 1), xb = std::clamp(x - shift, 0, width - 1);
+            rgb[i] = (*previous)[static_cast<std::size_t>((y * width + xr) * 3)];
+            rgb[i+2] = (*previous)[static_cast<std::size_t>((y * width + xb) * 3 + 2)];
+            rgb[i+1] = clamp8(.82 * src[i+1] + .18 * (*previous)[i+1]);
+        }
+    }
+    if (smear > .015) {
+        const auto src = rgb;
+        const int bands = 18 + static_cast<int>(smear * 22), sh = std::max(1, height / bands);
+        for (int b = 0; b < bands; ++b) {
+            const int dx = static_cast<int>(std::sin(b * .71) * width * .020 * smear);
+            if (b % 3) continue;
+            for (int y = b * sh; y < std::min(height, (b + 1) * sh); ++y) for (int x = 0; x < width; ++x)
+                copy_pixel(*previous, rgb, width, height, x, y, std::clamp(x - dx, 0, width-1), y, .10 + .22 * smear);
+        }
+    }
+}
+
+void native_feedback(std::vector<std::uint8_t>& rgb, const std::vector<std::uint8_t>* previous,
+                     int width, int height, const CreativeEffect& c, double amount) {
+    if (!previous || previous->size() != rgb.size() || amount <= .015) return;
+    const auto src = rgb;
+    const double cx = c.target_x * width, cy = c.target_y * height;
+    const double scale = 1.0 + c.feedback_scale * (.35 + .9 * amount);
+    const double angle = c.feedback_rotation * 3.141592653589793 / 180.0 * amount;
+    const double cs = std::cos(-angle), sn = std::sin(-angle);
+    const double alpha = .025 + .12 * amount;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+        const double rx = (x - cx) / scale, ry = (y - cy) / scale;
+        const int sx = std::clamp(static_cast<int>(cx + rx * cs - ry * sn), 0, width-1);
+        const int sy = std::clamp(static_cast<int>(cy + rx * sn + ry * cs), 0, height-1);
+        const auto di = static_cast<std::size_t>((y*width+x)*3), si = static_cast<std::size_t>((sy*width+sx)*3);
+        for(int ch=0;ch<3;++ch){const double screen=255.0-(255.0-src[di+ch])*(255.0-(*previous)[si+ch])/255.0;rgb[di+ch]=clamp8(src[di+ch]*(1-alpha)+screen*alpha);}
+    }
+}
+
+void native_local_symmetry(std::vector<std::uint8_t>& rgb, int width, int height,
+                           const CreativeEffect& c, double amount, double phase) {
+    if (amount <= .02) return;
+    const auto src = rgb;
+    const double cx = c.target_x * width, cy = c.target_y * height;
+    const double radius = std::min(width,height) * (.12 + .16 * amount);
+    const int segments = std::max(2, std::min(12, c.symmetry_segments));
+    const double wedge = 2.0 * 3.141592653589793 / segments;
+    const double alpha = .04 + .12 * amount;
+    const int x0 = std::max(0, static_cast<int>(cx-radius)), x1 = std::min(width-1, static_cast<int>(cx+radius));
+    const int y0 = std::max(0, static_cast<int>(cy-radius)), y1 = std::min(height-1, static_cast<int>(cy+radius));
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+        const double dx=x-cx,dy=y-cy,r=std::hypot(dx,dy);if(r>radius)continue;
+        double a=std::atan2(dy,dx)+phase*.012*amount;a=std::fmod(a+20*wedge,wedge);if(a>wedge*.5)a=wedge-a;
+        const int sx=std::clamp(static_cast<int>(cx+std::cos(a)*r),0,width-1),sy=std::clamp(static_cast<int>(cy+std::sin(a)*r),0,height-1);
+        const auto di=static_cast<std::size_t>((y*width+x)*3),si=static_cast<std::size_t>((sy*width+sx)*3);
+        for(int ch=0;ch<3;++ch){const double screen=255.0-(255.0-src[di+ch])*(255.0-src[si+ch])/255.0;rgb[di+ch]=clamp8(src[di+ch]*(1-alpha)+screen*alpha);}
+    }
+}
+
+void native_source_texture(std::vector<std::uint8_t>& rgb, int width, int height,
+                           const CreativeEffect& c, double bloom, double streaks) {
+    if (bloom <= .015 && streaks <= .015) return;
+    const auto src = rgb;
+    if (bloom > .015) {
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (int y=0;y<height;++y) for(int x=0;x<width;++x){const auto i=static_cast<std::size_t>((y*width+x)*3);const double l=.2126*src[i]+.7152*src[i+1]+.0722*src[i+2];if(l<155)continue;const double a=(l-155)/100.0*(.05+.18*bloom);rgb[i]=clamp8(rgb[i]*(1-a)+std::min(255.0,src[i]*1.35)*a);rgb[i+1]=clamp8(rgb[i+1]*(1-a)+std::min(255.0,src[i+1]*1.35)*a);rgb[i+2]=clamp8(rgb[i+2]*(1-a)+std::min(255.0,src[i+2]*1.35)*a);}
+    }
+    if (streaks > .015) {
+        const int strips=14, sw=std::max(1,width/strips);
+        for(int s=0;s<strips;++s){const int sx=std::clamp(s*sw,0,width-1);double peak=0;for(int y=0;y<height;y+=std::max(1,height/48))peak=std::max(peak,luminance(src,width,sx,y));if(peak<175)continue;const int dx=static_cast<int>(std::sin(s*1.7)*width*.008*streaks);for(int y=0;y<height;++y)for(int x=s*sw;x<std::min(width,(s+1)*sw);++x)copy_pixel(src,rgb,width,height,x,y,std::clamp(x-dx,0,width-1),y,.025+.08*streaks);}
+    }
+}
+
+void native_palette(std::vector<std::uint8_t>& rgb, int width, int height, const CreativeEffect& c, double amount) {
+    if (amount <= .015) return;
+    const double alpha=.02+.10*amount;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int y=0;y<height;++y)for(int x=0;x<width;++x){const auto i=static_cast<std::size_t>((y*width+x)*3);const double q=.35+.65*(static_cast<double>(x)/std::max(1,width-1));rgb[i]=clamp8(rgb[i]*(1-alpha)+c.palette_r*q*alpha);rgb[i+1]=clamp8(rgb[i+1]*(1-alpha)+c.palette_g*q*alpha);rgb[i+2]=clamp8(rgb[i+2]*(1-alpha)+c.palette_b*q*alpha);}
+}
+
+void restore_subject(std::vector<std::uint8_t>& rgb, const std::vector<std::uint8_t>& original,
+                     int width, int height, const CreativeEffect& c, double amount) {
+    if (c.subject_preserve * amount <= .02) return;
+    const double cx=c.target_x*width,cy=c.target_y*height,r=c.subject_radius*std::min(width,height);
+    const int center_x=std::clamp(static_cast<int>(cx),0,width-1),center_y=std::clamp(static_cast<int>(cy),0,height-1);
+    const auto ci=static_cast<std::size_t>((center_y*width+center_x)*3);
+    const double cr=original[ci],cg=original[ci+1],cb=original[ci+2];
+    const int x0=std::max(0,static_cast<int>(cx-r*1.15)),x1=std::min(width-1,static_cast<int>(cx+r*1.15));
+    const int y0=std::max(0,static_cast<int>(cy-r*1.35)),y1=std::min(height-1,static_cast<int>(cy+r*1.35));
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+        const double d=std::sqrt(std::pow((x-cx)/std::max(1.0,r),2)+std::pow((y-cy)/std::max(1.0,r*1.2),2));if(d>1.15)continue;
+        const auto i=static_cast<std::size_t>((y*width+x)*3);
+        const double color=std::sqrt(std::pow(original[i]-cr,2)+std::pow(original[i+1]-cg,2)+std::pow(original[i+2]-cb,2))/441.673;
+        const double proximity=std::clamp(1.0-d/1.15,0.0,1.0);
+        const double continuity=.32+.68*std::clamp(1.0-color*1.25,0.0,1.0);
+        const double mask=proximity*continuity;
+        const double edge=std::clamp((1-d)/.30,0.0,1.0);
+        const double a=c.subject_preserve*amount*(.08+.42*mask+.14*edge);
+        for(int ch=0;ch<3;++ch)rgb[i+ch]=clamp8(rgb[i+ch]*(1-a)+original[i+ch]*a);
+    }
+}
+
 } // namespace
+
+void apply_creative_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const CreativeEffect& c,
+    double progress,
+    double phase
+) {
+    if (rgb.empty()) return;
+    const auto original = rgb;
+    const double common_env = creative_envelope(c.envelope, progress);
+    const double hero = hero_envelope(c, progress);
+
+    const double camera = c.camera_energy * creative_envelope(c.camera_envelope, progress);
+    const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress);
+    const double bloom = c.texture_bloom * creative_envelope(c.bloom_envelope, progress);
+    const double streaks = c.texture_streaks * creative_envelope(c.streaks_envelope, progress);
+    const double depth = std::max(
+        c.depth_parallax * creative_envelope(c.depth_envelope, progress),
+        c.background_warp * creative_envelope(c.background_envelope, progress) * .55
+    );
+    const double flow = c.flow_warp * creative_envelope(c.flow_warp_envelope, progress);
+    const double echo = c.temporal_echo * creative_envelope(c.temporal_echo_envelope, progress);
+    const double rgb_delay = std::max(
+        c.temporal_rgb * creative_envelope(c.temporal_rgb_envelope, progress),
+        c.flow_rgb * creative_envelope(c.flow_rgb_envelope, progress) * .65
+    );
+    const double smear = c.temporal_smear * creative_envelope(c.temporal_smear_envelope, progress);
+    const double trails = c.flow_trails * creative_envelope(c.flow_trails_envelope, progress);
+    const double symmetry = c.local_symmetry * creative_envelope(c.symmetry_envelope, progress);
+    const double feedback = c.feedback * creative_envelope(c.feedback_envelope, progress);
+
+    // The native path is CPU-heavy, so insignificant curve tails are skipped.
+    // This retains the visible trajectory while avoiding several full-frame passes
+    // during the deliberately restrained parts of a phrase.
+    if (camera > .035) native_virtual_camera(rgb, width, height, c, camera, progress, phase);
+    if (palette > .045) native_palette(rgb, width, height, c, palette);
+    if (std::max(bloom, streaks) > .050) native_source_texture(rgb, width, height, c, bloom, streaks);
+    if (depth > .050) native_depth_parallax(rgb, width, height, c, depth, phase);
+    if (flow > .055) native_flow_warp(rgb, previous, width, height, c, flow);
+    if (std::max({echo, rgb_delay, smear, trails}) > .045)
+        native_temporal(rgb, previous, width, height, c, echo, rgb_delay, smear, trails);
+    if (symmetry > .065) native_local_symmetry(rgb, width, height, c, symmetry, phase);
+    if (feedback > .045) native_feedback(rgb, previous, width, height, c, feedback);
+
+    if (hero > .015) {
+        if (c.hero_kind == "flow_melt") {
+            native_flow_warp(rgb, previous, width, height, c, .92 * hero);
+            native_temporal(rgb, previous, width, height, c, .0, .28*hero, .55*hero, .35*hero);
+        } else if (c.hero_kind == "depth_burst") {
+            native_depth_parallax(rgb, width, height, c, .92*hero, phase);
+            native_feedback(rgb, previous, width, height, c, .58*hero);
+        } else if (c.hero_kind == "recursive_portal") {
+            native_local_symmetry(rgb, width, height, c, .78*hero, phase);
+            native_feedback(rgb, previous, width, height, c, .82*hero);
+            native_source_texture(rgb, width, height, c, .42*hero, .26*hero);
+        } else if (c.hero_kind == "subject_echo") {
+            native_temporal(rgb, previous, width, height, c, .55*hero, .36*hero, .42*hero, .40*hero);
+        } else if (c.hero_kind == "time_prism") {
+            native_temporal(rgb, previous, width, height, c, .28*hero, .68*hero, .48*hero, .20*hero);
+            native_local_symmetry(rgb, width, height, c, .40*hero, phase);
+        }
+    }
+    restore_subject(rgb, original, width, height, c, std::max(common_env, hero));
+}
 
 void apply_vector_effects(
     std::vector<std::uint8_t>& rgb,

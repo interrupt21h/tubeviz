@@ -15,6 +15,7 @@ from .library import ClipLibrary, SceneCandidate
 from .audio_ai import CONCEPT_KEYS, CONCEPT_PROMPTS, scene_audio_concept_alignment, top_audio_concepts
 from .models import CompositeLayer, DirectedTimeline, SceneIntent, SceneSelection, VisualCue
 from .transforms import TransformConfig, attach_transform_plan
+from .creative_effects import promote_hero_effects
 from .editing import EditConfig, attach_edit_plan
 from .visual_features import index_scene_visual_features
 from .choreography import (
@@ -48,6 +49,8 @@ class SceneSelectorConfig:
     visual_semantic_weight: float = 4.0
     transforms: bool = True
     transform_intensity: float = 1.0
+    creative_effects: bool = True
+    creative_intensity: float = 1.0
     max_video_layers: int = 3
     composition_intensity: float = 1.0
     selection_seed: int = 0
@@ -882,6 +885,8 @@ def build_scene_plan(
                 occurrence=occurrence,
                 shot_index_in_section=local_shot_index,
                 shot_progress=((shot_start + shot_end) * .5 - section.start) / max(.05, section.end-section.start),
+                creative_enabled=cfg.transforms and cfg.creative_effects,
+                creative_intensity=max(0.0, cfg.creative_intensity),
                 vector_enabled=cfg.vector_effects,
                 vector_intensity=cfg.vector_intensity,
                 codec_glitch_mode=cfg.codec_glitch_mode,
@@ -1008,6 +1013,11 @@ def attach_scene_plan(
 ) -> DirectedTimeline:
     cfg = config or SceneSelectorConfig()
     plan = build_scene_plan(timeline, library, cfg)
+    plan = promote_hero_effects(
+        plan,
+        {section.index: section for section in timeline.track.sections},
+        track_duration=timeline.track.duration,
+    )
     non_scene_cues = [
         cue for cue in timeline.cues
         if cue.action not in {"play_scene", "crossfade_scene"}

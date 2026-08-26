@@ -209,6 +209,15 @@ def _director_prompt(track: TrackAnalysis) -> str:
             "target_hue": 210.0,
             "vector_intensity": 1.0,
             "codec_intensity": 0.5,
+            "creative_trajectory": {
+                "abstraction": [0.15, 0.55],
+                "camera_energy": [0.25, 0.75],
+                "temporal": [0.10, 0.45],
+                "feedback": [0.05, 0.30],
+                "depth": [0.20, 0.50],
+                "flow": [0.10, 0.60],
+                "palette": [0.25, 0.70]
+            },
             "notes": "brief reasoning",
         }]
     }
@@ -347,6 +356,7 @@ def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: flo
         "target_hue": proposed.target_hue if proposed.target_hue is not None else base.target_hue,
         "vector_intensity": mix(base.vector_intensity, proposed.vector_intensity),
         "codec_intensity": mix(base.codec_intensity, proposed.codec_intensity),
+        "creative_trajectory": proposed.creative_trajectory or base.creative_trajectory,
         "notes": proposed.notes or base.notes,
     })
 

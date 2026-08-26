@@ -40,6 +40,16 @@ void apply_reactive_effects(
     double phase
 );
 
+void apply_creative_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const CreativeEffect& creative,
+    double progress,
+    double phase
+);
+
 void apply_vector_effects(
     std::vector<std::uint8_t>& rgb,
     const std::vector<std::uint8_t>* companion,

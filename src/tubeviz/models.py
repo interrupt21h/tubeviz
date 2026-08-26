@@ -49,6 +49,10 @@ class SectionAIDirection(BaseModel):
     target_hue: float | None = Field(default=None, ge=0.0, lt=360.0)
     vector_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
     codec_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
+    # Optional whole-section creative trajectories from the LLM director. Each
+    # value is [start, end] in normalized 0..1 intensity; the deterministic
+    # creative planner blends these with measured audio/scene features.
+    creative_trajectory: dict[str, list[float]] = Field(default_factory=dict)
     notes: str = ""
 
 
@@ -350,6 +354,69 @@ class CodecMaterialization(BaseModel):
     ffedit_version: str | None = None
 
 
+class SemanticVisualProfile(BaseModel):
+    """Scene semantics used to constrain creative effects without requiring runtime ML."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tags: list[str] = Field(default_factory=list)
+    person: float = Field(default=0.0, ge=0.0, le=1.0)
+    face: float = Field(default=0.0, ge=0.0, le=1.0)
+    water: float = Field(default=0.0, ge=0.0, le=1.0)
+    sky: float = Field(default=0.0, ge=0.0, le=1.0)
+    nature: float = Field(default=0.0, ge=0.0, le=1.0)
+    architecture: float = Field(default=0.0, ge=0.0, le=1.0)
+    vehicle: float = Field(default=0.0, ge=0.0, le=1.0)
+    text: float = Field(default=0.0, ge=0.0, le=1.0)
+    abstract: float = Field(default=0.0, ge=0.0, le=1.0)
+    night: float = Field(default=0.0, ge=0.0, le=1.0)
+    saliency_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    saliency_y: float = Field(default=0.5, ge=0.0, le=1.0)
+    subject_radius: float = Field(default=0.28, ge=0.05, le=0.75)
+
+
+class CreativeEffectPlan(BaseModel):
+    """High-level, temporally coherent rendered-video treatment for one shot.
+
+    Scalar fields are ceilings. ``automation`` contains normalized 0..1 shot-progress
+    curves and lets both browser and native renderers evolve the treatment rather than
+    toggle independent filters.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    flow_warp: float = Field(default=0.0, ge=0.0, le=1.0)
+    flow_trails: float = Field(default=0.0, ge=0.0, le=1.0)
+    flow_rgb: float = Field(default=0.0, ge=0.0, le=1.0)
+    temporal_echo: float = Field(default=0.0, ge=0.0, le=1.0)
+    temporal_rgb: float = Field(default=0.0, ge=0.0, le=1.0)
+    temporal_smear: float = Field(default=0.0, ge=0.0, le=1.0)
+    camera_energy: float = Field(default=0.0, ge=0.0, le=1.0)
+    camera_target_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    camera_target_y: float = Field(default=0.5, ge=0.0, le=1.0)
+    camera_drift_x: float = Field(default=0.0, ge=-1.0, le=1.0)
+    camera_drift_y: float = Field(default=0.0, ge=-1.0, le=1.0)
+    depth_parallax: float = Field(default=0.0, ge=0.0, le=1.0)
+    depth_fog: float = Field(default=0.0, ge=0.0, le=1.0)
+    subject_preserve: float = Field(default=0.0, ge=0.0, le=1.0)
+    background_warp: float = Field(default=0.0, ge=0.0, le=1.0)
+    feedback: float = Field(default=0.0, ge=0.0, le=1.0)
+    feedback_scale: float = Field(default=0.004, ge=0.0, le=0.08)
+    feedback_rotation: float = Field(default=0.0, ge=-3.0, le=3.0)
+    local_symmetry: float = Field(default=0.0, ge=0.0, le=1.0)
+    symmetry_segments: int = Field(default=4, ge=2, le=12)
+    texture_bloom: float = Field(default=0.0, ge=0.0, le=1.0)
+    texture_streaks: float = Field(default=0.0, ge=0.0, le=1.0)
+    palette_strength: float = Field(default=0.0, ge=0.0, le=1.0)
+    abstraction: float = Field(default=0.0, ge=0.0, le=1.0)
+    hero_kind: str | None = None
+    hero_amount: float = Field(default=0.0, ge=0.0, le=1.0)
+    hero_start: float = Field(default=0.0, ge=0.0, le=1.0)
+    hero_end: float = Field(default=1.0, ge=0.0, le=1.0)
+    semantic: SemanticVisualProfile = Field(default_factory=SemanticVisualProfile)
+    automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
+
+
 class VisualDirection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -367,6 +434,7 @@ class VisualDirection(BaseModel):
     automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
     vector_effects: list[VectorEffect] = Field(default_factory=list)
     codec_effects: list[CodecEffect] = Field(default_factory=list)
+    creative: CreativeEffectPlan = Field(default_factory=CreativeEffectPlan)
 
 
 class SceneSelection(BaseModel):

@@ -122,6 +122,86 @@ Manifest load_manifest(const std::string& path) {
             layer.blend_mode = f[5];
             layer.transform = parse_transform(f, 6);
             current->companions.push_back(std::move(layer));
+        } else if (f[0] == "CREATIVE") {
+            if (!current) throw std::runtime_error("CREATIVE before SHOT at line " + std::to_string(line_no));
+            if (f.size() < 37) throw std::runtime_error("invalid CREATIVE line " + std::to_string(line_no));
+            auto& c = current->creative;
+            c.flow_warp = as_double(f, 1);
+            c.flow_trails = as_double(f, 2);
+            c.flow_rgb = as_double(f, 3);
+            c.temporal_echo = as_double(f, 4);
+            c.temporal_rgb = as_double(f, 5);
+            c.temporal_smear = as_double(f, 6);
+            c.camera_energy = as_double(f, 7);
+            c.target_x = as_double(f, 8, 0.5);
+            c.target_y = as_double(f, 9, 0.5);
+            c.drift_x = as_double(f, 10);
+            c.drift_y = as_double(f, 11);
+            c.depth_parallax = as_double(f, 12);
+            c.depth_fog = as_double(f, 13);
+            c.subject_preserve = as_double(f, 14);
+            c.subject_radius = as_double(f, 15, 0.28);
+            c.background_warp = as_double(f, 16);
+            c.feedback = as_double(f, 17);
+            c.feedback_scale = as_double(f, 18, 0.004);
+            c.feedback_rotation = as_double(f, 19);
+            c.local_symmetry = as_double(f, 20);
+            c.symmetry_segments = static_cast<int>(as_double(f, 21, 4));
+            c.texture_bloom = as_double(f, 22);
+            c.texture_streaks = as_double(f, 23);
+            c.palette_strength = as_double(f, 24);
+            c.palette_r = static_cast<int>(as_double(f, 25, 128));
+            c.palette_g = static_cast<int>(as_double(f, 26, 160));
+            c.palette_b = static_cast<int>(as_double(f, 27, 220));
+            c.hero_kind = f[28] == "-" ? "" : f[28];
+            c.hero_amount = as_double(f, 29);
+            c.hero_start = as_double(f, 30);
+            c.hero_end = as_double(f, 31, 1.0);
+            c.abstraction = as_double(f, 32);
+            c.envelope[0] = as_double(f, 33, 1.0);
+            c.envelope[1] = as_double(f, 34, 1.0);
+            c.envelope[2] = as_double(f, 35, 1.0);
+            c.envelope[3] = as_double(f, 36, 1.0);
+            auto seed_envelope = [&](double (&dst)[4]) {
+                for (int i = 0; i < 4; ++i) dst[i] = c.envelope[i];
+            };
+            seed_envelope(c.flow_warp_envelope);
+            seed_envelope(c.flow_trails_envelope);
+            seed_envelope(c.flow_rgb_envelope);
+            seed_envelope(c.temporal_echo_envelope);
+            seed_envelope(c.temporal_rgb_envelope);
+            seed_envelope(c.temporal_smear_envelope);
+            seed_envelope(c.camera_envelope);
+            seed_envelope(c.depth_envelope);
+            seed_envelope(c.background_envelope);
+            seed_envelope(c.feedback_envelope);
+            seed_envelope(c.symmetry_envelope);
+            seed_envelope(c.bloom_envelope);
+            seed_envelope(c.streaks_envelope);
+            seed_envelope(c.palette_envelope);
+            // v0.33 extended creative manifests append 14 independent four-point
+            // curves after the compact common envelope.  A 37-field record stays
+            // valid and simply uses the common envelope for every channel.
+            if (f.size() >= 93) {
+                std::size_t pos = 37;
+                auto read_envelope = [&](double (&dst)[4]) {
+                    for (int i = 0; i < 4; ++i) dst[i] = as_double(f, pos++, 1.0);
+                };
+                read_envelope(c.flow_warp_envelope);
+                read_envelope(c.flow_trails_envelope);
+                read_envelope(c.flow_rgb_envelope);
+                read_envelope(c.temporal_echo_envelope);
+                read_envelope(c.temporal_rgb_envelope);
+                read_envelope(c.temporal_smear_envelope);
+                read_envelope(c.camera_envelope);
+                read_envelope(c.depth_envelope);
+                read_envelope(c.background_envelope);
+                read_envelope(c.feedback_envelope);
+                read_envelope(c.symmetry_envelope);
+                read_envelope(c.bloom_envelope);
+                read_envelope(c.streaks_envelope);
+                read_envelope(c.palette_envelope);
+            }
         } else if (f[0] == "VEC") {
             if (!current) throw std::runtime_error("VEC before SHOT at line " + std::to_string(line_no));
             if (f.size() < 17) throw std::runtime_error("invalid VEC line " + std::to_string(line_no));

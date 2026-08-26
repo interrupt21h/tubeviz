@@ -52,6 +52,59 @@ struct VectorEffect {
     double radius{0.0};
 };
 
+struct CreativeEffect {
+    double flow_warp{0.0};
+    double flow_trails{0.0};
+    double flow_rgb{0.0};
+    double temporal_echo{0.0};
+    double temporal_rgb{0.0};
+    double temporal_smear{0.0};
+    double camera_energy{0.0};
+    double target_x{0.5};
+    double target_y{0.5};
+    double drift_x{0.0};
+    double drift_y{0.0};
+    double depth_parallax{0.0};
+    double depth_fog{0.0};
+    double subject_preserve{0.0};
+    double subject_radius{0.28};
+    double background_warp{0.0};
+    double feedback{0.0};
+    double feedback_scale{0.004};
+    double feedback_rotation{0.0};
+    double local_symmetry{0.0};
+    int symmetry_segments{4};
+    double texture_bloom{0.0};
+    double texture_streaks{0.0};
+    double palette_strength{0.0};
+    int palette_r{128};
+    int palette_g{160};
+    int palette_b{220};
+    std::string hero_kind;
+    double hero_amount{0.0};
+    double hero_start{0.0};
+    double hero_end{1.0};
+    double abstraction{0.0};
+    // The common envelope is retained for compact/older creative manifests.
+    // New manifests additionally carry independent curves so native rendering
+    // follows the same per-effect trajectories as the browser renderer.
+    double envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double flow_warp_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double flow_trails_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double flow_rgb_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double temporal_echo_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double temporal_rgb_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double temporal_smear_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double camera_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double depth_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double background_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double feedback_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double symmetry_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double bloom_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double streaks_envelope[4]{1.0, 1.0, 1.0, 1.0};
+    double palette_envelope[4]{1.0, 1.0, 1.0, 1.0};
+};
+
 struct Shot {
     double time{0.0};
     double timeline_end{0.0};
@@ -59,6 +112,7 @@ struct Shot {
     Layer primary{};
     std::vector<Layer> companions;
     std::vector<VectorEffect> vector_effects;
+    CreativeEffect creative{};
 };
 
 struct Cue {

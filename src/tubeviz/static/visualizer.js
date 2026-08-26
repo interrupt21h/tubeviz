@@ -53,19 +53,23 @@ const [motionProbe,motionProbeCtx]=offscreen(false);
 const [motionPrev,motionPrevCtx]=offscreen(false);
 const [flowProbe,flowProbeCtx]=offscreen(false);
 const [flowPrev,flowPrevCtx]=offscreen(false);
+const [depthProbe,depthProbeCtx]=offscreen(false);
+const [subjectMask,subjectMaskCtx]=offscreen(true);
+const [subjectLayer,subjectLayerCtx]=offscreen(true);
 const delayBuffers=[delayA,delayB,delayC];
 const vectorGeometryCache=new Map();
 const vectorEchoHistory=[];
 let vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
 let vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
 let vectorFlowInitialized=false;
+let creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
 const delayCtx=[delayACtx,delayBCtx,delayCCtx];
 let delayWrite=0;
 
 function resize(){
   width=canvas.width=videoFx.width=Math.floor(innerWidth*devicePixelRatio);
   height=canvas.height=videoFx.height=Math.floor(innerHeight*devicePixelRatio);
-  for(const c of [history,scratch,freezeCanvas,holdCanvas,edgeCanvas]){c.width=width;c.height=height;}
+  for(const c of [history,scratch,freezeCanvas,holdCanvas,edgeCanvas,subjectLayer]){c.width=width;c.height=height;}
   for(const c of delayBuffers){c.width=Math.max(1,Math.floor(width/2));c.height=Math.max(1,Math.floor(height/2));}
   exportCanvas.width=width;exportCanvas.height=height;
   vectorSample.width=128;vectorSample.height=72;
@@ -74,6 +78,7 @@ function resize(){
   motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,64,36);
   flowProbe.width=64;flowProbe.height=36;flowPrev.width=64;flowPrev.height=36;
   flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,64,36);
+  depthProbe.width=16;depthProbe.height=9;subjectMask.width=16;subjectMask.height=9;creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
   vectorGeometryCache.clear();vectorEchoHistory.length=0;
   vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
   vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
@@ -154,7 +159,19 @@ async function activateScene(scene,{immediate=false}={}){
 }
 
 function transformedRect(t,rect){
-  const zoom=Math.max(1,t.zoom??1)*(1+punch*.11),panX=(t.pan_x??0)*rect.w*.20,panY=(t.pan_y??0)*rect.h*.20;
+  const creative=activeScene?.direction?.creative??{};
+  const camera=Math.min(1,creativeValue('camera_energy',creative.camera_energy??0)*liveFx.motion);
+  const p=directedProgress(),targetX=Number(creative.camera_target_x??.5),targetY=Number(creative.camera_target_y??.5);
+  const driftX=Number(creative.camera_drift_x??0),driftY=Number(creative.camera_drift_y??0);
+  // Treat high-resolution footage as a virtual camera canvas.  The motion is a
+  // smooth phrase envelope plus the existing beat impulse, and aims at the
+  // scene's semantic/saliency target rather than dead centre.
+  const cameraZoom=1+camera*(.018+.052*(.5-.5*Math.cos(Math.PI*Math.min(1,p))))+punch*.065;
+  const zoom=Math.max(1,t.zoom??1)*cameraZoom*(1+punch*.055);
+  const availableX=Math.max(0,rect.w*(zoom-1)),availableY=Math.max(0,rect.h*(zoom-1));
+  const semanticPanX=(.5-targetX)*availableX*.72+Math.sin(p*Math.PI*1.7+phase*.08)*rect.w*.018*camera*driftX;
+  const semanticPanY=(.5-targetY)*availableY*.72+Math.sin(p*Math.PI*1.3+phase*.07)*rect.h*.014*camera*driftY;
+  const panX=(t.pan_x??0)*rect.w*.20+semanticPanX,panY=(t.pan_y??0)*rect.h*.20+semanticPanY;
   return{x:rect.x+panX,y:rect.y+panY,w:rect.w*zoom,h:rect.h*zoom};
 }
 function drawLayer(target,state,rect,alpha=1,blend=null){
@@ -642,6 +659,132 @@ function automationValue(name,fallback=0){
   }
   return Number(points[points.length-1][1]);
 }
+function creativeValue(name,fallback=0){
+  const creative=activeScene?.direction?.creative;
+  if(!creative)return fallback;
+  const points=creative.automation?.[name];
+  if(!Array.isArray(points)||!points.length)return Number(creative[name]??fallback);
+  const p=directedProgress();
+  if(p<=points[0][0])return Number(points[0][1]);
+  for(let i=1;i<points.length;i++){
+    const a=points[i-1],b=points[i];
+    if(p<=b[0]){const q=(p-a[0])/Math.max(1e-6,b[0]-a[0]);return Number(a[1])+(Number(b[1])-Number(a[1]))*q;}
+  }
+  return Number(points[points.length-1][1]);
+}
+function creativeTarget(){
+  const c=activeScene?.direction?.creative??{};
+  return{x:Number(c.camera_target_x??.5)*width,y:Number(c.camera_target_y??.5)*height,r:Number(c.semantic?.subject_radius??.28)*Math.min(width,height)};
+}
+function preserveCreativeSubject(amount){
+  if(amount<=.02)return;
+  const {x,y,r}=creativeTarget(),c=activeScene?.direction?.creative??{},semantic=Math.max(Number(c.semantic?.person??0),Number(c.semantic?.face??0),Number(c.semantic?.text??0));
+  // Strong semantic subjects get a content-derived foreground mask.  It is
+  // intentionally coarse and feathered by canvas resampling: focal proximity and
+  // color continuity protect the actual subject rather than a permanent ellipse.
+  if(amount>.12&&semantic>.18){
+    const map=updateCreativeDepth();
+    if(map.cells.length){
+      const image=subjectMaskCtx.createImageData(map.cols,map.rows);
+      for(const cell of map.cells){const a=Math.max(0,Math.min(1,cell.subject??0));const i=(cell.y*map.cols+cell.x)*4;image.data[i]=image.data[i+1]=image.data[i+2]=255;image.data[i+3]=Math.round(255*a);}
+      subjectMaskCtx.clearRect(0,0,map.cols,map.rows);subjectMaskCtx.putImageData(image,0,0);
+      subjectLayerCtx.clearRect(0,0,width,height);subjectLayerCtx.globalCompositeOperation='source-over';subjectLayerCtx.globalAlpha=1;subjectLayerCtx.drawImage(scratch,0,0,width,height);
+      subjectLayerCtx.globalCompositeOperation='destination-in';subjectLayerCtx.imageSmoothingEnabled=true;subjectLayerCtx.drawImage(subjectMask,0,0,width,height);subjectLayerCtx.globalCompositeOperation='source-over';
+      fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.12+.43*amount;fx.drawImage(subjectLayer,0,0,width,height);fx.restore();
+    }
+  }
+  fx.save();fx.globalCompositeOperation='source-over';
+  // A low-amplitude feather remains as a fallback and prevents hard mask seams.
+  for(let i=4;i>=1;i--){const q=i/4;fx.save();fx.beginPath();fx.ellipse(x,y,r*(.75+.25*q),r*(1.02+.20*q),0,0,Math.PI*2);fx.clip();fx.globalAlpha=(.025+.075*amount)*(1.15-q*.15);fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  fx.restore();
+}
+function applyFlowWarpCreative(amount){
+  if(amount<=.02)return;const flow=updateOpticalFlow().field;if(!flow.length)return;snapshot();
+  const subject=activeScene?.direction?.creative?.subject_preserve??0,{x:cx,y:cy,r}=creativeTarget();
+  fx.save();fx.globalAlpha=.10+.34*amount;
+  const max=Math.min(60,flow.length);
+  for(let i=0;i<max;i++){const v=flow[i];const px=v.x*width,py=v.y*height,dist=Math.hypot(px-cx,py-cy);const protect=dist<r?1-subject*.78:1;if(protect<.15)continue;const pw=width*.075*(.6+.8*v.strength),ph=height*.09*(.6+.8*v.strength);const sx=Math.max(0,Math.min(width-pw,px-pw/2)),sy=Math.max(0,Math.min(height-ph,py-ph/2));const dx=v.vx*width*.040*amount*v.strength*protect,dy=v.vy*height*.055*amount*v.strength*protect;fx.drawImage(scratch,sx,sy,pw,ph,sx+dx,sy+dy,pw,ph);}
+  fx.restore();preserveCreativeSubject(subject*amount);
+}
+function applyFlowRgbCreative(amount){
+  if(amount<=.02)return;const flow=updateOpticalFlow().field;if(!flow.length)return;snapshot();
+  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.035+.13*amount;
+  for(const [hue,sign] of [[110,1],[-120,-1]]){if('filter'in fx)fx.filter=`hue-rotate(${hue}deg) saturate(1.9)`;for(const v of flow.slice(0,28)){const pw=width*.08,ph=height*.10,px=v.x*width,py=v.y*height,sx=Math.max(0,Math.min(width-pw,px-pw/2)),sy=Math.max(0,Math.min(height-ph,py-ph/2));fx.drawImage(scratch,sx,sy,pw,ph,sx+sign*v.vx*width*.026*amount,sy+sign*v.vy*height*.035*amount,pw,ph);}}
+  fx.restore();
+}
+function applyTemporalRgbCreative(amount){
+  if(amount<=.02)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.16*amount;const shift=width*.007*amount;
+  if('filter'in fx)fx.filter='hue-rotate(115deg) saturate(2.0)';fx.drawImage(delayed(1),shift,0,width,height);
+  if('filter'in fx)fx.filter='hue-rotate(-125deg) saturate(2.0)';fx.drawImage(delayed(2),-shift,0,width,height);fx.restore();
+}
+function applyTemporalSmearCreative(amount){
+  if(amount<=.02)return;snapshot();const bands=18+Math.floor(amount*24),sh=height/bands;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.20*amount;
+  for(let i=0;i<bands;i++){const y=i*sh,src=(i%3===0)?delayed(2):(i%2?delayed(1):scratch),dx=Math.sin(i*.71+phase*2.7)*width*.025*amount;fx.drawImage(src,0,(y/height)*src.height,src.width,(sh/height)*src.height+1,dx,y,width,sh+1);}fx.restore();
+}
+function updateCreativeDepth(){
+  if(creativeDepthCache.frame>=0&&frameCounter-creativeDepthCache.frame<3)return creativeDepthCache;
+  const cols=16,rows=9,c=activeScene?.direction?.creative??{},sem=c.semantic??{},target=creativeTarget();
+  depthProbeCtx.clearRect(0,0,cols,rows);depthProbeCtx.drawImage(scratch,0,0,cols,rows);
+  let data;try{data=depthProbeCtx.getImageData(0,0,cols,rows).data;}catch(_){return creativeDepthCache;}
+  const cells=[],tx=Math.max(0,Math.min(cols-1,Math.floor((target.x/width)*cols))),ty=Math.max(0,Math.min(rows-1,Math.floor((target.y/height)*rows))),ti=(ty*cols+tx)*4,tr=data[ti],tg=data[ti+1],tb=data[ti+2],semSubject=Math.max(Number(sem.person??0),Number(sem.face??0),Number(sem.text??0)),radius=Math.max(.08,target.r/Math.min(width,height));
+  for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+    const i=(y*cols+x)*4,r=data[i],g=data[i+1],b=data[i+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b),sat=(mx-mn)/255,lum=(.2126*r+.7152*g+.0722*b)/255;
+    const nx=(x+.5)/cols,ny=(y+.5)/rows,dx=(nx-target.x/width),dy=(ny-target.y/height),rad=Math.hypot(dx,dy),colorDist=Math.hypot(r-tr,g-tg,b-tb)/441.673;
+    const proximity=Math.max(0,1-rad/(radius*1.35)),subject=proximity*(.36+.64*Math.max(0,1-colorDist*1.35))*(.35+.65*semSubject);
+    // 0 is near and 1 is far. Perspective, image contrast, focal-region
+    // continuity and scene semantics form a cheap content-derived depth proxy.
+    let depth=.18+.56*(1-ny)+.10*(1-sat)+.06*(1-lum);
+    if(semSubject>.05)depth-=subject*.48;
+    if(Number(sem.sky??0)>.1&&ny<.48)depth+=.16*Number(sem.sky);
+    if(Number(sem.architecture??0)>.1)depth+=.05*Math.abs(nx-.5)*Number(sem.architecture);
+    cells.push({x,y,depth:Math.max(0,Math.min(1,depth)),lum,sat,subject:Math.max(0,Math.min(1,subject))});
+  }
+  creativeDepthCache={frame:frameCounter,cells,cols,rows};return creativeDepthCache;
+}
+function applyDepthParallaxCreative(amount){
+  if(amount<=.02)return;snapshot();const c=activeScene?.direction?.creative??{},target=creativeTarget(),map=updateCreativeDepth();
+  const dirX=Number(c.camera_drift_x??0),dirY=Number(c.camera_drift_y??0),cw=width/map.cols,ch=height/map.rows;fx.save();fx.globalAlpha=.09+.25*amount;
+  for(const cell of map.cells){const d=(cell.depth-.50)*amount,focus=1-Math.min(1,Math.hypot((cell.x+.5)*cw-target.x,(cell.y+.5)*ch-target.y)/(Math.min(width,height)*.55));const dx=(dirX*.74+Math.sin(phase*.3+cell.y*.51+cell.x*.13)*.26)*width*.034*d,dy=(dirY*.64+Math.cos(phase*.27+cell.x*.37)*.18)*height*.024*d,expand=1+.026*amount*Math.abs(d)+.008*amount*focus;const sx=cell.x*cw,sy=cell.y*ch,dw=cw*expand,dh=ch*expand;fx.drawImage(scratch,sx,sy,cw+1,ch+1,sx+dx-(dw-cw)/2,sy+dy-(dh-ch)/2,dw+1,dh+1);}
+  fx.restore();preserveCreativeSubject((c.subject_preserve??0)*amount);
+  const fog=Number(c.depth_fog??0)*amount;if(fog>.02){const g=fx.createLinearGradient(0,0,0,height);g.addColorStop(0,`rgba(205,225,255,${.04+.13*fog})`);g.addColorStop(.55,'rgba(180,205,235,0)');g.addColorStop(1,'rgba(0,0,0,0)');fx.save();fx.globalCompositeOperation='screen';fx.fillStyle=g;fx.fillRect(0,0,width,height);fx.restore();}
+}
+function applyBackgroundWarpCreative(amount){
+  if(amount<=.02)return;snapshot();const {x,y,r}=creativeTarget(),c=activeScene?.direction?.creative??{};fx.save();
+  // Two broad displaced passes move the environment while the subject region is restored.
+  fx.globalCompositeOperation='screen';fx.globalAlpha=.045+.17*amount;const dx=Math.sin(phase*.8)*width*.020*amount,dy=Math.cos(phase*.67)*height*.014*amount;fx.drawImage(scratch,dx,dy,width,height);fx.drawImage(scratch,-dx*.65,-dy*.65,width,height);fx.restore();preserveCreativeSubject((c.subject_preserve??0)*amount);
+}
+function applyRecursiveFeedbackCreative(amount){
+  if(amount<=.02)return;const c=activeScene?.direction?.creative??{},target=creativeTarget(),scale=1+Number(c.feedback_scale??.004)*(.35+.9*amount),rot=Number(c.feedback_rotation??0)*Math.PI/180*amount;
+  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.025+.13*amount;fx.translate(target.x,target.y);fx.rotate(rot);fx.scale(scale,scale);fx.translate(-target.x,-target.y);fx.drawImage(history,0,0,width,height);fx.restore();
+}
+function applyLocalSymmetryCreative(amount){
+  if(amount<=.025)return;snapshot();const c=activeScene?.direction?.creative??{},target=creativeTarget(),segments=Math.max(2,Math.min(12,Number(c.symmetry_segments??4))),radius=Math.min(width,height)*(.13+.16*amount),step=Math.PI*2/segments;
+  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.035+.12*amount;fx.beginPath();fx.arc(target.x,target.y,radius*1.15,0,Math.PI*2);fx.clip();
+  for(let i=0;i<segments;i++){fx.save();fx.translate(target.x,target.y);fx.rotate(i*step+phase*.015*amount);if(i%2)fx.scale(-1,1);const sc=1+.025*Math.sin(phase*.23+i);fx.scale(sc,sc);fx.translate(-target.x,-target.y);fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  fx.restore();
+}
+function applySourceTextureCreative(bloomAmount,streakAmount){
+  if(bloomAmount<=.02&&streakAmount<=.02)return;snapshot();
+  if(bloomAmount>.02){fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.035+.16*bloomAmount;if('filter'in fx)fx.filter=`brightness(${1.25+.55*bloomAmount}) contrast(${1.15+.55*bloomAmount}) blur(${2+8*bloomAmount}px)`;fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  if(streakAmount>.02){posterCtx.clearRect(0,0,posterCanvas.width,posterCanvas.height);if('filter'in posterCtx)posterCtx.filter=`brightness(${1.35+.7*streakAmount}) contrast(${1.7+.8*streakAmount})`;posterCtx.drawImage(scratch,0,0,posterCanvas.width,posterCanvas.height);posterCtx.filter='none';fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.025+.11*streakAmount;const strips=14;for(let i=0;i<strips;i++){const sx=i*posterCanvas.width/strips,sw=Math.max(1,posterCanvas.width/strips*.55),dx=i*width/strips+Math.sin(i+phase*.4)*width*.012*streakAmount;fx.drawImage(posterCanvas,sx,0,sw,posterCanvas.height,dx,0,width/strips*(.55+.7*streakAmount),height);}fx.restore();}
+}
+function applyPaletteCreative(amount){
+  if(amount<=.02)return;const palette=activeScene?.direction?.color?.palette??[];if(!palette.length)return;const target=creativeTarget();const g=fx.createLinearGradient(target.x-width*.35,target.y-height*.25,target.x+width*.45,target.y+height*.30);const usable=palette.slice(0,Math.min(5,palette.length));usable.forEach((color,i)=>g.addColorStop(i/Math.max(1,usable.length-1),color));fx.save();fx.globalCompositeOperation='soft-light';fx.globalAlpha=.025+.14*amount;fx.fillStyle=g;fx.fillRect(0,0,width,height);fx.restore();
+}
+function heroEnvelope(){
+  const c=activeScene?.direction?.creative??{},amount=Number(c.hero_amount??0);if(!c.hero_kind||amount<=0)return 0;const p=directedProgress(),a=Number(c.hero_start??0),b=Number(c.hero_end??1);if(p<a||p>b)return 0;const q=(p-a)/Math.max(1e-6,b-a),attack=Math.min(1,q/.16),release=Math.min(1,(1-q)/.22);const smooth=x=>x*x*(3-2*x);return amount*Math.min(smooth(attack),smooth(release));
+}
+function applyHeroCreative(){
+  const c=activeScene?.direction?.creative??{},a=heroEnvelope();if(a<=.02)return;
+  switch(c.hero_kind){
+    case'subject_echo':applyTemporalSmearCreative(.55*a);applyTemporalRgbCreative(.38*a);preserveCreativeSubject(Math.min(1,(c.subject_preserve??.6)+.25)*a);break;
+    case'flow_melt':applyFlowWarpCreative(.92*a);applyTemporalSmearCreative(.55*a);applyFlowRgbCreative(.35*a);break;
+    case'depth_burst':applyDepthParallaxCreative(.92*a);applyRecursiveFeedbackCreative(.58*a);break;
+    case'recursive_portal':applyLocalSymmetryCreative(.78*a);applyRecursiveFeedbackCreative(.82*a);applySourceTextureCreative(.42*a,.26*a);break;
+    case'time_prism':default:applyTemporalRgbCreative(.68*a);applyTemporalSmearCreative(.48*a);applyLocalSymmetryCreative(.40*a);applyBlockDisplace(.26*a);break;
+  }
+}
+
 function applyDirectedColor(){
   const dir=activeScene?.direction;if(!dir)return;
   const color=dir.color??{},hue=automationValue('hue',color.hue_shift_degrees??0);
@@ -1142,6 +1285,21 @@ function applyPostFx(){
   const motionTrails=Math.min(1,((t.motion_trails??0)+motionTrailFx)*trails);
   const sliceRecursion=Math.min(1,((t.slice_recursion??0)+sliceRecursionFx)*motion);
 
+  const creative=activeScene?.direction?.creative??{};
+  const creativeFlow=Math.min(1,creativeValue('flow_warp',creative.flow_warp??0)*motion);
+  const creativeFlowTrails=Math.min(1,creativeValue('flow_trails',creative.flow_trails??0)*trails);
+  const creativeFlowRgb=Math.min(1,creativeValue('flow_rgb',creative.flow_rgb??0)*glitchScale);
+  const creativeTemporal=Math.min(1,creativeValue('temporal_echo',creative.temporal_echo??0)*trails);
+  const creativeTemporalRgb=Math.min(1,creativeValue('temporal_rgb',creative.temporal_rgb??0)*trails);
+  const creativeSmear=Math.min(1,creativeValue('temporal_smear',creative.temporal_smear??0)*trails);
+  const creativeDepth=Math.min(1,creativeValue('depth_parallax',creative.depth_parallax??0)*motion);
+  const creativeBackground=Math.min(1,creativeValue('background_warp',creative.background_warp??0)*motion);
+  const creativeFeedback=Math.min(1,creativeValue('feedback',creative.feedback??0)*trails);
+  const creativeSymmetry=Math.min(1,creativeValue('local_symmetry',creative.local_symmetry??0)*motion);
+  const creativeBloom=Math.min(1,creativeValue('texture_bloom',creative.texture_bloom??0)*m);
+  const creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion);
+  const creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m);
+
   // Directed color happens on the composed video, then temporal processing
   // evolves continuously over the shot rather than toggling static filters.
   applyDirectedColor();
@@ -1151,6 +1309,22 @@ function applyPostFx(){
 
   // Capture the pre-temporal frame before time-based effects mutate it.
   captureDelayFrame();
+
+  // v0.33 creative-state pipeline: source-derived and semantic-aware effects run
+  // before legacy punctuation FX, so later glitches can accent rather than erase them.
+  applyPaletteCreative(creativePalette);
+  applySourceTextureCreative(creativeBloom,creativeStreaks);
+  applyDepthParallaxCreative(creativeDepth);
+  applyBackgroundWarpCreative(creativeBackground);
+  applyFlowWarpCreative(creativeFlow);
+  applyFlowRgbCreative(creativeFlowRgb);
+  applyTemporalSmearCreative(creativeSmear);
+  applyTemporalRgbCreative(creativeTemporalRgb);
+  applyMotionTrails(creativeFlowTrails*.78);
+  applyFrameEcho(creativeTemporal*.70);
+  applyLocalSymmetryCreative(creativeSymmetry);
+  applyRecursiveFeedbackCreative(creativeFeedback);
+  applyHeroCreative();
 
   applyShutter(shutter);
   applyBeatWarp(beatWarpFx,beatLow,beatMid,beatHigh);

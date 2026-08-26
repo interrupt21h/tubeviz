@@ -14,7 +14,7 @@ from typing import Any, Callable
 from .library import ClipLibrary
 from .settings import UserSettings, load_settings
 
-PROMPT_VERSION = "tubeviz-storyboard-v1"
+PROMPT_VERSION = "tubeviz-storyboard-v2"
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,11 @@ def _request_analysis(details: dict[str, Any], samples: list[tuple[dict[str, Any
         "actions, settings, camera, palette, lighting, textures, moods, semantic_tags (arrays of strings); "
         "editing_utility containing energy, motion, complexity, continuity, build_fit, drop_fit, ambient_fit "
         "(numbers 0..1); risks (array); and scenes, one per supplied scene, containing scene_index, description, "
-        "semantic_tags, energy, motion, complexity, build_fit, drop_fit, ambient_fit. Preserve scene_index values."
+        "semantic_tags, energy, motion, complexity, build_fit, drop_fit, ambient_fit, focal_point as an object "
+        "{x,y} with normalized 0..1 coordinates for the most visually important subject/region, subject_scale "
+        "as a 0..1 estimate of how much of the frame the primary subject occupies, depth_hint as one of "
+        "flat/layered/deep, and foreground/background arrays naming the visibly dominant regions. Preserve "
+        "scene_index values. Estimate composition from the actual pixels; do not infer unseen objects from titles."
     )}]
     for scene, path in samples:
         content.append({"type": "input_text", "text": f"Scene {scene['index']} at {float(scene['start']):.2f}s:"})
