@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
-.trim-modal{max-height:95vh;overflow:auto}.trim-modal video{max-height:55vh}
+.trim-modal{max-height:95vh;overflow:auto}.trim-modal video{max-height:52vh}.trim-modal .trim-editor{margin-top:8px}.trim-modal .clip-ai-panel{margin-top:14px}
 .clip-ai-card-summary{margin:9px 0;padding:9px;border:1px solid #253746;border-radius:7px;background:#101923}.clip-ai-card-summary p{font-size:11px;line-height:1.4;color:#c9d7e2}
 .ai-chip-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.ai-chip{padding:3px 6px;border-radius:999px;background:#173346;color:#9ee8ff;font-size:10px}.ai-chip.mood{background:#35284a;color:#d8c0ff}
 .clip-ai-panel{margin-top:14px;border:1px solid #285067;border-radius:10px;background:linear-gradient(145deg,#0d1b25,#0a1118);padding:15px}.clip-ai-panel.hidden{display:none}.clip-ai-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.clip-ai-head p{color:#d3e0e8;font-size:13px;line-height:1.5;margin-top:5px}

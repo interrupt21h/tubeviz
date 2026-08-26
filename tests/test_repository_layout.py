@@ -35,3 +35,21 @@ def test_readme_tab_screenshots_live_in_screenshots_directory():
         assert path.is_file()
         assert f"screenshots/{name}" in readme
     assert "![tubeviz screenshot](screenshot.png)" not in readme
+
+
+def test_screenshot_helper_supports_library_item_details():
+    script = Path("scripts/screenshot_studio.py").read_text()
+    readme = Path("README.md").read_text()
+    assert '"library-details"' in script
+    assert '"--clip-match"' in script
+    assert '"--clip-index"' in script
+    assert '"--clip-time"' in script
+    assert '"--full-details"' in script
+    assert '"--viewport-details"' in script
+    assert 'if not args.viewport_details:' in script
+    assert 'body > main' in script
+    assert 'max-height: none !important' in script
+    assert 'dimensions["clientHeight"] + 2 < dimensions["scrollHeight"]' in script
+    assert "screenshots/screenshot-library-details.png" in readme
+    assert "--tab library-details" in readme
+    assert "full-height capture is now the default" in readme

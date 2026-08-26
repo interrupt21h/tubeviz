@@ -1,3 +1,31 @@
+# 0.33.4 — Robust Library card actions
+
+- Fix Library **Play / Trim** buttons for clips whose titles contain double quotes or other characters that can terminate an inline HTML event-handler attribute. The visible failure happened on the quoted `She said:"..."` clip, making the bug look position-dependent.
+- Remove dynamic clip titles, source IDs, and source names from inline JavaScript handlers on Library cards. Card actions now carry only a stable numeric `data-clip-index` and are dispatched through delegated `click`/`change` listeners.
+- Apply the same safe dispatch path to Play / Trim, Reject/Restore, Edit tags, Delete, and output-pool toggles so user/YouTube metadata cannot corrupt card event bindings.
+- Add a Studio regression test that forbids reintroducing inline dynamic clip-action handlers.
+
+# 0.33.3 — Complete Library-detail screenshots
+
+- Make `--tab library-details` capture the complete Library inspector by default, including all content below the modal's normal internal scrollbar.
+- Fix full-detail capture structurally rather than by viewport size: the screenshot helper temporarily hides the underlying Studio chrome, returns the fixed modal overlay to normal document flow, removes the inspector max-height/overflow constraints, and lets the expanded inspector determine the full-page image height.
+- Add a pre-capture clipping assertion comparing the inspector's `clientHeight` and `scrollHeight`, so future CSS changes fail loudly instead of silently producing a truncated documentation screenshot.
+- Add `--viewport-details` for callers that explicitly want the normal scrollable on-screen presentation. Retain `--full-details` as a backward-compatible v0.33.2 flag; full-height mode no longer requires it.
+
+# 0.33.2 — Library-detail screenshot capture
+
+- Extend `scripts/screenshot_studio.py` with a first-class `--tab library-details` target that opens the Library, chooses a playable clip, opens its Play / Trim inspector, waits for trim/detail initialization, pauses playback on a representative frame, and captures the modal.
+- Add `--clip-match` and `--clip-index` for deterministic clip selection, `--clip-time` for an exact captured playhead position, and `--full-details` for a full-height inspector capture including the complete AI metadata panel.
+- Add a configurable `--height` viewport option while retaining the existing 1920×1080 defaults.
+- Emit clear errors when no playable clip matches instead of silently capturing the Library grid.
+- Document Library-detail screenshot examples in the README.
+
+# 0.33.1 — Library trim workflow
+
+- Move the non-destructive In/Out editor directly below the clip video in the Library detail modal, ahead of the much taller AI visual-analysis panel.
+- Slightly reduce the modal video maximum height so the video, trim timeline, endpoint readouts, and primary trim controls remain visible together on typical desktop displays.
+- Add a Studio regression test that locks the clip-detail ordering to video → In/Out editor → AI metadata.
+
 # 0.33.0 — Semantic temporal creative renderer
 
 - Added a first-class `CreativeEffectPlan` to every directed shot. The plan is a coherent visual state with independent automation curves rather than another collection of random per-frame filters.

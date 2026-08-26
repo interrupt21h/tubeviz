@@ -611,29 +611,29 @@ async function loadClips(){
       :"All ready clips are eligible; marking any clip activates the temporary pool";
     setStats($("libraryStats"),data.stats);
     if(!data.clips.length){grid.innerHTML="<p>No clips matched.</p>";return}
-    grid.innerHTML=data.clips.map(c=>{
+    grid.innerHTML=data.clips.map((c,index)=>{
       const enc=encodeURIComponent(c.source_id);
       const lp=encodeURIComponent(value("libraryPath"));
       const rejected=c.status==="rejected_manual";
       const tags=(c.tags||[]).map(tag=>`<span class="clip-tag">${escapeHtml(tag)}</span>`).join("");
-      return `<div class="clip${c.output_selected?" output-selected":""}">
+      return `<div class="clip${c.output_selected?" output-selected":""}" data-clip-index="${index}">
         <img loading="lazy" src="/api/gui/clip/${enc}/thumbnail?library=${lp}" onerror="this.style.opacity=.15">
         <div class="clip-body">
-          <label class="clip-output-toggle"><input type="checkbox" ${c.output_selected?"checked":""} ${c.status!=="ready"?"disabled":""} onchange="toggleOutputClip(${c.id},this.checked)"> Use in output pool</label>
+          <label class="clip-output-toggle"><input type="checkbox" data-clip-action="toggle-output" data-clip-index="${index}" ${c.output_selected?"checked":""} ${c.status!=="ready"?"disabled":""}> Use in output pool</label>
           <div class="clip-title">${escapeHtml(c.title||c.source_id)}</div>
-          <div class="clip-meta">${escapeHtml(c.source_id)} · ${c.status} · ${c.scene_count} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"} ${c.ai_enhanced?'· AI described':''}</div>
+          <div class="clip-meta">${escapeHtml(c.source_id)} · ${escapeHtml(c.status)} · ${Number(c.scene_count)||0} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"} ${c.ai_enhanced?'· AI described':''}</div>
           ${c.ai_metadata?`<div class="clip-ai-card-summary"><p>${escapeHtml(c.ai_metadata.summary||"AI visual metadata attached")}</p><div class="ai-chip-row">${aiChips(c.ai_metadata.semantic_tags)}${aiChips(c.ai_metadata.moods,"mood")}</div></div>`:""}
           <div class="clip-tags">${tags||'<span class="clip-tag empty">no tags</span>'}</div>
           ${(c.usable_start!=null||c.usable_end!=null)?`<div class="clip-trim-badge">trimmed ${formatTime(c.usable_start??0)} → ${formatTime(c.usable_end??c.duration??0)}</div>`:""}
           <div class="clip-actions">
             ${c.media_available
-              ?`<button onclick="playClip('${jsq(c.source_id)}','${jsq(c.source)}','${jsq(c.title||c.source_id)}')">Play / Trim</button>`
-              :`<button disabled title="No playable local media">No media</button>`}
+              ?`<button type="button" data-clip-action="play" data-clip-index="${index}">Play / Trim</button>`
+              :`<button type="button" disabled title="No playable local media">No media</button>`}
             ${rejected
-              ?`<button onclick="restoreClip('${jsq(c.source_id)}')">Restore</button>`
-              :`<button onclick="rejectClip('${jsq(c.source_id)}')">Reject</button>`}
-            <button onclick="editClipTags('${jsq(c.source_id)}','${jsq(c.source)}')">Edit tags</button>
-            <button class="danger" onclick="deleteClip('${jsq(c.source_id)}')">Delete</button>
+              ?`<button type="button" data-clip-action="restore" data-clip-index="${index}">Restore</button>`
+              :`<button type="button" data-clip-action="reject" data-clip-index="${index}">Reject</button>`}
+            <button type="button" data-clip-action="edit-tags" data-clip-index="${index}">Edit tags</button>
+            <button type="button" class="danger" data-clip-action="delete" data-clip-index="${index}">Delete</button>
           </div>
         </div>
       </div>`;
@@ -654,6 +654,31 @@ window.editClipTags=async(id,source)=>{
   await api(`/api/gui/clip/${encodeURIComponent(id)}/tags`,{method:"POST",body:JSON.stringify({library:value("libraryPath"),source,tags})});
   await loadClips();
 };
+
+function clipForActionElement(element){
+  const index=Number(element?.dataset?.clipIndex);
+  if(!Number.isInteger(index)||index<0||index>=libraryClips.length)return null;
+  return libraryClips[index]||null;
+}
+$("clipGrid").addEventListener("click",event=>{
+  const button=event.target.closest("button[data-clip-action]");
+  if(!button||!$("clipGrid").contains(button))return;
+  const clip=clipForActionElement(button);
+  if(!clip)return;
+  switch(button.dataset.clipAction){
+    case "play": playClip(clip.source_id,clip.source,clip.title||clip.source_id); break;
+    case "restore": restoreClip(clip.source_id); break;
+    case "reject": rejectClip(clip.source_id); break;
+    case "edit-tags": editClipTags(clip.source_id,clip.source); break;
+    case "delete": deleteClip(clip.source_id); break;
+  }
+});
+$("clipGrid").addEventListener("change",event=>{
+  const input=event.target.closest('input[data-clip-action="toggle-output"]');
+  if(!input||!$("clipGrid").contains(input))return;
+  const clip=clipForActionElement(input);
+  if(clip)toggleOutputClip(clip.id,input.checked);
+});
 $("selectVisible").onclick=()=>updateOutputSelection({clip_ids:libraryClips.filter(c=>c.status==="ready").map(c=>c.id),selected:true});
 $("unselectVisible").onclick=()=>updateOutputSelection({clip_ids:libraryClips.filter(c=>c.status==="ready").map(c=>c.id),selected:false});
 $("selectTag").onclick=()=>{const tag=value("tagFilter");if(tag)return updateOutputSelection({tag,selected:true});alert("Choose a tag first.")};

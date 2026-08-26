@@ -67,3 +67,27 @@ def test_live_job_logs_only_auto_follow_when_user_is_at_bottom():
     assert '?tail=4000' in js
     assert '$("jobLog").scrollTop=$("jobLog").scrollHeight' not in js
     assert '$("commandJobLog").scrollTop=$("commandJobLog").scrollHeight' not in js
+
+
+def test_clip_trim_editor_is_directly_below_video_before_ai_metadata():
+    html = _static("gui.html")
+    video = html.index('<video id="modalVideo"')
+    trim = html.index('<div class="trim-editor">')
+    ai = html.index('<section id="clipAiMetadata"')
+    assert video < trim < ai
+
+
+
+def test_library_card_actions_do_not_embed_clip_text_in_inline_handlers():
+    js = _static("gui.js")
+    assert 'data-clip-action="play"' in js
+    assert 'data-clip-action="reject"' in js
+    assert 'data-clip-action="edit-tags"' in js
+    assert 'data-clip-action="delete"' in js
+    assert 'button[data-clip-action]' in js
+    assert 'playClip(clip.source_id,clip.source,clip.title||clip.source_id)' in js
+    assert 'onclick="playClip(' not in js
+    assert 'onclick="rejectClip(' not in js
+    assert 'onclick="restoreClip(' not in js
+    assert 'onclick="editClipTags(' not in js
+    assert 'onclick="deleteClip(' not in js
