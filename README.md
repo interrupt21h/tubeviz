@@ -12,6 +12,8 @@ rendering a final encoded video.
 
 Complete videos produced with tubeviz:
 
+- [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
+- [Tubeviz - Night Tapes - Drifting](https://youtu.be/Z5qFih1OKeo)
 - [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
 - [Tubeviz — Step It Up — Stereo MC's](https://youtu.be/nrYzxJzPYbE)
 
