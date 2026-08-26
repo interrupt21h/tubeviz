@@ -1,3 +1,19 @@
+# 0.31.1 — Visible AI library intelligence
+
+- Show an AI-generated visual summary plus semantic and mood tags directly on each enhanced Library card.
+- Add a structured AI analysis panel to the clip playback/trim viewer with subjects, actions, settings, camera language, palette, lighting, textures, risks, and normalized editing-utility meters.
+- Align per-scene AI descriptions with detected scene timestamps and make scene rows seek the video for rapid verification.
+- Retain the complete raw analysis in an expandable diagnostic view and add per-clip re-analysis from the inspector.
+- Keep list responses compact by exposing only a curated AI summary while returning the complete metadata from the existing clip-detail endpoint.
+
+# 0.31.0 — Persistent video-understanding workflow
+
+- Add centralized, persistent AI settings and secure OpenAI/Hugging Face credential management.
+- Add cached OpenAI storyboard descriptions for new and existing library clips.
+- Integrate clip context and scene editing-utility metadata into final semantic scene selection.
+- Add Studio and CLI library backfill workflows with per-clip progress.
+- Migrate existing libraries in place to schema v7 without rewriting media.
+
 # 0.30.3 — Structured download progress
 
 - Connect yt-dlp's Python `progress_hooks` API to Tubeviz ingest progress.

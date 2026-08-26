@@ -26,6 +26,7 @@ from . import __version__
 from .library import ClipLibrary
 from .native_render import native_doctor
 from .codec_glitch import codec_doctor
+from .settings import load_settings, save_settings
 
 
 class JobRequest(BaseModel):
@@ -68,6 +69,20 @@ class OutputSelectionAction(BaseModel):
     selected: bool = True
 
 
+class AISettingsAction(BaseModel):
+    ai_enabled: bool = True
+    vision_enabled: bool = False
+    openai_api_key: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_vision_model: str = "gpt-5.1"
+    vision_detail: str = "low"
+    vision_max_frames: int = 12
+    vision_timeout_seconds: int = 180
+    hf_token: str | None = None
+    clear_openai_key: bool = False
+    clear_hf_token: bool = False
+
+
 @dataclass
 class GuiJob:
     id: str
@@ -95,6 +110,7 @@ class GuiJob:
             return
         lower = text.lower()
         stage_rules = (
+            ("ai describe", "Understanding video content"),
             ("search", "Discovering footage"), ("preview", "Evaluating previews"),
             ("download", "Downloading media"), ("normalize", "Normalizing media"),
             ("visual feature", "Indexing visual features"), ("embedded", "Embedding scenes"),
@@ -573,6 +589,13 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--force", o.get("force", False), boolean=True)
         return command
 
+    if kind == "ai-describe":
+        command = _tubeviz_command("library", "ai-describe", "--library", library)
+        _flag(command, "--clip-id", o.get("clip_id"))
+        _flag(command, "--limit", o.get("limit", 0))
+        _flag(command, "--force", o.get("force", False), boolean=True)
+        return command
+
     if kind == "codec-doctor":
         return _tubeviz_command("codec", "doctor")
 
@@ -686,6 +709,18 @@ def create_gui_app(
                 "source": "environment" if (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")) else None,
             },
         }
+
+    @app.get("/api/gui/ai-settings")
+    async def get_ai_settings() -> dict[str, Any]:
+        return load_settings().public_dict()
+
+    @app.post("/api/gui/ai-settings")
+    async def update_ai_settings(action: AISettingsAction) -> dict[str, Any]:
+        changes = action.model_dump(exclude={"clear_openai_key", "clear_hf_token"})
+        result = save_settings(
+            changes, clear_openai=action.clear_openai_key, clear_hf=action.clear_hf_token
+        )
+        return result.public_dict()
 
     @app.get("/api/gui/library")
     async def library_state(
@@ -901,6 +936,14 @@ def create_gui_app(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         env_overrides: dict[str, str] = {}
+        settings = load_settings()
+        env_overrides["TUBEVIZ_AI_ENABLED"] = "1" if settings.ai_enabled else "0"
+        if settings.effective_openai_key():
+            env_overrides["OPENAI_API_KEY"] = settings.effective_openai_key()
+            env_overrides["TUBEVIZ_LLM_API_KEY"] = settings.effective_openai_key()
+        if settings.effective_hf_token():
+            env_overrides["HF_TOKEN"] = settings.effective_hf_token()
+            env_overrides["HUGGING_FACE_HUB_TOKEN"] = settings.effective_hf_token()
         token = (request.hf_token or "").strip()
         if token:
             # HF_TOKEN is the canonical huggingface_hub override. Keep the

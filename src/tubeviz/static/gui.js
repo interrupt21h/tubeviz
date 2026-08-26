@@ -7,6 +7,7 @@ let cliSchema=null;
 let commandJobId=null;
 let commandPollTimer=null;
 let libraryClips=[];
+let aiSettings={ai_enabled:true,vision_enabled:false};
 
 function value(id){return $(id).value.trim()}
 function number(id){return Number($(id).value)}
@@ -190,14 +191,34 @@ async function init(){
   $("nativeBadge").textContent=ok?`native: ${n.renderer.split("/").pop()}`:"native: not built";
   $("nativeBadge").classList.add(ok?"ok":"warn");
   if(cfg.codec?.available){$("nativeBadge").textContent+=` · FFglitch ready`;}
-  const hfEnv=!!cfg.huggingface?.token_from_env;
-  $("hfToken").dataset.envAvailable=hfEnv?"1":"0";
-  $("hfTokenStatus").textContent=hfEnv?"HF_TOKEN available in server environment (value hidden)":"No Hugging Face token in server environment";
-  $("hfTokenStatus").classList.toggle("ok",hfEnv);
+  await loadAiSettings();
   await refreshLibrarySummary();
   loadClips();
   refreshJobs();
   loadCliSchema();
+}
+
+async function loadAiSettings(){
+  aiSettings=await api("/api/gui/ai-settings");
+  $("masterAiEnabled").checked=!!aiSettings.ai_enabled;
+  $("visionAiEnabled").checked=!!aiSettings.vision_enabled;
+  $("openaiBaseUrl").value=aiSettings.openai_base_url;
+  $("openaiVisionModel").value=aiSettings.openai_vision_model;
+  $("visionDetail").value=aiSettings.vision_detail;
+  $("visionMaxFrames").value=aiSettings.vision_max_frames;
+  $("visionTimeout").value=aiSettings.vision_timeout_seconds;
+  $("aiCredentialStatus").innerHTML=`<span class="credential-status ${aiSettings.openai_key_configured?'ok':''}">OpenAI key: ${aiSettings.openai_key_configured?'configured':'missing'}</span><span class="credential-status ${aiSettings.hf_token_configured?'ok':''}">HF token: ${aiSettings.hf_token_configured?'configured':'missing'}</span><span class="credential-status">Saved at ${escapeHtml(aiSettings.config_path)}</span>`;
+}
+
+async function saveAi(clearOpenai=false,clearHf=false){
+  aiSettings=await api("/api/gui/ai-settings",{method:"POST",body:JSON.stringify({
+    ai_enabled:checked("masterAiEnabled"),vision_enabled:checked("visionAiEnabled"),
+    openai_api_key:value("openaiApiKey")||null,hf_token:value("persistentHfToken")||null,
+    openai_base_url:value("openaiBaseUrl"),openai_vision_model:value("openaiVisionModel"),
+    vision_detail:value("visionDetail"),vision_max_frames:number("visionMaxFrames"),
+    vision_timeout_seconds:number("visionTimeout"),clear_openai_key:clearOpenai,clear_hf_token:clearHf
+  })});
+  $("openaiApiKey").value="";$("persistentHfToken").value="";await loadAiSettings();
 }
 
 document.querySelectorAll(".tab").forEach(btn=>btn.onclick=()=>{
@@ -265,12 +286,12 @@ $("analyzeBtn").onclick=()=>{
   audio:value("audioPath")||null,
   output:value("timelinePath")||"timeline.json",
   options:{
-    semantic:checked("semantic"),semantic_device:value("semanticDevice"),
-    audio_ai:checked("audioAi"),audio_ai_device:value("audioAiDevice"),
-    music_ai:checked("musicAi"),music_ai_device:value("musicAiDevice"),music_ai_model:value("musicAiModel"),
+    semantic:aiSettings.ai_enabled&&checked("semantic"),semantic_device:value("semanticDevice"),
+    audio_ai:aiSettings.ai_enabled&&checked("audioAi"),audio_ai_device:value("audioAiDevice"),
+    music_ai:aiSettings.ai_enabled&&checked("musicAi"),music_ai_device:value("musicAiDevice"),music_ai_model:value("musicAiModel"),
     audio_ai_window:number("audioAiWindow"),audio_ai_hop:number("audioAiHop"),
     audio_visual_match_weight:number("audioVisualWeight"),
-    ai_director:checked("aiDirector"),ai_director_base_url:value("aiDirectorUrl")||null,
+    ai_director:aiSettings.ai_enabled&&checked("aiDirector"),ai_director_base_url:value("aiDirectorUrl")||null,
     ai_director_model:value("aiDirectorModel")||null,ai_director_api_key:value("aiDirectorApiKey")||null,
     ai_director_strength:number("aiDirectorStrength"),
     section_bars:number("sectionBars"),max_video_layers:number("maxLayers"),
@@ -306,7 +327,7 @@ $("ingestBtn").onclick=()=>startJob("ingest",{
   options:{
     results_per_term:number("resultsPerTerm"),hard_max_duration:number("hardMaxDuration"),
     min_source_height:number("minSourceHeight"),max_source_height:number("maxSourceHeight"),
-    cookies_from_browser:value("cookiesBrowser")||null,ai_discovery:checked("aiDiscovery"),
+    cookies_from_browser:value("cookiesBrowser")||null,ai_discovery:aiSettings.ai_enabled&&checked("aiDiscovery"),
     ai_device:value("aiDevice"),ai_candidates_per_term:number("aiCandidates"),
     ai_query_count:number("aiQueries"),acquisition_query_count:number("acquisitionQueries"),target_clips:number("targetClips"),
     ai_llm_base_url:value("aiLlmBaseUrl")||null,ai_llm_model:value("aiLlmModel")||null,
@@ -595,7 +616,8 @@ async function loadClips(){
         <div class="clip-body">
           <label class="clip-output-toggle"><input type="checkbox" ${c.output_selected?"checked":""} ${c.status!=="ready"?"disabled":""} onchange="toggleOutputClip(${c.id},this.checked)"> Use in output pool</label>
           <div class="clip-title">${escapeHtml(c.title||c.source_id)}</div>
-          <div class="clip-meta">${escapeHtml(c.source_id)} · ${c.status} · ${c.scene_count} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"}</div>
+          <div class="clip-meta">${escapeHtml(c.source_id)} · ${c.status} · ${c.scene_count} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"} ${c.ai_enhanced?'· AI described':''}</div>
+          ${c.ai_metadata?`<div class="clip-ai-card-summary"><p>${escapeHtml(c.ai_metadata.summary||"AI visual metadata attached")}</p><div class="ai-chip-row">${aiChips(c.ai_metadata.semantic_tags)}${aiChips(c.ai_metadata.moods,"mood")}</div></div>`:""}
           <div class="clip-tags">${tags||'<span class="clip-tag empty">no tags</span>'}</div>
           ${(c.usable_start!=null||c.usable_end!=null)?`<div class="clip-trim-badge">trimmed ${formatTime(c.usable_start??0)} → ${formatTime(c.usable_end??c.duration??0)}</div>`:""}
           <div class="clip-actions">
@@ -640,6 +662,38 @@ function formatTime(seconds){
   const value=Math.max(0,Number(seconds)||0),minutes=Math.floor(value/60),secs=value-minutes*60;
   return `${minutes}:${secs.toFixed(3).padStart(6,"0")}`;
 }
+function aiList(value){return Array.isArray(value)?value.filter(item=>item!=null&&String(item).trim()):[]}
+function aiText(value){
+  if(value==null)return "";
+  if(Array.isArray(value))return value.join(", ");
+  if(typeof value==="object")return Object.entries(value).map(([key,item])=>`${key.replaceAll("_"," ")}: ${Array.isArray(item)?item.join(", "):item}`).join(" · ");
+  return String(value);
+}
+function aiChips(values,kind=""){return aiList(values).map(value=>`<span class="ai-chip ${kind}">${escapeHtml(value)}</span>`).join("")}
+function aiGroup(title,value){const text=aiText(value);return text?`<div class="clip-ai-group"><h4>${escapeHtml(title)}</h4><p>${escapeHtml(text)}</p></div>`:""}
+function aiMetrics(utility={}){
+  return ["energy","motion","complexity","continuity","build_fit","drop_fit","ambient_fit"].filter(key=>Number.isFinite(Number(utility[key]))).map(key=>{
+    const score=Math.max(0,Math.min(1,Number(utility[key])));
+    return `<div class="ai-metric"><span>${escapeHtml(key.replaceAll("_"," "))} · ${score.toFixed(2)}</span><div class="ai-meter"><i style="width:${(score*100).toFixed(1)}%"></i></div></div>`;
+  }).join("");
+}
+function renderClipAiMetadata(details){
+  const panel=$("clipAiMetadata"),data=details.ai_description;
+  if(!data){panel.classList.add("hidden");panel.innerHTML="";return}
+  const scenesByIndex=new Map((details.scenes||[]).map(scene=>[Number(scene.index),scene]));
+  const sceneHtml=aiList(data.scenes).map(scene=>{
+    if(typeof scene!=="object")return "";
+    const indexed=scenesByIndex.get(Number(scene.scene_index));
+    const start=indexed?Number(indexed.start):null,end=indexed?Number(indexed.end):null;
+    const time=start==null?`scene ${scene.scene_index}`:`${formatTime(start)}–${formatTime(end)}`;
+    const score=["energy","motion","drop_fit"].filter(key=>Number.isFinite(Number(scene[key]))).map(key=>`${key.replace("_"," ")} ${Number(scene[key]).toFixed(2)}`).join(" · ");
+    return `<button class="ai-scene" type="button" ${start==null?"disabled":`onclick="seekTrim(${start})"`}><span class="ai-scene-time">${escapeHtml(time)}</span><span class="ai-scene-copy">${escapeHtml(scene.description||"No scene description")}<span class="ai-chip-row">${aiChips(scene.semantic_tags)}</span></span><span class="ai-scene-score">${escapeHtml(score)}</span></button>`;
+  }).join("");
+  const groups=[["Subjects",data.subjects],["Actions",data.actions],["Settings",data.settings],["Camera",data.camera],["Palette",data.palette],["Lighting",data.lighting],["Textures",data.textures],["Risks",data.risks]].map(([title,value])=>aiGroup(title,value)).join("");
+  panel.innerHTML=`<div class="clip-ai-head"><div><h3>AI visual analysis</h3><p>${escapeHtml(data.summary||"Structured visual metadata is attached to this clip.")}</p></div><button type="button" onclick="enhanceClipAi(${details.id})">Re-analyze clip</button></div><div class="ai-chip-row">${aiChips(data.semantic_tags)}${aiChips(data.moods,"mood")}</div><div class="clip-ai-grid">${groups}<div class="clip-ai-group"><h4>Editing utility</h4><div class="ai-metrics">${aiMetrics(data.editing_utility||{})}</div></div></div>${sceneHtml?`<div class="ai-scenes"><h4>Scene descriptions · click to seek</h4>${sceneHtml}</div>`:""}<details class="ai-raw"><summary>Raw AI metadata</summary><pre>${escapeHtml(JSON.stringify(data,null,2))}</pre></details>`;
+  panel.classList.remove("hidden");
+}
+window.enhanceClipAi=clipId=>startJob("ai-describe",{library:value("libraryPath"),options:{clip_id:clipId,force:true,limit:1}});
 function clampTrim(){
   if(!activeTrim)return;
   const duration=Math.max(.05,activeTrim.duration||Number($("modalVideo").duration)||0);
@@ -670,6 +724,7 @@ function seekTrim(value){
 async function initializeTrimEditor(id,source,title){
   const params=qs({library:value("libraryPath"),source});
   const details=await api(`/api/gui/clip/${encodeURIComponent(id)}?${params}`);
+  renderClipAiMetadata(details);
   const video=$("modalVideo");
   const setup=()=>{
     const duration=Number.isFinite(video.duration)&&video.duration>0?video.duration:Number(details.duration||0);
@@ -688,6 +743,7 @@ window.playClip=async(id,source,title)=>{
   $("modalTitle").textContent=title;
   $("trimStatus").textContent="Loading clip…";
   activeTrim=null;
+  $("clipAiMetadata").classList.add("hidden");$("clipAiMetadata").innerHTML="";
   const params=qs({library:value("libraryPath"),source});
   const video=$("modalVideo");
   video.src=`/api/gui/clip/${encodeURIComponent(id)}/media?${params}`;
@@ -798,6 +854,10 @@ window.watchJob=(id,kind)=>{
   }
 };
 $("refreshJobs").onclick=refreshJobs;
+$("saveAiSettings").onclick=()=>saveAi(false,false).catch(e=>{$("aiCredentialStatus").textContent=e.message});
+$("clearOpenAiKey").onclick=()=>saveAi(true,false).catch(e=>{$("aiCredentialStatus").textContent=e.message});
+$("clearPersistentHf").onclick=()=>saveAi(false,true).catch(e=>{$("aiCredentialStatus").textContent=e.message});
+$("enhanceLibraryAi").onclick=()=>startJob("ai-describe",{library:value("libraryPath"),options:{force:checked("forceAiDescribe"),limit:0}});
 $("loadClips").onclick=loadClips;
 $("statusFilter").onchange=loadClips;
 $("tagFilter").onchange=loadClips;

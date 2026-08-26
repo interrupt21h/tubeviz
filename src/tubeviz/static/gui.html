@@ -5,7 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.30.3">
+<link rel="stylesheet" href="/static/gui.css?v=0.31.1">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.31.1">
 </head>
 <body>
 <header>
@@ -19,6 +20,7 @@
 <nav>
   <button class="tab active" data-tab="create">Create</button>
   <button class="tab" data-tab="library">Library</button>
+  <button class="tab" data-tab="ai">AI Settings</button>
   <button class="tab" data-tab="command">Command Center</button>
   <button class="tab" data-tab="jobs">Jobs</button>
 </nav>
@@ -37,20 +39,7 @@
         <button id="previewBtn">Start Preview</button>
       </div>
       <div id="projectStats" class="stats"></div>
-      <details class="settings-group">
-        <summary>AI credentials</summary>
-        <div class="settings-body">
-          <label class="field-label" for="hfToken">Hugging Face token</label>
-          <div class="secret-input-row">
-            <input id="hfToken" type="password" autocomplete="off" spellcheck="false" placeholder="Optional session token; blank uses HF_TOKEN from environment">
-            <button id="toggleHfToken" type="button" class="secret-toggle" aria-pressed="false">Show typed token</button>
-          </div>
-          <div class="credential-row">
-            <span id="hfTokenStatus" class="credential-status">Checking environment…</span>
-          </div>
-          <p class="card-note">The server-side <code>HF_TOKEN</code> value is never sent to the browser and cannot be revealed here. The Show button only reveals a token you typed into this field. A typed token is passed only to jobs launched from this Studio session.</p>
-        </div>
-      </details>
+      <input id="hfToken" type="hidden"><span id="hfTokenStatus" hidden></span><button id="toggleHfToken" hidden>Show typed token</button>
     </article>
 
     <article class="card workflow-card analyze-card">
@@ -87,7 +76,7 @@
         <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
         <label>AI director URL <input id="aiDirectorUrl" placeholder="http://localhost:8000/v1"></label>
         <label>AI director model <input id="aiDirectorModel" placeholder="local model name"></label>
-        <label>AI director API key <input id="aiDirectorApiKey" type="password" placeholder="optional for local endpoints"></label>
+        <input id="aiDirectorApiKey" type="hidden">
         <label class="slider-field">AI director strength <span class="slider-value" data-for="aiDirectorStrength"></span><input id="aiDirectorStrength" type="range" min="0" max="1" step=".05" value=".75"><span class="slider-scale"><span>off 0</span><b>recommended .55–.85</b><span>full 1</span></span></label>
       </div>
       <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
@@ -167,9 +156,9 @@
         <div class="settings-body">
           <label>OpenAI-compatible base URL <input id="aiLlmBaseUrl" placeholder="http://localhost:8000/v1"></label>
           <label>Model <input id="aiLlmModel" placeholder="your-model-name"></label>
-          <label class="field-label" for="aiLlmApiKey">API key (optional)</label>
+          <label class="field-label" for="aiLlmApiKey" hidden>API key (configured in AI Settings)</label>
           <div class="secret-input-row">
-            <input id="aiLlmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="Optional; passed only to the child process">
+            <input id="aiLlmApiKey" type="hidden">
             <button id="toggleAiLlmKey" type="button" class="secret-toggle" aria-pressed="false">Show typed key</button>
           </div>
           <p class="card-note">If URL/model are blank, Tubeviz uses its deterministic short-query planner. API keys are passed via <code>TUBEVIZ_LLM_API_KEY</code>, never in argv/job history.</p>
@@ -239,6 +228,35 @@ https://youtu.be/..."></textarea>
       <div id="jobTiming" class="job-progress-timing"></div>
     </div>
     <pre id="jobLog">No active job.</pre>
+  </article>
+</section>
+
+<section id="ai" class="panel">
+  <article class="card ai-settings-card">
+    <div class="card-kicker">CENTRAL CONFIGURATION</div><h2>AI Settings</h2>
+    <p class="card-note">These settings apply to ingest, library enhancement, analysis, and final scene selection. They persist in your user home directory; the server-side <code>HF_TOKEN</code> value is never sent to the browser, and neither is the saved OpenAI key.</p>
+    <label class="check master-toggle"><input id="masterAiEnabled" type="checkbox" checked> Enable AI features throughout Tubeviz</label>
+    <label class="check"><input id="visionAiEnabled" type="checkbox"> Describe video storyboards with OpenAI during ingest</label>
+    <div class="grid two">
+      <label>OpenAI API key <input id="openaiApiKey" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+      <label>Hugging Face token <input id="persistentHfToken" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
+      <label>OpenAI base URL <input id="openaiBaseUrl" value="https://api.openai.com/v1"></label>
+      <label>Vision model <input id="openaiVisionModel" value="gpt-5.1"></label>
+      <label>Image detail <select id="visionDetail"><option value="low">low (faster/cheaper)</option><option value="high">high</option><option value="auto">auto</option></select></label>
+      <label>Storyboard frames per clip <input id="visionMaxFrames" type="number" min="2" max="50" value="12"></label>
+      <label>Request timeout (seconds) <input id="visionTimeout" type="number" min="10" max="900" value="180"></label>
+    </div>
+    <div id="aiCredentialStatus" class="credential-row"></div>
+    <div class="actions">
+      <button id="clearOpenAiKey">Clear OpenAI key</button><button id="clearPersistentHf">Clear HF token</button>
+      <button class="primary" id="saveAiSettings">Save AI Settings</button>
+    </div>
+  </article>
+  <article class="card">
+    <h2>Enhance Existing Library</h2>
+    <p>Analyze every ready clip that has no current cached description. Each request uses scene thumbnails sampled across the full clip. Existing media is not re-downloaded or rewritten.</p>
+    <label class="check"><input id="forceAiDescribe" type="checkbox"> Re-analyze clips even when the cached description is current</label>
+    <div class="actions"><button class="primary" id="enhanceLibraryAi">Enhance Existing Library</button></div>
   </article>
 </section>
 
@@ -328,6 +346,8 @@ https://youtu.be/..."></textarea>
     </div>
     <video id="modalVideo" controls autoplay></video>
 
+    <section id="clipAiMetadata" class="clip-ai-panel hidden" aria-live="polite"></section>
+
     <div class="trim-editor">
       <div class="trim-readout">
         <span>In <b id="trimInLabel">0:00.000</b></span>
@@ -358,6 +378,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.30.3"></script>
+<script src="/static/gui.js?v=0.31.1"></script>
 </body>
 </html>

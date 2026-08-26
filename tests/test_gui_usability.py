@@ -15,7 +15,8 @@ def test_hf_token_reveal_is_bound_before_async_init_and_env_secret_stays_hidden(
     assert 'input.type===\"text\"' in js
     assert 'Show typed token' in html
     assert 'server-side <code>HF_TOKEN</code> value is never sent to the browser' in html
-    assert 'value hidden' in js
+    assert 'hf_token_configured' in js
+    assert 'saved secrets are never returned' not in js  # status uses booleans, never values
 
 
 def test_manual_url_ingest_has_full_editor_and_collapsible_advanced_controls():

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,7 @@ class SceneCandidate:
     term: str | None
     term_rank: int | None
     visual_features: dict[str, Any] | None = None
+    ai_description: dict[str, Any] | None = None
 
 
 def utcnow() -> str:
@@ -68,6 +69,29 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
         while chunk := handle.read(chunk_size):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _ai_card_summary(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    utility = data.get("editing_utility") if isinstance(data.get("editing_utility"), dict) else {}
+    tags = data.get("semantic_tags") if isinstance(data.get("semantic_tags"), list) else []
+    moods = data.get("moods") if isinstance(data.get("moods"), list) else []
+    return {
+        "summary": str(data.get("summary") or "").strip(),
+        "semantic_tags": [str(value) for value in tags[:8]],
+        "moods": [str(value) for value in moods[:5]],
+        "editing_utility": {
+            key: utility.get(key) for key in (
+                "energy", "motion", "complexity", "continuity",
+                "build_fit", "drop_fit", "ambient_fit",
+            ) if isinstance(utility.get(key), (int, float))
+        },
+    }
 
 
 class ClipLibrary:
@@ -187,6 +211,24 @@ class ClipLibrary:
 
                 CREATE INDEX IF NOT EXISTS idx_scene_visual_features_version
                     ON scene_visual_features(version, scene_id);
+
+                CREATE TABLE IF NOT EXISTS clip_ai_descriptions (
+                    clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    cache_key TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS scene_ai_descriptions (
+                    scene_id INTEGER PRIMARY KEY REFERENCES scenes(id) ON DELETE CASCADE,
+                    clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                    data_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_scene_ai_clip ON scene_ai_descriptions(clip_id, scene_id);
 
                 CREATE TABLE IF NOT EXISTS tags (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -603,12 +645,14 @@ class ClipLibrary:
                 {end_expr} AS effective_end_time,
                 s.thumbnail_path, c.usable_start, c.usable_end,
                 c.source_id, c.title, c.description, c.channel, c.normalized_path,
-                st.term, ct.rank AS term_rank, svf.data_json AS visual_features_json
+                st.term, ct.rank AS term_rank, svf.data_json AS visual_features_json,
+                sai.data_json AS ai_description_json
             FROM scenes s
             JOIN clips c ON c.id=s.clip_id
             LEFT JOIN clip_terms ct ON ct.clip_id=c.id
             LEFT JOIN search_terms st ON st.id=ct.term_id
             LEFT JOIN scene_visual_features svf ON svf.scene_id=s.id
+            LEFT JOIN scene_ai_descriptions sai ON sai.scene_id=s.id
             WHERE {' AND '.join(clauses)}
             ORDER BY
                 CASE WHEN ct.rank IS NULL THEN 1 ELSE 0 END,
@@ -668,9 +712,65 @@ class ClipLibrary:
                     term=row["term"],
                     term_rank=int(row["term_rank"]) if row["term_rank"] is not None else None,
                     visual_features=visual_features,
+                    ai_description=(json.loads(row["ai_description_json"])
+                                    if row["ai_description_json"] else None),
                 )
             )
         return result
+
+    def clip_ai_cache_key(self, clip_id: int) -> str | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT cache_key FROM clip_ai_descriptions WHERE clip_id=?", (clip_id,)
+            ).fetchone()
+        return str(row["cache_key"]) if row else None
+
+    def store_clip_ai_description(
+        self, clip_id: int, data: dict[str, Any], *, provider: str, model: str,
+        prompt_version: str, cache_key: str,
+    ) -> None:
+        now = utcnow()
+        scenes = data.get("scenes", []) if isinstance(data.get("scenes"), list) else []
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO clip_ai_descriptions(
+                       clip_id,provider,model,prompt_version,cache_key,data_json,updated_at)
+                   VALUES(?,?,?,?,?,?,?) ON CONFLICT(clip_id) DO UPDATE SET
+                       provider=excluded.provider,model=excluded.model,
+                       prompt_version=excluded.prompt_version,cache_key=excluded.cache_key,
+                       data_json=excluded.data_json,updated_at=excluded.updated_at""",
+                (clip_id, provider, model, prompt_version, cache_key,
+                 json.dumps(data, ensure_ascii=False, sort_keys=True), now),
+            )
+            indexed = {
+                int(row["scene_index"]): int(row["id"])
+                for row in db.execute(
+                    "SELECT id,scene_index FROM scenes WHERE clip_id=?", (clip_id,)
+                ).fetchall()
+            }
+            db.execute("DELETE FROM scene_ai_descriptions WHERE clip_id=?", (clip_id,))
+            for scene in scenes:
+                if not isinstance(scene, dict):
+                    continue
+                try:
+                    scene_id = indexed[int(scene["scene_index"])]
+                except (KeyError, TypeError, ValueError):
+                    continue
+                # Repeat clip context on each scene row so final candidate
+                # ranking can consume every returned dimension without another
+                # join or silently dropping global camera/world information.
+                enriched = {"clip_context": {key: value for key, value in data.items() if key != "scenes"}, **scene}
+                db.execute(
+                    "INSERT INTO scene_ai_descriptions(scene_id,clip_id,data_json,updated_at) VALUES(?,?,?,?)",
+                    (scene_id, clip_id, json.dumps(enriched, ensure_ascii=False, sort_keys=True), now),
+                )
+
+    def load_clip_ai_description(self, clip_id: int) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT data_json FROM clip_ai_descriptions WHERE clip_id=?", (clip_id,)
+            ).fetchone()
+        return json.loads(row["data_json"]) if row else None
 
 
 
@@ -757,8 +857,10 @@ class ClipLibrary:
             SELECT
                 c.id, c.source, c.source_id, c.title, c.channel, c.duration,
                 c.width, c.height, c.status, c.error,
-                c.original_path, c.normalized_path, c.duplicate_of_clip_id,
+                c.original_path, c.normalized_path, c.normalized_sha256, c.duplicate_of_clip_id,
                 c.usable_start, c.usable_end,
+                EXISTS(SELECT 1 FROM clip_ai_descriptions cad WHERE cad.clip_id=c.id) AS ai_enhanced,
+                (SELECT cad.data_json FROM clip_ai_descriptions cad WHERE cad.clip_id=c.id) AS ai_description_json,
                 EXISTS(SELECT 1 FROM output_selection os WHERE os.clip_id=c.id) AS output_selected,
                 (SELECT GROUP_CONCAT(t.name, char(31)) FROM clip_tags ctag
                  JOIN tags t ON t.id=ctag.tag_id WHERE ctag.clip_id=c.id) AS tags,
@@ -797,10 +899,13 @@ class ClipLibrary:
                 "error": row["error"],
                 "original_path": row["original_path"],
                 "normalized_path": row["normalized_path"],
+                "normalized_sha256": row["normalized_sha256"],
                 "duplicate_of_clip_id": row["duplicate_of_clip_id"],
                 "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
                 "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
                 "output_selected": bool(row["output_selected"]),
+                "ai_enhanced": bool(row["ai_enhanced"]),
+                "ai_metadata": _ai_card_summary(row["ai_description_json"]),
                 "tags": sorted((x for x in str(row["tags"] or "").split(chr(31)) if x), key=str.casefold),
                 "usable_duration": max(
                     0.0,
@@ -897,6 +1002,7 @@ class ClipLibrary:
             "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
             "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
             "output_selected": output_selected,
+            "ai_description": self.load_clip_ai_description(int(row["id"])),
             "tags": [str(item[0]) for item in tag_rows],
             "usable_duration": max(
                 0.0,

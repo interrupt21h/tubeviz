@@ -41,6 +41,8 @@ from .codec_glitch import (
     CodecGlitchConfig, CodecGlitchError, codec_doctor,
     index_codec_motion_features, materialize_codec_timeline,
 )
+from .settings import load_settings
+from .vision_ai import enhance_library
 
 
 def _cmd_music_ai_doctor(args: argparse.Namespace) -> None:
@@ -222,6 +224,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
+    user_settings = load_settings()
     plan = None
     if args.visual_brief:
         _planning_library = ClipLibrary(args.library); _planning_library.initialize()
@@ -335,6 +338,9 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
     )
     print(f"Library: {library.root}")
     print(f"Database: {library.db_path}")
+    if user_settings.ai_enabled and user_settings.vision_enabled:
+        vision = enhance_library(library, settings=user_settings)
+        print(f"AI descriptions: enhanced={vision.enhanced} cached={vision.cached} failed={vision.failed}")
 
 
 def _cmd_ingest_url(args: argparse.Namespace) -> None:
@@ -359,6 +365,22 @@ def _cmd_ingest_url(args: argparse.Namespace) -> None:
           f"existing={summary.skipped_existing} rejected={summary.rejected} downloaded={summary.downloaded} "
           f"ready={summary.ready} failed={summary.failed} scenes={summary.scenes}")
     print(f"Library: {library.root}")
+    user_settings = load_settings()
+    if user_settings.ai_enabled and user_settings.vision_enabled:
+        vision = enhance_library(library, settings=user_settings)
+        print(f"AI descriptions: enhanced={vision.enhanced} cached={vision.cached} failed={vision.failed}")
+
+
+def _cmd_library_ai_describe(args: argparse.Namespace) -> None:
+    library = ClipLibrary(args.library)
+    summary = enhance_library(
+        library, clip_id=args.clip_id, limit=args.limit, force=args.force,
+        progress=lambda message: print(message, flush=True),
+    )
+    print(
+        f"AI description complete: considered={summary.considered} enhanced={summary.enhanced} "
+        f"cached={summary.cached} failed={summary.failed}"
+    )
 
 
 def _cmd_library_list(args: argparse.Namespace) -> None:
@@ -1172,6 +1194,15 @@ def build_parser() -> argparse.ArgumentParser:
     ai_report.add_argument("--limit", type=int, default=50)
     ai_report.set_defaults(func=_cmd_library_ai_report)
 
+    ai_describe = library_sub.add_parser(
+        "ai-describe", help="Describe scene storyboards with the configured OpenAI vision model"
+    )
+    ai_describe.add_argument("--library", default="./library")
+    ai_describe.add_argument("--clip-id", type=int)
+    ai_describe.add_argument("--limit", type=int, default=0, help="0 processes every missing clip")
+    ai_describe.add_argument("--force", action="store_true")
+    ai_describe.set_defaults(func=_cmd_library_ai_describe)
+
     visual_index = library_sub.add_parser(
         "visual-index",
         help="Index temporal visual fingerprints, palette, motion, and visual accents",
@@ -1523,6 +1554,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    settings = load_settings()
+    if settings.effective_openai_key():
+        os.environ["OPENAI_API_KEY"] = settings.effective_openai_key()
+        os.environ.setdefault("TUBEVIZ_LLM_API_KEY", settings.effective_openai_key())
+    if settings.effective_hf_token():
+        os.environ["HF_TOKEN"] = settings.effective_hf_token()
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.effective_hf_token()
+    os.environ["TUBEVIZ_AI_ENABLED"] = "1" if settings.ai_enabled else "0"
     args = build_parser().parse_args()
     args.func(args)
 

@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.trim-modal{max-height:95vh;overflow:auto}.trim-modal video{max-height:55vh}
+.clip-ai-card-summary{margin:9px 0;padding:9px;border:1px solid #253746;border-radius:7px;background:#101923}.clip-ai-card-summary p{font-size:11px;line-height:1.4;color:#c9d7e2}
+.ai-chip-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.ai-chip{padding:3px 6px;border-radius:999px;background:#173346;color:#9ee8ff;font-size:10px}.ai-chip.mood{background:#35284a;color:#d8c0ff}
+.clip-ai-panel{margin-top:14px;border:1px solid #285067;border-radius:10px;background:linear-gradient(145deg,#0d1b25,#0a1118);padding:15px}.clip-ai-panel.hidden{display:none}.clip-ai-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.clip-ai-head p{color:#d3e0e8;font-size:13px;line-height:1.5;margin-top:5px}
+.clip-ai-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:13px}.clip-ai-group{background:#0a1118;border:1px solid #253746;border-radius:8px;padding:10px}.clip-ai-group h4{margin:0 0 7px;color:#8ddfff;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.clip-ai-group p{color:#c1ced8;font-size:12px;line-height:1.45}
+.ai-metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.ai-metric{font-size:10px;color:var(--muted)}.ai-meter{height:5px;background:#202b36;border-radius:999px;margin-top:3px;overflow:hidden}.ai-meter i{display:block;height:100%;background:linear-gradient(90deg,#176f91,#62d7ff)}
+.ai-scenes{display:grid;gap:7px;margin-top:12px}.ai-scene{display:grid;grid-template-columns:72px 1fr auto;gap:9px;align-items:center;text-align:left;width:100%;background:#0a1118;border-color:#273b49;padding:9px}.ai-scene-time{font:10px ui-monospace,SFMono-Regular,monospace;color:#83dbf5}.ai-scene-copy{font-size:11px;line-height:1.4}.ai-scene-score{font-size:10px;color:var(--muted)}
+.ai-raw summary{cursor:pointer;color:var(--muted);font-size:11px;margin-top:12px}.ai-raw pre{min-height:0;max-height:280px;font-size:10px}
+@media(max-width:700px){.clip-ai-grid{grid-template-columns:1fr}.ai-scene{grid-template-columns:62px 1fr}}

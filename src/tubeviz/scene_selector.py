@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from collections import Counter, deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,6 +136,22 @@ def _semantic_score(
     visual_weight: float,
 ) -> float:
     score = metadata_semantic_score(candidate, query)
+    # Vision descriptions cover the whole visible frame (subjects, action,
+    # setting, mood, camera, palette and editing utility). Feed all textual
+    # fields into retrieval instead of treating the analysis as display-only.
+    if candidate.ai_description:
+        corpus = json.dumps(candidate.ai_description, ensure_ascii=False).lower()
+        terms = {token for token in re.findall(r"[a-z0-9]+", query.lower()) if len(token) > 2}
+        if terms:
+            score += 1.6 * sum(1 for token in terms if token in corpus) / len(terms)
+        utility = candidate.ai_description
+        target = query.lower()
+        if "peak" in target or "intense" in target:
+            score += .45 * float(utility.get("drop_fit", utility.get("energy", 0)) or 0)
+        elif "build" in target or "rising" in target:
+            score += .45 * float(utility.get("build_fit", utility.get("motion", 0)) or 0)
+        elif "ambient" in target or "slow" in target:
+            score += .45 * float(utility.get("ambient_fit", utility.get("continuity", 0)) or 0)
     if query_vector is not None:
         vector = embedding_map.get(candidate.scene_id)
         if vector is not None:

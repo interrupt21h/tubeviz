@@ -29,6 +29,7 @@ Tubeviz is designed around five principles:
 - [Architecture](#architecture)
 - [Requirements and installation](#requirements)
 - [Studio GUI](#quick-start-studio-gui)
+- [Persistent AI settings and video understanding](#persistent-ai-settings-and-video-understanding)
 - [End-to-end CLI workflow](#end-to-end-cli-workflow)
 - [Theme-first footage acquisition](#theme-first-ai-footage-acquisition)
 - [Music analysis and choreography](#phrase-aware-choreography-and-multi-shot-planning)
@@ -406,7 +407,54 @@ Studio provides inline `?` help affordances for form controls. Hover or focus a 
 
 The Manual YouTube URL workflow uses a dedicated multi-line URL editor with one source URL per line and keeps uncommon network/normalization settings under **Advanced ingest settings**.
 
-For Hugging Face authentication, leave the Studio token field blank to inherit a server-side `HF_TOKEN`. For security, the value of an environment token is never sent to the browser. The **Show typed token** control only reveals a token entered directly into that Studio field.
+OpenAI and Hugging Face credentials now live together in the dedicated **AI Settings** tab. Saved secret values are never sent back to the browser.
+
+## Persistent AI settings and video understanding
+
+Studio's **AI Settings** tab is the single control surface for learned features. The master **Enable AI features throughout Tubeviz** switch gates AI-assisted acquisition and final analysis jobs; the separate storyboard switch controls paid OpenAI video-description requests. The same screen configures the OpenAI API key, Hugging Face token, OpenAI-compatible base URL, vision model, image detail, frame budget, and timeout.
+
+Settings persist outside the repository at `~/.config/tubeviz/config.json` (or `$XDG_CONFIG_HOME/tubeviz/config.json`). Set `TUBEVIZ_CONFIG` to use another path. Tubeviz creates the file with user-only `0600` permissions. Saved credentials are injected only into child-process environments and are excluded from job commands, logs, and API responses. `OPENAI_API_KEY`, `HF_TOKEN`, and `HUGGING_FACE_HUB_TOKEN` remain fallbacks when their saved field is empty.
+
+Vision description is opt-in because image inputs consume API tokens. When enabled, each newly completed ingest is enhanced automatically. The **Enhance Existing Library** action backfills every ready legacy clip without downloading or normalizing it again. Cache keys include the normalized-media checksum, model, detail level, prompt version, and sampled scene indexes; unchanged clips are therefore free to skip. Enable **Re-analyze cached clips** only after changing the desired interpretation or when deliberately refreshing model output.
+
+```mermaid
+flowchart TD
+    READY["Ready clip"] --> SCENES["Detected scenes and thumbnails"]
+    SCENES --> SAMPLE["Stratified full-clip storyboard"]
+    SAMPLE --> CACHE{"Current cache key?"}
+    CACHE -->|yes| KEEP["Reuse description"]
+    CACHE -->|no| API["OpenAI Responses API"]
+    API --> CLIP["Clip summary and visual world"]
+    API --> SHOTS["Per-scene descriptions and utility"]
+    CLIP --> DB[("SQLite AI description cache")]
+    SHOTS --> DB
+```
+
+The request sends all sampled thumbnails in one scene-labelled storyboard. The structured result covers visible subjects, actions, locations, camera language, palette, lighting, texture, mood, risks, semantic tags, and editing utility. Per-scene values include energy, motion, complexity, continuity, and fit for builds, drops, and ambient passages. Tubeviz stores both the clip-level analysis and scene rows so existing libraries gain the same capabilities as newly ingested footage.
+
+```mermaid
+flowchart TB
+    MUSIC["Musical section and trajectory"] --> QUERY["Semantic and editorial intent"]
+    LOCAL["OpenCLIP plus local visual features"] --> RANK["Candidate sequence ranking"]
+    VISION["All AI description fields"] --> TEXT["Full description retrieval"]
+    VISION --> UTILITY["Build, drop, ambient fit"]
+    QUERY --> RANK
+    TEXT --> RANK
+    UTILITY --> RANK
+    RANK --> PLAN["Directed timeline"]
+```
+
+This is not metadata for display only. Final scene planning searches the complete description corpus and blends the appropriate editing-utility score into section ranking. Local OpenCLIP embeddings, measured motion/palette/complexity, transition quality, novelty, curation preferences, and deterministic timing remain active, so remote descriptions enrich rather than replace Tubeviz's existing analysis.
+
+Command-line backfill uses the same persistent configuration and cache:
+
+```bash
+tubeviz library ai-describe --library ./library
+tubeviz library ai-describe --library ./library --limit 10
+tubeviz library ai-describe --library ./library --clip-id 42 --force
+```
+
+Progress is emitted per clip: the log reports the current clip/total, sampled-frame count, cache hits, stored results, and failures. Studio maps those lines to the existing active-job stage/progress display and retains the detailed log for diagnosis.
 
 ## Quick start: Studio GUI
 
@@ -432,7 +480,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.30.3**.
+For this release, the header and `tubeviz.__version__` should report **0.31.1**.
 
 ```mermaid
 flowchart LR

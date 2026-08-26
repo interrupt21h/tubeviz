@@ -20,6 +20,7 @@ def test_gui_cli_schema_covers_every_current_non_gui_leaf_command():
         "ingest",
         "ingest-url",
         "library ai-report",
+        "library ai-describe",
         "library codec-motion-index",
         "library delete",
         "library embed",

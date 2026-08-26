@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+"""Persistent, user-scoped Tubeviz settings.
+
+Secrets live in one mode-0600 JSON file rather than project files or shell
+history. Environment variables remain supported when a saved value is empty.
+"""
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass, fields
+from pathlib import Path
+from typing import Any
+
+
+def settings_path() -> Path:
+    override = os.environ.get("TUBEVIZ_CONFIG")
+    if override:
+        return Path(override).expanduser()
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "tubeviz" / "config.json"
+
+
+@dataclass(frozen=True)
+class UserSettings:
+    ai_enabled: bool = True
+    vision_enabled: bool = False
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_vision_model: str = "gpt-5.1"
+    vision_detail: str = "low"
+    vision_max_frames: int = 12
+    vision_timeout_seconds: int = 180
+    hf_token: str = ""
+
+    def effective_openai_key(self) -> str:
+        return self.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+
+    def effective_hf_token(self) -> str:
+        return self.hf_token or os.environ.get("HF_TOKEN", "") or os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
+
+    def public_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        value.pop("openai_api_key")
+        value.pop("hf_token")
+        value.update(
+            openai_key_configured=bool(self.effective_openai_key()),
+            hf_token_configured=bool(self.effective_hf_token()),
+            config_path=str(settings_path()),
+        )
+        return value
+
+
+def load_settings() -> UserSettings:
+    path = settings_path()
+    if not path.is_file():
+        return UserSettings()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        allowed = {field.name for field in fields(UserSettings)}
+        return UserSettings(**{key: value for key, value in raw.items() if key in allowed})
+    except (OSError, ValueError, TypeError):
+        return UserSettings()
+
+
+def save_settings(changes: dict[str, Any], *, clear_openai: bool = False, clear_hf: bool = False) -> UserSettings:
+    current = asdict(load_settings())
+    allowed = set(current)
+    for key, value in changes.items():
+        if key not in allowed or value is None:
+            continue
+        # Blank secret fields mean "keep saved value", which makes the GUI safe
+        # to reload without ever returning credentials to the browser.
+        if key in {"openai_api_key", "hf_token"} and not str(value).strip():
+            continue
+        current[key] = value
+    if clear_openai:
+        current["openai_api_key"] = ""
+    if clear_hf:
+        current["hf_token"] = ""
+    result = UserSettings(**current)
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(temp, 0o600)
+    temp.replace(path)
+    return result

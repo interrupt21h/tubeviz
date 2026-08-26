@@ -19,7 +19,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--tab",
-        choices=("create", "library", "command", "jobs"),
+        choices=("create", "library", "command", "jobs", "ai"),
         default="create",
     )
     parser.add_argument("--width", type=int, default=1920)
