@@ -472,6 +472,9 @@ class SceneSelection(BaseModel):
     composition_mode: str = "single"
     layers: list[CompositeLayer] = Field(default_factory=list)
     codec_materialization: CodecMaterialization = Field(default_factory=CodecMaterialization)
+    # Advisory provenance from the bounded LLM edit-consultant pass. It records only
+    # validated candidate IDs/treatment hints; hard selection constraints remain deterministic.
+    ai_consultant: dict[str, Any] = Field(default_factory=dict)
 
 
 class DirectedTimeline(BaseModel):
@@ -484,3 +487,5 @@ class DirectedTimeline(BaseModel):
     world_states: list[WorldSnapshot] = Field(default_factory=list)
     scene_plan: list[SceneSelection] = Field(default_factory=list)
     scene_intents: list[SceneIntent] = Field(default_factory=list)
+    # Compact snapshot of the library/effect capabilities supplied to the whole-song LLM.
+    ai_resource_manifest: dict[str, Any] = Field(default_factory=dict)

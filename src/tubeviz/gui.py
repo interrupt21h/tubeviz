@@ -493,6 +493,10 @@ def _job_command(request: JobRequest) -> list[str]:
             _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
             _flag(command, "--ai-director-model", o.get("ai_director_model"))
             _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
+            if o.get("ai_edit_consultant", True) is False:
+                command.append("--no-ai-edit-consultant")
+            _flag(command, "--ai-consultant-candidates", o.get("ai_consultant_candidates", 12))
+            _flag(command, "--ai-consultant-weight", o.get("ai_consultant_weight", .85))
         _flag(command, "--section-bars", o.get("section_bars", 8))
         _flag(command, "--max-video-layers", o.get("max_video_layers", 3))
         _flag(command, "--composition-intensity", o.get("composition_intensity", 1.0))

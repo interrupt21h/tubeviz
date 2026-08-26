@@ -35,6 +35,7 @@ from .youtube import YouTubeSource
 from .visual_features import VisualFeatureConfig, index_scene_visual_features
 from .audio_ai import AudioAIConfig, attach_audio_semantics, audio_ai_doctor
 from .ai_music_director import AIDirectorConfig, attach_llm_directions, attach_semantic_directions
+from .ai_resources import build_resource_manifest
 from .choreography import ChoreographyConfig, attach_choreography
 from .music_ai import MusicAIConfig, attach_music_embeddings, music_ai_doctor
 from .codec_glitch import (
@@ -84,6 +85,9 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     user_settings = load_settings()
     ai_director_base_url = (args.ai_director_base_url or user_settings.openai_base_url or "").strip()
     ai_director_model = (args.ai_director_model or user_settings.openai_model or "").strip()
+    library: ClipLibrary | None = None
+    selector_cfg: SceneSelectorConfig | None = None
+    resource_manifest: dict[str, object] = {}
     if getattr(args, "ai_director", False) and not getattr(args, "audio_ai", False):
         raise SystemExit("--ai-director requires --audio-ai so the whole-song plan is grounded in CLAP audio semantics")
     if getattr(args, "ai_director", False) and (not ai_director_base_url or not ai_director_model):
@@ -148,8 +152,20 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         # CLAP semantics always get a deterministic section-level direction.
         analysis = attach_semantic_directions(analysis)
         if getattr(args, "ai_director", False):
+            if args.library:
+                library = ClipLibrary(args.library)
+                library.initialize()
+                selector_cfg = _selector_config(
+                    args, ai_base_url=ai_director_base_url, ai_model=ai_director_model,
+                )
+                resource_manifest = build_resource_manifest(library, selector_cfg)
+                print(
+                    f"AI director: resource manifest has {resource_manifest.get('library', {}).get('eligible_clips', 0)} clips / "
+                    f"{resource_manifest.get('library', {}).get('eligible_scenes', 0)} scenes", flush=True,
+                )
             analysis = attach_llm_directions(
                 analysis,
+                resource_manifest=resource_manifest,
                 config=AIDirectorConfig(
                     enabled=True,
                     base_url=ai_director_base_url,
@@ -176,12 +192,21 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     timeline = direct(analysis)
     if args.library:
         print(f"Analyze: planning scenes from {args.library}", flush=True)
-        library = ClipLibrary(args.library)
-        library.initialize()
+        if library is None:
+            library = ClipLibrary(args.library)
+            library.initialize()
+        if selector_cfg is None:
+            selector_cfg = _selector_config(
+                args, ai_base_url=ai_director_base_url, ai_model=ai_director_model,
+            )
+        if getattr(args, "ai_director", False) and not resource_manifest:
+            resource_manifest = build_resource_manifest(library, selector_cfg)
+        if resource_manifest:
+            timeline = timeline.model_copy(update={"ai_resource_manifest": resource_manifest})
         timeline = attach_scene_plan(
             timeline,
             library,
-            _selector_config(args),
+            selector_cfg,
         )
         print(f"Analyze: scene plan complete ({len(timeline.scene_plan)} shots)", flush=True)
     output = Path(args.output).expanduser()
@@ -602,7 +627,7 @@ def _cmd_library_embed(args: argparse.Namespace) -> None:
     )
 
 
-def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
+def _selector_config(args: argparse.Namespace, *, ai_base_url: str | None = None, ai_model: str | None = None) -> SceneSelectorConfig:
     seed = int(getattr(args, "selection_seed", 0) or 0)
     if getattr(args, "reshuffle", False):
         seed = secrets.randbits(63) or 1
@@ -655,6 +680,21 @@ def _selector_config(args: argparse.Namespace) -> SceneSelectorConfig:
         effect_compatibility_weight=max(0.0, getattr(args, "effect_compatibility_weight", 0.60)),
         preference_learning=getattr(args, "preference_learning", True),
         preference_weight=max(0.0, getattr(args, "preference_weight", 0.35)),
+        ai_consultant_enabled=(
+            bool(getattr(args, "ai_director", False))
+            and bool(getattr(args, "ai_edit_consultant", True))
+            and bool(ai_base_url) and bool(ai_model)
+        ),
+        ai_consultant_base_url=ai_base_url,
+        ai_consultant_model=ai_model,
+        ai_consultant_api_key=getattr(args, "ai_director_api_key", None),
+        ai_consultant_timeout=max(1.0, float(getattr(args, "ai_director_timeout", 90.0))),
+        ai_consultant_cache_dir=getattr(args, "ai_director_cache_dir", None),
+        ai_consultant_force=bool(getattr(args, "ai_director_force", False)),
+        ai_consultant_candidates=max(4, min(32, int(getattr(args, "ai_consultant_candidates", 12)))),
+        ai_consultant_weight=max(0.0, min(2.0, float(getattr(args, "ai_consultant_weight", 0.85)))),
+        ai_consultant_reasoning_effort=getattr(args, "ai_director_reasoning_effort", "none"),
+        ai_consultant_max_completion_tokens=max(512, int(getattr(args, "ai_consultant_max_completion_tokens", 4096))),
     )
 
 
@@ -1355,6 +1395,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--ai-director-strength", type=float, default=0.75, help="How strongly the whole-song LLM plan may alter the deterministic CLAP baseline")
     analyze.add_argument("--ai-director-reasoning-effort", choices=("none", "low", "medium", "high", "xhigh", "max"), default="none", help="Native OpenAI GPT-5.6 reasoning effort; 'none' avoids spending the director output budget on hidden reasoning")
     analyze.add_argument("--ai-director-max-completion-tokens", type=int, default=8192, help="Native OpenAI Chat Completions budget for the whole-song JSON plan")
+    analyze.add_argument("--ai-edit-consultant", action=argparse.BooleanOptionalAction, default=True, help="With --ai-director and --library, run a second bounded LLM pass that ranks valid scene candidates for each section")
+    analyze.add_argument("--ai-consultant-candidates", type=int, default=12, help="Maximum valid scene candidates shown to the bounded AI edit consultant per section (4..32)")
+    analyze.add_argument("--ai-consultant-weight", type=float, default=0.85, help="Soft scene-ranking bonus from the AI edit consultant; deterministic hard constraints remain authoritative")
+    analyze.add_argument("--ai-consultant-max-completion-tokens", type=int, default=4096, help="Native OpenAI completion budget for each section-level bounded edit consultation")
     analyze.add_argument("--no-transforms", action="store_true", help="Disable per-scene video transform planning")
     analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Legacy transform strength; 0 disables, 1 normal, up to 2 aggressive")
     analyze.add_argument("--creative-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable semantic/temporal creative rendering: optical flow, virtual camera, depth, feedback, palette, and hero effects")

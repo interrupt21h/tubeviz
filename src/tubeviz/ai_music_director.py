@@ -194,7 +194,7 @@ def _track_summary(track: TrackAnalysis) -> list[dict[str, Any]]:
     return out
 
 
-def _director_prompt(track: TrackAnalysis) -> str:
+def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | None = None) -> str:
     schema = {
         "sections": [{
             "index": 0,
@@ -222,12 +222,14 @@ def _director_prompt(track: TrackAnalysis) -> str:
         }]
     }
     return (
-        "You are the high-level music-video director for tubeviz. Plan the visual arc of the whole track. "
-        "Do NOT select filenames, clip IDs, or exact cut times. The deterministic optimizer owns those. "
+        "You are the high-level music-video director for tubeviz. Plan the visual arc of the whole track using the ACTUAL library strengths and renderer capabilities supplied below. "
+        "Do NOT select filenames, clip IDs, scene IDs, or exact cut times in this first pass. A later bounded edit-consultant pass will choose only among valid retrieved scenes, and the deterministic optimizer owns hard timing. "
+        "Explicitly exploit resources that exist and avoid relying on visual worlds/effects that the resource manifest says are absent or scarce. "
         "Use callbacks and controlled evolution: avoid changing visual worlds arbitrarily every section. "
         "Use the supplied trajectory fields (build/drop/release probability, tension slope, anticipation, withholding) to create coherent escalation and payoff. Reserve the strongest contrast/effects for builds, drops, mutations and payoffs; keep pre-drop withholding when it creates useful contrast. Return JSON only.\n\n"
         f"Required schema example:\n{json.dumps(schema, indent=2)}\n\n"
-        f"Track analysis:\n{json.dumps(_track_summary(track), indent=2)}"
+        f"Track analysis:\n{json.dumps(_track_summary(track), indent=2)}\n\n"
+        f"Actual tubeviz resources available for this production:\n{json.dumps(resource_manifest or {}, indent=2)}"
     )
 
 
@@ -243,7 +245,7 @@ def _is_native_openai(base_url: str) -> bool:
         return False
 
 
-def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
+def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": cfg.model,
         "messages": [
@@ -251,7 +253,7 @@ def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, A
                 "role": "system",
                 "content": "Return strict JSON only. You direct themes and intensity; you never choose media files.",
             },
-            {"role": "user", "content": _director_prompt(track)},
+            {"role": "user", "content": _director_prompt(track, resource_manifest)},
         ],
     }
 
@@ -287,10 +289,10 @@ def _extract_json(content: str) -> dict[str, Any]:
     return json.loads(text[start:end+1])
 
 
-def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
+def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
     if not cfg.base_url or not cfg.model:
         raise RuntimeError("--ai-director requires --ai-director-base-url and --ai-director-model")
-    payload = _request_payload(track, cfg)
+    payload = _request_payload(track, cfg, resource_manifest)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     api_key = resolve_llm_api_key(cfg.base_url, cfg.api_key)
@@ -361,7 +363,7 @@ def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: flo
     })
 
 
-def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, progress=print) -> TrackAnalysis:
+def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None, progress=print) -> TrackAnalysis:
     if not config.enabled:
         return track
     root = _cache_root(config)
@@ -370,6 +372,7 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, pro
         "model": config.model,
         "base_url": config.base_url,
         "sections": _track_summary(track),
+        "resources": resource_manifest or {},
     }, sort_keys=True).encode()).hexdigest()
     cache = root / f"{digest}.json"
     if cache.is_file() and not config.force:
@@ -377,7 +380,7 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, pro
         progress("AI director: loaded cached whole-song plan")
     else:
         progress(f"AI director: requesting whole-song plan from {config.model}")
-        result = _call_llm(track, config)
+        result = _call_llm(track, config, resource_manifest)
         tmp = cache.with_suffix(".tmp")
         tmp.write_text(json.dumps(result, indent=2, sort_keys=True))
         tmp.replace(cache)

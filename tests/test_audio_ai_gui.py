@@ -20,6 +20,9 @@ def test_gui_analyze_job_includes_audio_ai_and_llm_director():
             "ai_director_model": "local-model",
             "ai_director_api_key": "secret",
             "ai_director_strength": .7,
+            "ai_edit_consultant": True,
+            "ai_consultant_candidates": 14,
+            "ai_consultant_weight": .9,
         },
     ))
     joined = " ".join(command)
@@ -31,6 +34,8 @@ def test_gui_analyze_job_includes_audio_ai_and_llm_director():
     assert "--ai-director" in command
     assert "--ai-director-base-url http://localhost:8000/v1" in joined
     assert "--ai-director-model local-model" in joined
+    assert "--ai-consultant-candidates 14" in joined
+    assert "--ai-consultant-weight 0.9" in joined
     assert "--ai-director-api-key" not in joined
     assert "secret" not in joined
 

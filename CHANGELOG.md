@@ -1,3 +1,18 @@
+# 0.34.0 — Resource-aware two-pass AI editing
+
+- Upgrade the optional LLM director from a song-only treatment pass into a resource-aware two-pass directing system. Pass 1 now receives a compact manifest of the actual READY/output-pool library plus the renderer capabilities that are enabled for the run.
+- Add `ai_resources.py` to summarize eligible clip/scene counts, AI/visual-feature coverage, dominant visual worlds and provenance terms, motion and palette distributions, representative real material, raster/temporal effects, vector primitives, codec-space effects, hero effects, composition modes, and renderer constraints.
+- Include the resource manifest in the whole-song director cache key and prompt so an LLM cannot plan as though unavailable footage/effects exist. Persist the compact manifest in `DirectedTimeline.ai_resource_manifest` for auditability.
+- Add a second bounded AI edit-consultant pass. For every musical section, tubeviz builds a small candidate slate from the strongest deterministic retrieval results across all shot positions and lets the LLM rank only those validated scene IDs. Invented IDs and unsupported treatment names are discarded.
+- Let AI consultation consider the complete eligible output pool even when OpenCLIP semantic embeddings are disabled; metadata, stored vision descriptions, visual fingerprints and deterministic trajectory/effect scoring still form the candidate slate.
+- Feed validated consultant preferences back into both greedy scene choice and multi-shot beam search as a soft bonus. Trim/duration rules, motif identity, scene/source cooldowns, novelty pressure, beat-aligned shot windows and media validity remain hard/deterministic.
+- Permit the bounded consultant to suggest an existing effect family and at most one sparse hero treatment per musical section. The effect-family hint is applied before deterministic vector/creative planning so it changes the actual generated treatment rather than just timeline metadata.
+- Persist per-shot `ai_consultant` provenance: validated preference IDs, whether the final selected scene was preferred, treatment hints and a short editorial reason.
+- Add CLI controls `--[no-]ai-edit-consultant`, `--ai-consultant-candidates`, `--ai-consultant-weight`, and `--ai-consultant-max-completion-tokens`. The consultant is enabled by default when `--ai-director --library` is active and inherits the same AI Settings endpoint/model/key.
+- Expose the bounded consultant, candidate-slate size and influence weight in Studio. Command Center receives the same flags automatically from argparse.
+- Cache section consultations under the AI-director cache hierarchy and fall back cleanly to deterministic ranking if any consultation request fails.
+- Add regression coverage for resource-manifest contents, whole-song prompt grounding, rejection of invented candidate IDs, bounded effect validation, cross-term/all-library consultant selection, CLI defaults and Studio argument propagation.
+
 # 0.33.7 — Final source-chroma fidelity guard
 
 - Make `source_fidelity` a whole-render contract rather than a setting used only by the directed color grade. Browser rendering now captures the composed source frame before post FX and re-anchors final hue/saturation toward that source after raster effects, while retaining effect-generated luminance and geometry.

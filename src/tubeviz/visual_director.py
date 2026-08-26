@@ -616,6 +616,7 @@ def build_visual_direction(
     vector_intensity: float = 1.0,
     codec_glitch_mode: str = "off",
     codec_glitch_intensity: float = 0.65,
+    effect_family_override: str | None = None,
 ) -> VisualDirection:
     f = candidate.visual_features or {}
     source_hue = float(f.get("dominant_hue", 0.0)) % 360.0
@@ -661,6 +662,8 @@ def build_visual_direction(
     if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
         if section.audio_semantic_confidence >= .18:
             family = section.ai_direction.effect_family
+    if effect_family_override in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
+        family = str(effect_family_override)
     # Keep the section vocabulary coherent while avoiding a single visual grammar on
     # every shot.  The first shot establishes the base family; later shots branch to
     # compatible families on roughly half of selections.

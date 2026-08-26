@@ -131,3 +131,7 @@ def test_ai_director_cli_openai_defaults_parse():
     ])
     assert args.ai_director_reasoning_effort == "none"
     assert args.ai_director_max_completion_tokens == 8192
+    assert args.ai_edit_consultant is True
+    assert args.ai_consultant_candidates == 12
+    assert args.ai_consultant_weight == 0.85
+    assert args.ai_consultant_max_completion_tokens == 4096

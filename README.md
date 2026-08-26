@@ -1278,14 +1278,59 @@ Edit density is quantized back onto musical beat counts, so AI can ask for a mor
 or more spacious montage but cannot move cuts off the beat grid.
 
 Studio exposes CLAP enable/device/window/hop settings, the audio-to-visual match weight,
-whole-song director enable/strength controls, and an **Audio AI Doctor** action. The
-director inherits its OpenAI endpoint, model, and key from **AI Settings**.
+whole-song director enable/strength controls, bounded edit-consultant candidate count/weight,
+and an **Audio AI Doctor** action. The director and consultant inherit the same OpenAI
+endpoint, model, and key from **AI Settings**.
 
-### Optional whole-song LLM director
+### Resource-aware two-pass LLM director
 
-For a higher-level narrative arc, tubeviz can send a compact section summary to any
-OpenAI-compatible chat-completions endpoint. The model is asked for themes and treatment
-only: it cannot select filenames, clip IDs, or exact cut times.
+With `--ai-director`, tubeviz now uses the LLM in **two bounded passes** instead of asking
+it to imagine a visual treatment without knowing what the project actually contains.
+
+**Pass 1 — whole-song resource-aware director.** Before the request, tubeviz builds a
+compact manifest from the current READY/output-pool library and the renderer configuration.
+The model receives:
+
+- eligible clip and scene counts;
+- dominant visual worlds, semantic tags, search/provenance terms, motion distribution and
+  source-palette distribution;
+- representative described scenes from the actual library;
+- the enabled raster/temporal, vector, codec-space, hero and composition capabilities; and
+- hard planning boundaries explaining which decisions remain deterministic.
+
+The first pass chooses the song-scale visual arc, section treatment, effect family, pacing,
+continuity and creative trajectories. It still cannot select filenames, clip IDs, scene IDs
+or exact cut times. This keeps the global plan compact enough to reason over the entire song
+without dumping thousands of raw scene rows into one prompt.
+
+**Pass 2 — bounded AI edit consultant.** For each musical section, the deterministic
+retriever scores the complete eligible output pool and builds a small slate of the strongest
+real scenes across that section's shot trajectory. The LLM sees only those validated
+`scene_id` values, their descriptions/tags, source title, motion/complexity/brightness,
+palette, editing utility and deterministic score. It may rank those IDs and optionally
+suggest an effect family or one sparse hero treatment. Invented IDs/effects are discarded.
+The preference becomes a **soft score inside both greedy and lookahead beam search**; trim
+bounds, duration, motif identity, source/scene cooldowns, media validity, beat-aligned cut
+windows and renderer limits always remain authoritative.
+
+```mermaid
+flowchart TD
+    MUSIC["DSP + CLAP + MERT + trajectories"] --> P1["Pass 1: whole-song LLM director"]
+    LIB["READY/output-pool library"] --> MANIFEST["Compact resource manifest"]
+    FX["Enabled raster/vector/codec/hero effects"] --> MANIFEST
+    MANIFEST --> P1
+    P1 --> ARC["Resource-aware visual arc"]
+    ARC --> RETRIEVE["Deterministic all-library retrieval"]
+    LIB --> RETRIEVE
+    RETRIEVE --> SLATE["Bounded valid scene slate per section"]
+    SLATE --> P2["Pass 2: AI edit consultant"]
+    P2 --> SOFT["Validated soft scene/effect preferences"]
+    SOFT --> OPT["Deterministic greedy + beam optimizer"]
+    RETRIEVE --> OPT
+    OPT --> TL["Beat-aligned directed timeline"]
+```
+
+A normal resource-aware run is simply:
 
 ```bash
 tubeviz analyze audio/connected.mp3 \
@@ -1297,23 +1342,43 @@ tubeviz analyze audio/connected.mp3 \
   --output timelines/connected-ai-directed.json
 ```
 
-The director uses the saved **AI Settings** base URL, model, and OpenAI credential by
-default. `--ai-director-base-url`, `--ai-director-model`, and
-`--ai-director-api-key` remain available for one-off CLI overrides, including local or
-third-party OpenAI-compatible endpoints.
-
-The returned JSON is schema-validated and unknown fields are discarded. The LLM plan is
-blended with the deterministic CLAP baseline, and low CLAP confidence reduces how
-strongly the language model may redirect a section. Plans are cached under
-`~/.cache/tubeviz/ai-director/`.
-
-The authority split is:
+The bounded edit consultant is enabled automatically with `--ai-director --library`. Tune or
+disable it with:
 
 ```text
-LLM / CLAP:     what should this passage feel and look like?
-tubeviz:        which actual library scenes best satisfy that intent?
-rhythm engine:  exactly where should cuts and accents land?
-renderer:       how should pixels, vectors and codec effects execute it?
+--ai-edit-consultant / --no-ai-edit-consultant
+--ai-consultant-candidates 12
+--ai-consultant-weight .85
+--ai-consultant-max-completion-tokens 4096
+```
+
+A larger candidate slate exposes more real alternatives to the LLM but increases prompt
+size. The default of 12 is intentionally small; candidates are chosen as a union of strong
+retrieval results across the section rather than simply the first twelve scenes. Consultant
+responses are cached per section alongside the whole-song director cache, so unchanged
+audio/library/direction inputs do not repeatedly incur LLM work.
+
+Both passes inherit the saved **AI Settings** base URL, model and OpenAI credential by
+default. `--ai-director-base-url`, `--ai-director-model`, and
+`--ai-director-api-key` remain available for one-off CLI overrides, including local or
+third-party OpenAI-compatible endpoints. Secrets are resolved at request time and are not
+stored in timeline provenance or job argv.
+
+The timeline stores the compact `ai_resource_manifest` used for Pass 1 and, on consulted
+shots, an `ai_consultant` provenance object containing the validated preference list,
+whether the selected scene was preferred, optional treatment hints, and the short editorial
+reason. This makes AI influence inspectable without giving the model authority over hard
+execution details.
+
+The authority split is therefore:
+
+```text
+LLM pass 1:      what should the whole song look like, given resources we really have?
+retriever:       which real scenes are plausible for this musical section?
+LLM pass 2:      among that bounded valid slate, which sequence best serves the edit?
+optimizer:       enforce timing, trim, cooldown, motif, diversity and transition constraints
+rhythm engine:   exactly where cuts and accents land
+renderer:        execute bounded raster/vector/codec/hero treatments
 ```
 
 ### Optional MERT music representations

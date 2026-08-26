@@ -12,6 +12,7 @@ from urllib.parse import quote
 import numpy as np
 
 from .library import ClipLibrary, SceneCandidate
+from .ai_edit_consultant import AIEditConsultantConfig, consult_section, preference_bonus
 from .audio_ai import CONCEPT_KEYS, CONCEPT_PROMPTS, scene_audio_concept_alignment, top_audio_concepts
 from .models import CompositeLayer, DirectedTimeline, SceneIntent, SceneSelection, VisualCue
 from .transforms import TransformConfig, attach_transform_plan
@@ -84,6 +85,19 @@ class SceneSelectorConfig:
     effect_compatibility_weight: float = 0.60
     preference_learning: bool = True
     preference_weight: float = 0.35
+    # Optional second LLM pass. It sees only a bounded slate of already-valid scenes
+    # and contributes a soft ranking bonus; deterministic timing/cooldowns stay authoritative.
+    ai_consultant_enabled: bool = False
+    ai_consultant_base_url: str | None = None
+    ai_consultant_model: str | None = None
+    ai_consultant_api_key: str | None = None
+    ai_consultant_timeout: float = 90.0
+    ai_consultant_cache_dir: str | None = None
+    ai_consultant_force: bool = False
+    ai_consultant_candidates: int = 12
+    ai_consultant_weight: float = 0.85
+    ai_consultant_reasoning_effort: str = "none"
+    ai_consultant_max_completion_tokens: int = 4096
 
 
 _SECTION_DESCRIPTORS = {
@@ -353,6 +367,7 @@ def _sequence_choose(
     preference_profile: dict[str, object] | None,
     cfg: SceneSelectorConfig,
     salt: str,
+    consultant_advice: dict[int, dict[str, object]] | None = None,
 ) -> SceneCandidate | None:
     """Beam-search a short scene sequence and return its first scene.
 
@@ -374,7 +389,7 @@ def _sequence_choose(
         return min(1.0, max(0.0, ((a+b)*.5-section.start)/section_span))
 
     p0 = progress_for(window_index)
-    def static_score(c: SceneCandidate, progress: float) -> float:
+    def static_score(c: SceneCandidate, progress: float, local_index: int) -> float:
         return (
             semantic_scores.get(c.scene_id, 0.0)
             + cfg.visual_match_weight * visual_match_score(c, section)
@@ -383,9 +398,10 @@ def _sequence_choose(
             + cfg.trajectory_weight * trajectory_scene_score(c, section, progress)
             + cfg.effect_compatibility_weight * effect_compatibility_score(c, section)
             + cfg.preference_weight * _preference_score(c, preference_profile)
+            + preference_bonus(c.scene_id, (consultant_advice or {}).get(local_index), cfg.ai_consultant_weight)
         )
 
-    initial = sorted(usable, key=lambda c: (-static_score(c, p0), c.scene_id))[:pool_size]
+    initial = sorted(usable, key=lambda c: (-static_score(c, p0, window_index), c.scene_id))[:pool_size]
     if preferred_clip_id is not None:
         preferred = [c for c in usable if c.clip_id == preferred_clip_id]
         for c in preferred[:4]:
@@ -397,7 +413,7 @@ def _sequence_choose(
     for step in range(depth):
         progress = progress_for(window_index+step)
         candidates_step = initial if step == 0 else sorted(
-            usable, key=lambda c: (-static_score(c, progress), c.scene_id)
+            usable, key=lambda c: (-static_score(c, progress, window_index+step), c.scene_id)
         )[:pool_size]
         if step == 0 and preferred_clip_id is not None:
             preferred_step = [c for c in usable if c.clip_id == preferred_clip_id]
@@ -410,7 +426,7 @@ def _sequence_choose(
         for score, sequence, local_counts in beams:
             prev = sequence[-1] if sequence else previous
             for candidate in candidates_step:
-                base = static_score(candidate, progress)
+                base = static_score(candidate, progress, window_index+step)
                 transition = cfg.transition_weight * transition_score(prev, candidate, section)
                 anticipation = cfg.anticipation_weight * trajectory_transition_score(prev, candidate, section, progress)
                 # Cooldowns are soft inside the lookahead: impossible hard filters can
@@ -605,10 +621,46 @@ def _auto_unique_target(duration: float, available_clip_count: int, cfg: SceneSe
 
 
 
+def _consultant_slate(
+    candidates: list[SceneCandidate], *, section, windows: list[tuple[float, float]],
+    semantic_scores: dict[int, float], audio_visual_scores: dict[int, float],
+    preference_profile: dict[str, object] | None, cfg: SceneSelectorConfig,
+) -> list[tuple[SceneCandidate, float]]:
+    """Union the strongest deterministic candidates across the section's shot trajectory."""
+    if not candidates:
+        return []
+    section_span = max(.05, float(section.end-section.start))
+    best: dict[int, tuple[SceneCandidate, float]] = {}
+    per_window = max(4, min(8, cfg.ai_consultant_candidates // 2 or 4))
+    for a, b in windows:
+        progress = min(1.0, max(0.0, ((a+b)*.5-section.start)/section_span))
+        scored = []
+        for candidate in candidates:
+            score = (
+                semantic_scores.get(candidate.scene_id, 0.0)
+                + cfg.visual_match_weight * visual_match_score(candidate, section)
+                + cfg.audio_visual_match_weight * section.audio_semantic_confidence
+                  * audio_visual_scores.get(candidate.scene_id, 0.0)
+                + cfg.trajectory_weight * trajectory_scene_score(candidate, section, progress)
+                + cfg.effect_compatibility_weight * effect_compatibility_score(candidate, section)
+                + cfg.preference_weight * _preference_score(candidate, preference_profile)
+            )
+            scored.append((score, candidate))
+        scored.sort(key=lambda x: (-x[0], x[1].scene_id))
+        for score, candidate in scored[:per_window]:
+            old = best.get(candidate.scene_id)
+            if old is None or score > old[1]:
+                best[candidate.scene_id] = (candidate, score)
+    result = sorted(best.values(), key=lambda x: (-x[1], x[0].scene_id))
+    return result[:max(4, int(cfg.ai_consultant_candidates))]
+
+
 def build_scene_plan(
     timeline: DirectedTimeline,
     library: ClipLibrary,
     config: SceneSelectorConfig | None = None,
+    *,
+    progress=print,
 ) -> list[SceneSelection]:
     cfg = config or SceneSelectorConfig()
     library.initialize()
@@ -654,7 +706,10 @@ def build_scene_plan(
         timeline.track.duration, available_clip_count, cfg
     )
 
-    all_candidates: list[SceneCandidate] | None = None
+    # AI consultation should be able to consider the entire eligible output pool,
+    # even when OpenCLIP semantic embeddings are disabled. Metadata/vision descriptions
+    # still provide a useful retrieval signal; semantic mode additionally loads vectors.
+    all_candidates: list[SceneCandidate] | None = global_candidates if cfg.ai_consultant_enabled else None
     if cfg.semantic:
         semantic_cfg = SemanticConfig(
             model=cfg.semantic_model,
@@ -738,6 +793,29 @@ def build_scene_plan(
         } if section.audio_semantics else {}
 
         windows = _shot_windows(timeline, section, cfg)
+        consultant_advice: dict[int, dict[str, object]] = {}
+        consultant_hero_used = False
+        if cfg.ai_consultant_enabled and cfg.ai_consultant_base_url and cfg.ai_consultant_model:
+            slate = _consultant_slate(
+                candidates, section=section, windows=windows, semantic_scores=semantic_scores,
+                audio_visual_scores=audio_visual_scores, preference_profile=preference_profile, cfg=cfg,
+            )
+            try:
+                consultant_advice = consult_section(
+                    section, windows=windows, candidates=slate, previous=previous_primary,
+                    config=AIEditConsultantConfig(
+                        enabled=True, base_url=cfg.ai_consultant_base_url, model=cfg.ai_consultant_model,
+                        api_key=cfg.ai_consultant_api_key, timeout=cfg.ai_consultant_timeout,
+                        cache_dir=cfg.ai_consultant_cache_dir, force=cfg.ai_consultant_force,
+                        candidate_count=cfg.ai_consultant_candidates, weight=cfg.ai_consultant_weight,
+                        reasoning_effort=cfg.ai_consultant_reasoning_effort,
+                        max_completion_tokens=cfg.ai_consultant_max_completion_tokens,
+                    ),
+                    progress=progress,
+                )
+            except Exception as exc:
+                progress(f"AI edit consultant: section {section.index} unavailable ({exc}); using deterministic ranking")
+
         for local_shot_index, (shot_start, shot_end) in enumerate(windows):
             shot_ordinal += 1
             shot_duration = max(0.05, shot_end - shot_start)
@@ -769,6 +847,7 @@ def build_scene_plan(
                     )
                     + cfg.effect_compatibility_weight * effect_compatibility_score(candidate, section)
                     + cfg.preference_weight * _preference_score(candidate, preference_profile)
+                    + preference_bonus(candidate.scene_id, consultant_advice.get(local_shot_index), cfg.ai_consultant_weight)
                 )
                 for candidate in candidates
             }
@@ -780,6 +859,7 @@ def build_scene_plan(
                     audio_visual_scores=audio_visual_scores, recent_scene_ids=set(recent_scenes),
                     recent_clip_ids=set(recent_clips), used_clip_counts=used_clip_counts,
                     preferred_clip_id=preferred_clip, preference_profile=preference_profile, cfg=cfg, salt=salt,
+                    consultant_advice=consultant_advice,
                 )
             if selected is None:
                 selected = _choose_scene(
@@ -891,7 +971,20 @@ def build_scene_plan(
                 vector_intensity=cfg.vector_intensity,
                 codec_glitch_mode=cfg.codec_glitch_mode,
                 codec_glitch_intensity=cfg.codec_glitch_intensity,
+                effect_family_override=(consultant_advice.get(local_shot_index) or {}).get("effect_family"),
             )
+            advice = consultant_advice.get(local_shot_index) or {}
+            requested_family = advice.get("effect_family")
+            requested_hero = advice.get("hero_kind")
+            if requested_hero and not consultant_hero_used and direction.creative.hero_amount <= 0.01:
+                hero_name = str(requested_hero).replace(" ", "_")
+                # The consultant may request a hero, but at most one consultant hero is
+                # admitted per musical section. Renderer semantics stay deterministic.
+                direction = direction.model_copy(update={"creative": direction.creative.model_copy(update={
+                    "hero_kind": hero_name, "hero_amount": min(0.62, 0.28 + 0.22*section.energy),
+                    "hero_start": 0.18, "hero_end": 0.82,
+                })})
+                consultant_hero_used = True
 
             layer_budget = max(1, min(4, int(cfg.max_video_layers)))
             comp_strength = max(0.0, min(2.0, cfg.composition_intensity))
@@ -999,6 +1092,14 @@ def build_scene_plan(
                     direction=direction,
                     composition_mode=composition_mode,
                     layers=composite_layers,
+                    ai_consultant={
+                        "enabled": bool(consultant_advice),
+                        "preferred_scene_ids": list((advice or {}).get("preferred_scene_ids") or []),
+                        "selected_was_preferred": selected.scene_id in set((advice or {}).get("preferred_scene_ids") or []),
+                        "effect_family": (advice or {}).get("effect_family"),
+                        "hero_kind": (advice or {}).get("hero_kind"),
+                        "reason": (advice or {}).get("reason", ""),
+                    } if advice else {},
                 )
             )
             previous_primary = selected
@@ -1010,9 +1111,11 @@ def attach_scene_plan(
     timeline: DirectedTimeline,
     library: ClipLibrary,
     config: SceneSelectorConfig | None = None,
+    *,
+    progress=print,
 ) -> DirectedTimeline:
     cfg = config or SceneSelectorConfig()
-    plan = build_scene_plan(timeline, library, cfg)
+    plan = build_scene_plan(timeline, library, cfg, progress=progress)
     plan = promote_hero_effects(
         plan,
         {section.index: section for section in timeline.track.sections},
