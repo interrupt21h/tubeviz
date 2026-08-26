@@ -68,9 +68,29 @@ def test_download_has_independent_live_guard(tmp_path: Path):
 
 
 def test_default_formats_prefer_direct_http_and_exclude_dash_first():
-    attempts = YouTubeSource.DEFAULT_FORMAT_ATTEMPTS
+    source = YouTubeSource()
+    attempts = source.format_attempts
     assert "protocol^=http" in attempts[0]
     assert "protocol!*=dash" in attempts[0]
+    assert "height>=1080" in attempts[0]
+    assert "height<=1080" in attempts[0]
+    assert attempts[0].startswith("bv[")
+    assert "+ba" not in attempts[0]
+
+
+def test_audio_formats_and_configurable_height_bounds():
+    source = YouTubeSource(min_height=720, max_height=1440, keep_audio=True)
+    assert "height>=720" in source.format_attempts[0]
+    assert "height<=1440" in source.format_attempts[0]
+    assert "+ba" in source.format_attempts[0]
+    with pytest.raises(ValueError):
+        YouTubeSource(min_height=1080, max_height=720)
+
+
+def test_default_minimum_height_rejects_sub_1080_sources():
+    ok, reason = _acceptable(result({"duration": 30, "height": 720}), IngestConfig())
+    assert not ok
+    assert "height 720" in reason
 
 
 def test_base_options_bound_network_and_parallelize_fragments():

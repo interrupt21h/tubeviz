@@ -253,6 +253,9 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         concurrent_fragments=args.concurrent_fragments,
         retries=args.download_retries,
         fragment_retries=args.fragment_retries,
+        min_height=args.min_source_height,
+        max_height=args.max_source_height,
+        keep_audio=args.keep_audio,
     )
     summary = ingest_terms(
         terms,
@@ -266,6 +269,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             max_search_pool=args.max_search_pool,
             search_pool_step=args.search_pool_step,
             min_width=args.min_width,
+            min_source_height=args.min_source_height,
+            max_source_height=args.max_source_height,
             normalize_width=args.width,
             normalize_height=args.height,
             normalize_fps=args.fps,
@@ -335,10 +340,14 @@ def _cmd_ingest_url(args: argparse.Namespace) -> None:
     library = ClipLibrary(args.library)
     source = YouTubeSource(quiet=not args.verbose_ytdlp, cookies_from_browser=args.cookies_from_browser,
         socket_timeout=args.download_socket_timeout, concurrent_fragments=args.concurrent_fragments,
-        retries=args.download_retries, fragment_retries=args.fragment_retries)
+        retries=args.download_retries, fragment_retries=args.fragment_retries,
+        min_height=args.min_source_height, max_height=args.max_source_height,
+        keep_audio=args.keep_audio)
     summary = ingest_urls(args.urls, library, term=args.term, source=source, config=IngestConfig(
         results_per_term=1, min_duration=args.min_duration, preferred_max_duration=0,
-        hard_max_duration=args.hard_max_duration, min_width=args.min_width, normalize_width=args.width,
+        hard_max_duration=args.hard_max_duration, min_width=args.min_width,
+        min_source_height=args.min_source_height, max_source_height=args.max_source_height,
+        normalize_width=args.width,
         normalize_height=args.height, normalize_fps=args.fps, scene_threshold=args.scene_threshold,
         min_scene_seconds=args.min_scene_seconds, keep_audio=args.keep_audio, detect_scenes=not args.no_scenes,
         force=args.force, visual_index_scenes=not args.no_visual_index,
@@ -966,6 +975,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--preferred-max-duration", type=float, default=1200.0, help="Soft preference for shorter source videos; seconds; 0 disables")
     ingest.add_argument("--hard-max-duration", type=float, default=3600.0, help="Maximum downloaded clip/segment length in seconds. Longer finite search results are sampled when --sample-long-videos is enabled; 0 disables")
     ingest.add_argument("--min-width", type=int, default=0, help="Reject videos narrower than this; 0 disables")
+    ingest.add_argument("--min-source-height", type=int, default=1080, help="Minimum source-video height; default 1080")
+    ingest.add_argument("--max-source-height", type=int, default=1080, help="Maximum downloaded source format height; default 1080; 0 disables")
     ingest.add_argument("--width", type=int, default=1280, help="Normalized frame width")
     ingest.add_argument("--height", type=int, default=720, help="Normalized frame height")
     ingest.add_argument("--fps", type=int, default=30, help="Normalized frame rate")
@@ -1074,6 +1085,8 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_url.add_argument("--min-duration", type=float, default=0.0)
     ingest_url.add_argument("--hard-max-duration", type=float, default=0.0, help="Reject longer videos; 0 disables")
     ingest_url.add_argument("--min-width", type=int, default=0)
+    ingest_url.add_argument("--min-source-height", type=int, default=1080, help="Minimum source-video height; default 1080")
+    ingest_url.add_argument("--max-source-height", type=int, default=1080, help="Maximum downloaded source format height; default 1080; 0 disables")
     ingest_url.add_argument("--width", type=int, default=1280)
     ingest_url.add_argument("--height", type=int, default=720)
     ingest_url.add_argument("--fps", type=int, default=30)

@@ -65,12 +65,6 @@ class YouTubeSource:
     # Prefer finite direct HTTP/HTTPS media. This mirrors yt-dlp's documented
     # recommendation for preferring direct links over HLS/DASH manifests.
     # Live HLS is rejected separately before any download starts.
-    DEFAULT_FORMAT_ATTEMPTS = (
-        "(bv*+ba/b)[protocol^=http][protocol!*=dash]",
-        "(bv*+ba/b)[protocol^=http]",
-        "b[ext=mp4][protocol^=http][protocol!*=dash]",
-    )
-
     LIVE_STATUSES = {"is_live", "is_upcoming", "post_live"}
     FINITE_PROTOCOLS = {"http", "https", "http_dash_segments"}
 
@@ -84,14 +78,47 @@ class YouTubeSource:
         concurrent_fragments: int = 4,
         retries: int = 2,
         fragment_retries: int = 2,
+        min_height: int = 1080,
+        max_height: int = 1080,
+        keep_audio: bool = False,
     ):
         self.quiet = quiet
         self.cookies_from_browser = cookies_from_browser
-        self.format_attempts = format_attempts or self.DEFAULT_FORMAT_ATTEMPTS
+        self.min_height = max(0, int(min_height))
+        self.max_height = max(0, int(max_height))
+        if self.min_height and self.max_height and self.min_height > self.max_height:
+            raise ValueError("minimum source height cannot exceed maximum source height")
+        self.keep_audio = bool(keep_audio)
+        self.format_attempts = format_attempts or self._format_attempts()
         self.socket_timeout = max(1.0, float(socket_timeout))
         self.concurrent_fragments = max(1, int(concurrent_fragments))
         self.retries = max(0, int(retries))
         self.fragment_retries = max(0, int(fragment_retries))
+
+    def _height_filter(self) -> str:
+        pieces: list[str] = []
+        if self.min_height:
+            pieces.append(f"[height>={self.min_height}]")
+        if self.max_height:
+            pieces.append(f"[height<={self.max_height}]")
+        return "".join(pieces)
+
+    def _format_attempts(self) -> tuple[str, ...]:
+        bounds = self._height_filter()
+        if self.keep_audio:
+            return (
+                f"(bv{bounds}+ba/b{bounds})[protocol^=http][protocol!*=dash]",
+                f"(bv{bounds}+ba/b{bounds})[protocol^=http]",
+                f"b{bounds}[protocol^=http]",
+            )
+        # Library audio is discarded by default. Request video-only formats so
+        # yt-dlp does not download/merge a second stream that normalization will
+        # immediately remove.
+        return (
+            f"bv{bounds}[protocol^=http][protocol!*=dash]",
+            f"bv{bounds}[protocol^=http]",
+            f"b{bounds}[protocol^=http][protocol!*=dash]",
+        )
 
     def _base_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {

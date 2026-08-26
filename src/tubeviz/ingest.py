@@ -31,6 +31,8 @@ class IngestConfig:
     # Actual rejection threshold; 0 disables it.
     hard_max_duration: float = 60.0 * 60.0
     min_width: int = 0
+    min_source_height: int = 1080
+    max_source_height: int = 1080
     normalize_width: int = 1280
     normalize_height: int = 720
     normalize_fps: int = 30
@@ -167,6 +169,11 @@ def _acceptable(result: SearchResult, cfg: IngestConfig) -> tuple[bool, str | No
     width = metadata.get("width")
     if width is not None and cfg.min_width and int(width) < cfg.min_width:
         return False, f"width {width} < {cfg.min_width}"
+    height = metadata.get("height")
+    if height is not None and cfg.min_source_height and int(height) < cfg.min_source_height:
+        return False, f"height {height} < minimum {cfg.min_source_height}"
+    if cfg.min_source_height and cfg.max_source_height and cfg.min_source_height > cfg.max_source_height:
+        return False, "minimum source height exceeds maximum source height"
     return True, None
 
 

@@ -432,7 +432,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.30.1**.
+For this release, the header and `tubeviz.__version__` should report **0.30.2**.
 
 ```mermaid
 flowchart LR
@@ -650,6 +650,8 @@ Important ingest controls:
 | `--preferred-max-duration S` | Soft preference for shorter videos; `0` disables |
 | `--hard-max-duration S` | Hard rejection limit; `0` disables |
 | `--min-width PX` | Reject narrow video; `0` disables |
+| `--min-source-height PX` | Reject sources below this height; default `1080` |
+| `--max-source-height PX` | Cap the downloaded source representation; default `1080`, `0` disables |
 | `--width/--height/--fps` | Normalized media format |
 | `--scene-threshold` | FFmpeg scene-change sensitivity |
 | `--min-scene-seconds` | Minimum indexed scene duration |

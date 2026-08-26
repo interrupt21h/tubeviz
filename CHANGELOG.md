@@ -1,3 +1,11 @@
+# 0.30.2 — Bounded source resolution
+
+- Default both minimum accepted source height and maximum downloaded source height to 1080p for search and manual URL ingestion.
+- Add `--min-source-height` and `--max-source-height` to both ingest commands and expose them in the curated Studio forms and generated Command Center.
+- Build yt-dlp format selectors from the requested height bounds instead of downloading unrestricted best-quality representations such as 4K before 720p normalization.
+- Download video-only representations by default because Tubeviz discards source audio; request and merge a separate audio stream only with `--keep-audio`.
+- Preserve direct finite HTTP format preference, bounded retries, fragment concurrency, and explicit fallback attempts.
+
 # 0.30.1 — Live processing progress
 
 - Added a first-class Studio progress panel with the current processing stage, elapsed time, determinate percentage/counts when available, ETA when reported, and an indeterminate animation for work whose total cannot be known.
