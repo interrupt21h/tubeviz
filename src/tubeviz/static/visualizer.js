@@ -39,6 +39,10 @@ function rand(){
 function offscreen(alpha=false){const c=document.createElement('canvas');return [c,c.getContext('2d',{alpha})];}
 const [history,historyCtx]=offscreen(false);
 const [scratch,scratchCtx]=offscreen(true);
+// Full-resolution pre-FX color reference. Effects may reshape luminance/geometry,
+// but final chroma is anchored back toward this composed source frame according
+// to CreativeEffectPlan.source_fidelity.
+const [sourceColorAnchor,sourceColorAnchorCtx]=offscreen(false);
 const [freezeCanvas,freezeCtx]=offscreen(false);
 const [holdCanvas,holdCtx]=offscreen(false);
 const [edgeCanvas,edgeCtx]=offscreen(true);
@@ -74,7 +78,7 @@ let delayWrite=0,delayCount=0,historyReady=false;
 function resize(){
   width=canvas.width=videoFx.width=Math.floor(innerWidth*devicePixelRatio);
   height=canvas.height=videoFx.height=Math.floor(innerHeight*devicePixelRatio);
-  for(const c of [history,scratch,freezeCanvas,holdCanvas,edgeCanvas,subjectLayer]){c.width=width;c.height=height;}
+  for(const c of [history,scratch,sourceColorAnchor,freezeCanvas,holdCanvas,edgeCanvas,subjectLayer]){c.width=width;c.height=height;}
   for(const c of delayBuffers){c.width=Math.max(1,Math.floor(width/2));c.height=Math.max(1,Math.floor(height/2));}
   exportCanvas.width=width;exportCanvas.height=height;
   vectorSample.width=128;vectorSample.height=72;
@@ -264,6 +268,40 @@ function sourceFidelity(){
   // a permanent color replacement.  The envelope returns to the source immediately.
   const hero=(typeof heroEnvelope==='function')?heroEnvelope():0;
   return Math.max(.58,Math.min(1,base-.16*hero));
+}
+function captureSourceColorAnchor(){
+  sourceColorAnchorCtx.save();
+  sourceColorAnchorCtx.globalAlpha=1;
+  sourceColorAnchorCtx.globalCompositeOperation='source-over';
+  if('filter' in sourceColorAnchorCtx)sourceColorAnchorCtx.filter='none';
+  sourceColorAnchorCtx.clearRect(0,0,width,height);
+  sourceColorAnchorCtx.drawImage(videoFx,0,0,width,height);
+  sourceColorAnchorCtx.restore();
+}
+function applySourceColorFidelity(){
+  if(!activeScene)return;
+  const fidelity=sourceFidelity();
+  if(fidelity<=.60)return;
+  const color=activeScene?.direction?.color??{};
+  const creative=activeScene?.direction?.creative??{};
+  const hue=Math.abs(Number(automationValue('hue',color.hue_shift_degrees??0)))/14;
+  const palette=Math.max(0,Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)));
+  const hero=(typeof heroEnvelope==='function')?heroEnvelope():0;
+  // Normal shots get a strong source-chroma anchor. Explicit color design and hero
+  // moments can relax it, but never allow a persistent whole-frame LUT to take over.
+  const base=Math.max(0,Math.min(1,(fidelity-.60)/.40));
+  const intentional=Math.max(0,Math.min(1,.48*hue+.35*palette+.42*hero));
+  const alpha=Math.max(0,Math.min(.94,base*(.94-.48*intentional)));
+  if(alpha<=.025)return;
+  fx.save();
+  fx.globalAlpha=alpha;
+  // CSS/Canvas 'color' blend takes hue+saturation from the source anchor while
+  // retaining luminosity from the effected frame. This preserves motion/geometry
+  // effects without letting additive passes collapse every clip into one palette.
+  fx.globalCompositeOperation='color';
+  if('filter' in fx)fx.filter='none';
+  fx.drawImage(sourceColorAnchor,0,0,width,height);
+  fx.restore();
 }
 function channelPixels(source){
   const w=channelSample.width,h=channelSample.height;
@@ -648,16 +686,17 @@ function applyBeatWarp(amount,low,mid,high){
   const cy=height*(.52+.08*Math.cos(phase*.31));
 
   if(bass>.02){
-    fx.save();fx.globalCompositeOperation='screen';
-    const rings=3+Math.floor(bass*5);
-    for(let i=rings;i>=1;i--){
-      const q=i/rings,r=Math.min(width,height)*(.10+.34*q);
-      fx.save();fx.beginPath();fx.arc(cx,cy,r,0,Math.PI*2);fx.clip();
-      const scale=1+bass*(.025+.055*(1-q));
-      fx.translate(cx,cy);fx.scale(scale,scale);fx.translate(-cx,-cy);
-      fx.globalAlpha=.035+.12*bass*(1-q*.35);
-      fx.drawImage(scratch,0,0,width,height);fx.restore();
-    }
+    // Bass impact is a borderless full-frame breathing/push transform. Older
+    // versions clipped several scaled passes to concentric circles, which made a
+    // circular mask feel like the default visual language on every strong beat.
+    fx.save();
+    fx.globalCompositeOperation='source-over';
+    fx.globalAlpha=.045+.14*bass;
+    const sx=1+.030*bass,sy=1+.018*bass;
+    const dx=Math.sin(phase*.73)*width*.006*bass;
+    const dy=Math.cos(phase*.61)*height*.005*bass;
+    fx.translate(cx+dx,cy+dy);fx.scale(sx,sy);fx.translate(-cx,-cy);
+    fx.drawImage(scratch,0,0,width,height);
     fx.restore();
   }
 
@@ -1322,6 +1361,9 @@ function codecFallback(){
 }
 function applyPostFx(){
   if(!activeScene)return;
+  // Preserve the actual composed clip palette before any post-processing. This is
+  // the canonical chroma reference for the final source-fidelity guard.
+  captureSourceColorAnchor();
   const t=activeScene.transform??{},m=liveFx.master;
   const motion=m*liveFx.motion,trails=m*liveFx.trails,glitchScale=m*liveFx.glitch,strobeScale=m*liveFx.strobe;
 
@@ -1427,6 +1469,11 @@ function applyPostFx(){
   applyScanlines(scan);
   applyVignette(vignette);
   applyStrobe(strobe);
+
+  // Final raster color guard: preserve the source clip's hue/saturation even after
+  // many additive temporal/spatial passes. Vector accents are drawn afterwards so
+  // they can retain their deliberately designed accent colors.
+  applySourceColorFidelity();
   renderVectorSceneGraph();
 
   historyCtx.globalAlpha=.92;

@@ -280,3 +280,50 @@ def test_browser_mask_and_symmetry_grammars_are_not_universal_circles():
     assert "case'time_prism':default" in js
     time_prism = js.split("case'time_prism':default", 1)[1].split("break;", 1)[0]
     assert "applyLocalSymmetryCreative" not in time_prism
+
+
+def test_final_source_chroma_guard_wraps_post_processing_in_both_renderers():
+    from pathlib import Path
+
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    native_fx = Path("src/tubeviz/native_src/src/effects.cpp").read_text()
+    native_renderer = Path("src/tubeviz/native_src/src/renderer.cpp").read_text()
+
+    assert "captureSourceColorAnchor" in js
+    assert "applySourceColorFidelity" in js
+    assert "globalCompositeOperation='color'" in js
+    assert js.index("applySourceColorFidelity();") < js.index("renderVectorSceneGraph();")
+
+    assert "apply_source_color_fidelity" in native_fx
+    assert "YIQ" in native_fx
+    assert native_renderer.index("apply_reactive_effects") < native_renderer.index("apply_source_color_fidelity")
+
+
+def test_bass_beat_warp_has_no_concentric_ring_mask():
+    from pathlib import Path
+
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    native_fx = Path("src/tubeviz/native_src/src/effects.cpp").read_text()
+
+    # The old browser implementation clipped each bass pulse to concentric arcs.
+    beat_block = js[js.index("function applyBeatWarp"):js.index("function applyTempoWarp")]
+    assert "const rings=" not in beat_block
+    assert "fx.arc(cx,cy,r" not in beat_block
+
+    # Native used a rational ring falloff around r ~= .22.
+    reactive_block = native_fx[native_fx.index("void apply_reactive_effects"):native_fx.index("inline void blend_pixel")]
+    assert "rr2" not in reactive_block
+    assert "0.0484" not in reactive_block
+    assert "125.0 * distance" not in reactive_block
+    assert "bass_push" in reactive_block
+
+
+def test_clean_color_shots_are_neutral_more_than_eighty_percent_of_time():
+    clean = 0
+    for scene_id in range(1, 121):
+        c = candidate(scene_id)
+        d = direction(c, section(index=4, label="develop"), creative_intensity=1.0)
+        if abs(d.color.hue_shift_degrees) < 1e-9:
+            clean += 1
+            assert d.color.saturation_scale == 1.0
+    assert clean >= 90

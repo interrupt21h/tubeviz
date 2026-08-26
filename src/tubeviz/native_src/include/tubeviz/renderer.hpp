@@ -48,6 +48,10 @@ private:
     ReactiveState reactive_{};
     std::size_t cue_index_{0};
     std::vector<std::uint8_t> previous_output_;
+    // Composed primary+companion frame before creative/vector/reactive effects. Used
+    // by the final source-chroma guard so every native post-processing path obeys
+    // CreativeEffectPlan.source_fidelity.
+    std::vector<std::uint8_t> color_reference_;
     bool has_previous_output_{false};
     std::size_t previous_shot_index_{static_cast<std::size_t>(-1)};
 };

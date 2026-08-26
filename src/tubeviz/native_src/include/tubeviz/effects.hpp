@@ -50,6 +50,18 @@ void apply_creative_effects(
     double phase
 );
 
+// Re-anchor final hue/saturation toward the composed source frame while retaining
+// effect-generated luminance/structure. This is the native equivalent of Canvas
+// 'color' blending and makes source_fidelity a whole-render contract.
+void apply_source_color_fidelity(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>& reference,
+    int width,
+    int height,
+    const CreativeEffect& creative,
+    double progress
+);
+
 void apply_vector_effects(
     std::vector<std::uint8_t>& rgb,
     const std::vector<std::uint8_t>* companion,

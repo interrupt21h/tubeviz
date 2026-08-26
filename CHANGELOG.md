@@ -1,3 +1,13 @@
+# 0.33.7 — Final source-chroma fidelity guard
+
+- Make `source_fidelity` a whole-render contract rather than a setting used only by the directed color grade. Browser rendering now captures the composed source frame before post FX and re-anchors final hue/saturation toward that source after raster effects, while retaining effect-generated luminance and geometry.
+- Add the same final chroma guard to the native renderer using YIQ chroma interpolation against the pre-FX composed source frame. This runs after native creative and vector effects, preventing additive feedback, temporal effects, portals, or other full-frame treatments from collapsing unrelated footage into one magenta palette.
+- Reduce routine hue direction further: only about 10% of ordinary shots and 16% of peak shots request a hue bias, and non-color-directed shots keep saturation exactly neutral.
+- Hero moments and explicit palette/hue treatments temporarily relax the chroma anchor, preserving intentional color design without allowing it to become the default look of every clip.
+- Remove the remaining always-recurrent circular beat grammar: browser bass beat-warp no longer draws concentric clipped rings, and the native renderer no longer uses a radial ring envelope. Both now use a borderless full-frame breathing/push transform.
+- Run the native source-chroma guard after reactive beat processing, closing the final path that could modify chroma after fidelity protection.
+- Preserve source-derived vector accents in browser rendering by applying the final chroma guard before vector overlays; native vectors are included in the guard because they share the raster buffer and can occupy broad image regions.
+
 # 0.33.6 — Visual treatment diversity and sparse masks
 
 - Add `CreativeEffectPlan.style_version=2` so renderers can recognize the sparse-treatment grammar. Existing v0.33.0-v0.33.5 timelines load as legacy style 0 and receive renderer-time sparsity guards for hue, masks, symmetry, palette overlays, and portals; regenerating the timeline is recommended but no longer required to eliminate the old always-on look.

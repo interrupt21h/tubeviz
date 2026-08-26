@@ -630,7 +630,7 @@ def build_visual_direction(
     # exactly zero; the remaining shots receive a small source-relative bias.  This
     # gives the source library's actual palette room to provide visual diversity.
     color_gate = _seed_unit(shot_seed, 31)
-    color_active = color_gate >= (0.72 if section.label != "peak" else 0.68)
+    color_active = color_gate >= (0.90 if section.label != "peak" else 0.84)
     vibe_bias = _VIBE_HUE_BIAS.get(section.vibe, _VIBE_HUE_BIAS["neutral"]) if color_active else 0.0
     ai_bias = 0.0
     if color_active and section.ai_direction is not None and section.ai_direction.target_hue is not None:
@@ -653,7 +653,7 @@ def build_visual_direction(
     if color_active:
         saturation_scale = _clamp(.96 + .18 * section.energy + .06 * section.brightness, .86, 1.25)
     else:
-        saturation_scale = _clamp(.98 + .06 * section.energy, .94, 1.08)
+        saturation_scale = 1.0
     contrast_scale = _clamp(.95 + .30 * section.energy + .10 * section.noisiness, .82, 1.42)
     brightness_scale = _clamp(.90 + .16 * section.brightness + .07 * section.energy, .80, 1.24)
     chroma = _clamp((.01 + .10 * section.energy + .07 * section.noisiness) * (1.0 if color_active else .28), 0.0, .24)

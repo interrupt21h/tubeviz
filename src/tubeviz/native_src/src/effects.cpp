@@ -195,16 +195,17 @@ void apply_reactive_effects(
     const double ripple = std::clamp(
         state.ripple + state.beat_warp * state.beat_mid * 0.35, 0.0, 1.0
     );
-    const double radial = std::clamp(
-        state.beat_warp * state.beat_low + state.vortex * 0.25, 0.0, 1.0
+    const double bass_push = std::clamp(
+        state.beat_warp * state.beat_low + state.vortex * 0.18, 0.0, 1.0
     );
-    if (ripple > 0.015 || radial > 0.015) {
+    if (ripple > 0.015 || bass_push > 0.015) {
         const auto src = rgb;
         const double cx = width * (0.5 + 0.05 * std::sin(phase * 0.7));
         const double cy = height * (0.5 + 0.04 * std::cos(phase * 0.6));
-        const double inv_scale2 =
-            1.0 / (static_cast<double>(std::max(width, height)) *
-                   std::max(width, height));
+        const double zoom_x = 1.0 + .030 * bass_push;
+        const double zoom_y = 1.0 + .018 * bass_push;
+        const double drift_x = std::sin(phase*.73) * width * .006 * bass_push;
+        const double drift_y = std::cos(phase*.61) * height * .005 * bass_push;
 #ifdef TUBEVIZ_HAVE_OPENMP
 #pragma omp parallel for schedule(static)
 #endif
@@ -212,20 +213,10 @@ void apply_reactive_effects(
             const double wave =
                 std::sin(y * 0.055 + phase * 11.0) * width * 0.012 * ripple;
             for (int x = 0; x < width; ++x) {
-                double sx = x - wave;
-                double sy = y;
-                if (radial > 0.0) {
-                    const double dx = x - cx, dy = y - cy;
-                    const double rr2 = (dx * dx + dy * dy) * inv_scale2;
-                    // Ring centered around r ~= .22 using a rational falloff.
-                    // This is visually close to the old exp/sqrt formulation
-                    // and dramatically cheaper on multi-megapixel frames.
-                    const double distance = std::abs(rr2 - 0.0484);
-                    const double envelope = 1.0 / (1.0 + 125.0 * distance);
-                    const double push = radial * 0.072 * envelope;
-                    sx -= dx * push;
-                    sy -= dy * push;
-                }
+                // Borderless anisotropic breathing/push. There is deliberately no
+                // radial ring envelope or circular clipping boundary here.
+                double sx = cx + (x - cx - drift_x) / zoom_x - wave;
+                double sy = cy + (y - cy - drift_y) / zoom_y;
                 const int ix = std::clamp(static_cast<int>(sx + 0.5), 0, width - 1);
                 const int iy = std::clamp(static_cast<int>(sy + 0.5), 0, height - 1);
                 const auto di = static_cast<std::size_t>((y * width + x) * 3);
@@ -908,6 +899,54 @@ void apply_creative_effects(
         }
     }
     restore_subject(rgb, original, width, height, c, std::max(common_env, hero));
+}
+
+void apply_source_color_fidelity(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>& reference,
+    int width,
+    int height,
+    const CreativeEffect& c,
+    double progress
+) {
+    if (rgb.size() != reference.size() || rgb.empty()) return;
+    const double hero = hero_envelope(c, progress);
+    const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
+    if (fidelity <= .60) return;
+
+    const double hue_intent = std::clamp(std::abs(c.color_hue_shift) / 14.0, 0.0, 1.0);
+    const double palette_intent = std::clamp(c.palette_strength, 0.0, 1.0);
+    const double intentional = std::clamp(.48*hue_intent + .35*palette_intent + .42*hero, 0.0, 1.0);
+    const double base = std::clamp((fidelity - .60) / .40, 0.0, 1.0);
+    const double alpha = std::clamp(base * (.94 - .48*intentional), 0.0, .94);
+    if (alpha <= .025) return;
+
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const auto i = static_cast<std::size_t>((y * width + x) * 3);
+            const double r = rgb[i], g = rgb[i+1], b = rgb[i+2];
+            const double rr = reference[i], rg = reference[i+1], rb = reference[i+2];
+
+            // YIQ is convenient here because Y is perceptual luminance while I/Q
+            // carry chroma. Keep the effected frame's Y, but interpolate I/Q back
+            // toward the actual source frame. Spatial effects remain intact while
+            // a runaway additive color cast cannot dominate the whole shot.
+            const double y_out = .299*r + .587*g + .114*b;
+            const double i_out = .596*r - .274*g - .322*b;
+            const double q_out = .211*r - .523*g + .312*b;
+            const double i_ref = .596*rr - .274*rg - .322*rb;
+            const double q_ref = .211*rr - .523*rg + .312*rb;
+            const double ii = i_out*(1.0-alpha) + i_ref*alpha;
+            const double qq = q_out*(1.0-alpha) + q_ref*alpha;
+
+            rgb[i]   = clamp8(y_out + .956*ii + .621*qq);
+            rgb[i+1] = clamp8(y_out - .272*ii - .647*qq);
+            rgb[i+2] = clamp8(y_out - 1.106*ii + 1.703*qq);
+        }
+    }
 }
 
 void apply_vector_effects(

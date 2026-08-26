@@ -128,6 +128,10 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
         blend_layer(output, companion, layer.opacity, layer.blend_mode);
     }
 
+    // Canonical pre-FX color reference. Keep it as renderer state so the final
+    // chroma guard can run *after* reactive beat effects as well.
+    color_reference_ = output;
+
     const double progress = std::clamp(
         (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time),
         0.0, 1.0
@@ -200,6 +204,16 @@ int Renderer::run() {
         const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative);
         auto output = render_shot(*shot, now, allow_previous_effects);
         apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
+        // Final native color contract runs after creative, vector *and reactive*
+        // effects. Earlier placement allowed beat chroma/radial processing to bypass
+        // source_fidelity and reintroduce a global cast after the guard had run.
+        const double color_progress = std::clamp(
+            (now - shot->time) / std::max(0.001, shot->timeline_end - shot->time),
+            0.0, 1.0
+        );
+        apply_source_color_fidelity(
+            output, color_reference_, width_, height_, shot->creative, color_progress
+        );
 
         if (shot_index != previous_shot_index_ && shot->crossfade > 0.0 && frame_index > 0 && !previous_output_.empty()) {
             // Freeze-frame crossfade for Phase 1. Phase 2 keeps the outgoing
