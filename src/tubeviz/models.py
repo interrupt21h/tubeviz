@@ -385,6 +385,9 @@ class CreativeEffectPlan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # 0 = legacy v0.33.0-v0.33.5 treatment semantics.  v2 introduces sparse
+    # color/mask scheduling so renderers can defensively tame older timelines.
+    style_version: int = Field(default=0, ge=0, le=16)
     flow_warp: float = Field(default=0.0, ge=0.0, le=1.0)
     flow_trails: float = Field(default=0.0, ge=0.0, le=1.0)
     flow_rgb: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -409,7 +412,7 @@ class CreativeEffectPlan(BaseModel):
     texture_streaks: float = Field(default=0.0, ge=0.0, le=1.0)
     palette_strength: float = Field(default=0.0, ge=0.0, le=1.0)
     # Fraction of the source image's original color/tonal identity that should be
-    # preserved.  Active v0.33.5 plans normally live around 0.8-0.95; disabled
+    # preserved.  Active v0.33.6 plans normally live around 0.84-0.985; disabled
     # creative rendering explicitly uses 1.0.  The non-1.0 model default keeps
     # older v0.33 timelines conservative when loaded by a newer renderer.
     source_fidelity: float = Field(default=0.90, ge=0.0, le=1.0)

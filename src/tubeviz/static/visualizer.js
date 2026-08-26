@@ -193,7 +193,7 @@ function drawLayer(target,state,rect,alpha=1,blend=null){
   // Clamp legacy timeline hue transforms as well.  New planners already emit only
   // subtle shot-local hue variation, but this keeps older v0.33 timelines from
   // reintroducing the pre-fix full-palette rotation when previewed by a new server.
-  const layerHue=Math.max(-10,Math.min(10,Number(t.hue_degrees??0)));
+  const layerHue=legacyTreatment()?0:Math.max(-6,Math.min(6,Number(t.hue_degrees??0)));
   if('filter' in target)target.filter=`brightness(${t.brightness??1}) contrast(${t.contrast??1}) saturate(${t.saturation??1}) hue-rotate(${layerHue}deg) blur(${t.blur_px??0}px) grayscale(${t.grayscale??0})`;
   target.beginPath();target.rect(rect.x,rect.y,rect.w,rect.h);target.clip();
   target.translate(rect.x+rect.w/2,rect.y+rect.h/2);target.rotate((t.rotation_degrees??0)*Math.PI/180);target.scale(t.mirror?-1:1,1);target.translate(-(rect.x+rect.w/2),-(rect.y+rect.h/2));
@@ -528,22 +528,27 @@ function applyMirrorCorridor(amount){
 }
 function applyMaskWipe(amount){
   if(amount<=.025)return;
-  const old=delayed(2);
-  const p=(clockSeconds()*(.10+.28*amount)+phase*.07)%1;
-  fx.save();
-  fx.beginPath();
-  if(Math.floor(clockSeconds()*.5)%2===0){
-    const r=Math.hypot(width,height)*(.08+p*.92);
-    fx.arc(width/2,height/2,r,0,Math.PI*2);
+  const old=delayed(2),sceneSeed=Number(activeScene?.scene_id??0)+Number(activeScene?.section_index??0)*17;
+  const p=(clockSeconds()*(.10+.24*amount)+phase*.05)%1,variant=Math.abs(sceneSeed)%4;
+  fx.save();fx.beginPath();
+  if(variant===0){
+    // Diagonal band -- the most common mask grammar.
+    const x=(p*1.5-.25)*width;
+    fx.moveTo(x-width*.30,0);fx.lineTo(x+width*.16,0);fx.lineTo(x+width*.31,height);fx.lineTo(x-width*.15,height);fx.closePath();
+  }else if(variant===1){
+    // Off-axis diamond/lozenge.
+    const cx=width*(.20+.60*p),cy=height*(.42+.12*Math.sin(phase*.3)),rx=width*(.10+.18*amount),ry=height*(.20+.16*amount);
+    fx.moveTo(cx,cy-ry);fx.lineTo(cx+rx,cy);fx.lineTo(cx,cy+ry);fx.lineTo(cx-rx,cy);fx.closePath();
+  }else if(variant===2){
+    // Irregular polygon around the semantic target.
+    const t=creativeTarget(),r=Math.min(width,height)*(.12+.20*p);
+    for(let i=0;i<7;i++){const a=i/7*Math.PI*2,rr=r*(.72+.22*Math.sin(a*3+phase*.4));const x=t.x+Math.cos(a)*rr*1.35,y=t.y+Math.sin(a)*rr;if(i===0)fx.moveTo(x,y);else fx.lineTo(x,y);}fx.closePath();
   }else{
-    const x=(p*1.4-.2)*width;
-    fx.moveTo(x-width*.24,0);fx.lineTo(x+width*.18,0);fx.lineTo(x+width*.24,height);fx.lineTo(x-width*.18,height);fx.closePath();
+    // Ellipse is intentionally only one of four variants and drifts off center.
+    const cx=width*(.35+.28*Math.sin(phase*.11)),cy=height*(.46+.18*Math.cos(phase*.09));
+    fx.ellipse(cx,cy,width*(.08+.34*p),height*(.12+.28*p),phase*.03,0,Math.PI*2);
   }
-  fx.clip();
-  fx.globalAlpha=.12+.42*amount;
-  fx.globalCompositeOperation='screen';
-  fx.drawImage(old,0,0,width,height);
-  fx.restore();
+  fx.clip();fx.globalAlpha=.08+.28*amount;fx.globalCompositeOperation='source-over';fx.drawImage(old,0,0,width,height);fx.restore();
 }
 function applySolarize(amount){
   if(amount<=.035)return;
@@ -812,9 +817,13 @@ function applyRecursiveFeedbackCreative(amount){
   fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.025+.13*amount;fx.translate(target.x,target.y);fx.rotate(rot);fx.scale(scale,scale);fx.translate(-target.x,-target.y);fx.drawImage(history,0,0,width,height);fx.restore();
 }
 function applyLocalSymmetryCreative(amount){
-  if(amount<=.025)return;snapshot();const c=activeScene?.direction?.creative??{},target=creativeTarget(),segments=Math.max(2,Math.min(12,Number(c.symmetry_segments??4))),radius=Math.min(width,height)*(.13+.16*amount),step=Math.PI*2/segments;
-  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.035+.12*amount;fx.beginPath();fx.arc(target.x,target.y,radius*1.15,0,Math.PI*2);fx.clip();
-  for(let i=0;i<segments;i++){fx.save();fx.translate(target.x,target.y);fx.rotate(i*step+phase*.015*amount);if(i%2)fx.scale(-1,1);const sc=1+.025*Math.sin(phase*.23+i);fx.scale(sc,sc);fx.translate(-target.x,-target.y);fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  if(amount<=.025)return;snapshot();const c=activeScene?.direction?.creative??{},target=creativeTarget(),segments=Math.max(2,Math.min(12,Number(c.symmetry_segments??4))),radius=Math.min(width,height)*(.11+.14*amount),step=Math.PI*2/segments,variant=Math.abs(Number(activeScene?.scene_id??0))%3;
+  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.025+.08*amount;fx.beginPath();
+  if(variant===0){fx.ellipse(target.x,target.y,radius*1.35,radius*.76,phase*.025,0,Math.PI*2);}
+  else if(variant===1){for(let i=0;i<6;i++){const a=i/6*Math.PI*2+phase*.01,rr=radius*(i%2?1.0:.72),x=target.x+Math.cos(a)*rr*1.25,y=target.y+Math.sin(a)*rr;if(i===0)fx.moveTo(x,y);else fx.lineTo(x,y);}fx.closePath();}
+  else{fx.rect(target.x-radius*1.25,target.y-radius*.55,radius*2.5,radius*1.1);}
+  fx.clip();
+  for(let i=0;i<segments;i++){fx.save();fx.translate(target.x,target.y);fx.rotate(i*step+phase*.015*amount);if(i%2)fx.scale(-1,1);const sc=1+.02*Math.sin(phase*.23+i);fx.scale(sc,sc);fx.translate(-target.x,-target.y);fx.drawImage(scratch,0,0,width,height);fx.restore();}
   fx.restore();
 }
 function applySourceTextureCreative(bloomAmount,streakAmount){
@@ -835,7 +844,7 @@ function applyHeroCreative(){
     case'flow_melt':applyFlowWarpCreative(.92*a);applyTemporalSmearCreative(.55*a);applyFlowRgbCreative(.35*a);break;
     case'depth_burst':applyDepthParallaxCreative(.92*a);applyRecursiveFeedbackCreative(.58*a);break;
     case'recursive_portal':applyLocalSymmetryCreative(.78*a);applyRecursiveFeedbackCreative(.82*a);applySourceTextureCreative(.42*a,.26*a);break;
-    case'time_prism':default:applyTemporalRgbCreative(.68*a);applyTemporalSmearCreative(.48*a);applyLocalSymmetryCreative(.40*a);applyBlockDisplace(.26*a);break;
+    case'time_prism':default:applyTemporalRgbCreative(.62*a);applyTemporalSmearCreative(.44*a);applyBlockDisplace(.30*a);applySpectralDisplacement(.20*a);break;
   }
 }
 
@@ -843,7 +852,8 @@ function applyDirectedColor(){
   const dir=activeScene?.direction;if(!dir)return;
   const color=dir.color??{},rawHue=automationValue('hue',color.hue_shift_degrees??0);
   // Defensive clamp for timelines planned by older releases with absolute hue LUTs.
-  const hue=Math.max(-28,Math.min(28,Number(rawHue)));
+  if(legacyTreatment()&&sceneSparseGate(31)<.70)return;
+  const hue=Math.max(-14,Math.min(14,Number(rawHue)));
   const sat=Math.max(.65,Math.min(1.55,Number(automationValue('saturation',color.saturation_scale??1))));
   const contrast=Math.max(.72,Math.min(1.55,Number(color.contrast_scale??1))),brightness=Math.max(.72,Math.min(1.35,Number(color.brightness_scale??1)));
   if(Math.abs(hue)<.2&&Math.abs(sat-1)<.01&&Math.abs(contrast-1)<.01&&Math.abs(brightness-1)<.01)return;
@@ -852,8 +862,8 @@ function applyDirectedColor(){
   snapshot();
   fx.save();
   if('filter'in fx)fx.filter=`hue-rotate(${hue}deg) saturate(${sat}) contrast(${contrast}) brightness(${brightness})`;
-  const colorDelta=Math.min(1,Math.abs(hue)/28+.55*Math.abs(sat-1)+.35*Math.abs(contrast-1)+.25*Math.abs(brightness-1));
-  fx.globalAlpha=Math.min(.34,.025+room*(.48+.34*colorDelta));
+  const colorDelta=Math.min(1,Math.abs(hue)/14+.45*Math.abs(sat-1)+.30*Math.abs(contrast-1)+.20*Math.abs(brightness-1));
+  fx.globalAlpha=Math.min(.24,.015+room*(.34+.26*colorDelta));
   fx.globalCompositeOperation='source-over';
   fx.drawImage(scratch,0,0,width,height);
   fx.restore();
@@ -896,6 +906,11 @@ function vectorRand(seed,index=0){
   x^=x<<13;x^=x>>>17;x^=x<<5;
   return (x>>>0)/4294967296;
 }
+function sceneSparseGate(index=0){
+  const seed=(Number(activeScene?.scene_id??1)*1000003+Number(activeScene?.section_index??0)*9176+Number(activeScene?.occurrence??1)*1009)>>>0;
+  return vectorRand(seed,index);
+}
+function legacyTreatment(){return Number(activeScene?.direction?.creative?.style_version??0)<2;}
 function effectCurveValue(effect,name,fallback=null){
   const points=effect?.automation?.[name];
   if(!Array.isArray(points)||!points.length)return fallback??effect?.[name]??effect?.amount??0;
@@ -1252,8 +1267,8 @@ function renderVectorSceneGraph(){
   // visible vector families simultaneously. Keep all invisible deformation,
   // but select only the strongest family vocabulary at render time.
   const family=activeScene?.direction?.effect_family??'cinematic',role=activeScene?.direction?.narrative_role??'develop';
-  const priority={dream:['vector_echo','contours','portal','semantic_outline'],liquid:['flow_ribbons','vector_echo','portal','flow_particles'],analog:['perspective_grid','contours','semantic_outline'],fracture:['delaunay_fracture','voronoi','portal'],hyper:['flow_ribbons','delaunay_fracture','flow_particles','perspective_grid'],prismatic:['portal','voronoi','flow_ribbons'],cinematic:['semantic_outline','contours','perspective_grid','portal']}[family]??['contours'];
-  const hidden=allEffects.filter(e=>e.visible===false),visible=allEffects.filter(e=>e.visible!==false);
+  const priority={dream:['vector_echo','contours','semantic_outline','portal'],liquid:['flow_ribbons','vector_echo','flow_particles','portal'],analog:['perspective_grid','contours','semantic_outline'],fracture:['delaunay_fracture','voronoi','portal'],hyper:['flow_ribbons','delaunay_fracture','flow_particles','perspective_grid'],prismatic:['voronoi','flow_ribbons','portal'],cinematic:['semantic_outline','contours','perspective_grid','portal']}[family]??['contours'];
+  const hidden=allEffects.filter(e=>e.visible===false),visible=allEffects.filter(e=>e.visible!==false&&!(legacyTreatment()&&e.kind==='portal'&&vectorRand(e.seed,71)<.90));
   visible.sort((a,b)=>{const ai=priority.indexOf(a.kind),bi=priority.indexOf(b.kind);return(ai<0?99:ai)-(bi<0?99:bi);});
   const budget=(role==='payoff'&&sectionEnergy>.76)?2:1,effects=[...visible.slice(0,budget),...hidden];
   // Edge extraction is shared by all geometry derived from the current frame.
@@ -1321,7 +1336,7 @@ function applyPostFx(){
   const scan=Math.min(1,(t.scanlines??0)*m);
   const vignette=Math.min(1,(t.vignette??0)*m);
   const ripple=Math.min(1,((t.ripple??0)+rippleFx+directedFlow*.28+codec.ripple)*motion);
-  const kaleido=Math.min(1,((t.kaleidoscope??0)+kaleidoFx)*motion);
+  const kaleido=Math.min(1,((t.kaleidoscope??0)+kaleidoFx)*motion)*(legacyTreatment()&&sceneSparseGate(73)<.90?0:1);
   const tiles=Math.min(1,(t.tiles??0)*motion);
   const tunnel=Math.min(1,((t.tunnel??0)+tunnelFx)*motion);
   const posterize=Math.min(1,(t.posterize??0)*m);
@@ -1331,18 +1346,19 @@ function applyPostFx(){
 
   const slitScan=Math.min(1,((t.slit_scan??0)+slitScanFx)*motion);
   const frameEcho=Math.min(1,((t.frame_echo??0)+echoFx)*trails);
-  const corridor=Math.min(1,((t.mirror_corridor??0)+corridorFx)*motion);
-  const mask=Math.min(1,((t.mask_wipe??0)+maskFx)*motion);
-  const solarize=Math.min(1,((t.solarize??0)+solarizeFx)*m);
+  const corridor=Math.min(1,((t.mirror_corridor??0)+corridorFx)*motion)*(legacyTreatment()&&sceneSparseGate(79)<.84?0:1);
+  const mask=Math.min(1,((t.mask_wipe??0)+maskFx)*motion)*(legacyTreatment()&&sceneSparseGate(81)<.93?0:1);
+  const solarize=Math.min(1,((t.solarize??0)+solarizeFx)*m)*(legacyTreatment()&&sceneSparseGate(85)<.90?0:1);
   const datamosh=Math.min(1,((t.datamosh??0)+datamoshFx+codec.datamosh)*glitchScale);
   const blocks=Math.min(1,((t.block_displace??0)+codec.blocks)*glitchScale);
   const chromaDelay=Math.min(1,((t.chroma_delay??0)+chromaDelayFx+directedChroma*.24)*trails);
   const tracking=Math.min(1,((t.vhs_tracking??0)+codec.tracking)*glitchScale);
-  const vortex=Math.min(1,((t.vortex??0)+vortexFx+codec.vortex)*motion);
+  const vortex=Math.min(1,((t.vortex??0)+vortexFx+codec.vortex)*motion)*(legacyTreatment()&&sceneSparseGate(87)<.78?0:1);
   const motionTrails=Math.min(1,((t.motion_trails??0)+motionTrailFx)*trails);
   const sliceRecursion=Math.min(1,((t.slice_recursion??0)+sliceRecursionFx)*motion);
 
   const creative=activeScene?.direction?.creative??{};
+  const legacy=Number(creative.style_version??0)<2;
   const creativeFlow=Math.min(1,creativeValue('flow_warp',creative.flow_warp??0)*motion);
   const creativeFlowTrails=Math.min(1,creativeValue('flow_trails',creative.flow_trails??0)*trails);
   const creativeFlowRgb=Math.min(1,creativeValue('flow_rgb',creative.flow_rgb??0)*glitchScale);
@@ -1352,10 +1368,10 @@ function applyPostFx(){
   const creativeDepth=Math.min(1,creativeValue('depth_parallax',creative.depth_parallax??0)*motion);
   const creativeBackground=Math.min(1,creativeValue('background_warp',creative.background_warp??0)*motion);
   const creativeFeedback=Math.min(1,creativeValue('feedback',creative.feedback??0)*trails);
-  const creativeSymmetry=Math.min(1,creativeValue('local_symmetry',creative.local_symmetry??0)*motion);
+  const creativeSymmetry=Math.min(1,creativeValue('local_symmetry',creative.local_symmetry??0)*motion)*(legacy&&sceneSparseGate(83)<.90?0:1);
   const creativeBloom=Math.min(1,creativeValue('texture_bloom',creative.texture_bloom??0)*m);
   const creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion);
-  const creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m);
+  const creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m)*(legacy&&sceneSparseGate(89)<.70?0:1);
 
   // Directed color happens on the composed video, then temporal processing
   // evolves continuously over the shot rather than toggling static filters.

@@ -74,14 +74,30 @@ def test_non_peak_shots_use_at_most_one_visible_vector_family():
     )
     assert len([effect for effect in direction.vector_effects if effect.visible]) <= 1
 
-def test_prismatic_family_prefers_portal_and_voronoi_at_peak():
+def test_prismatic_family_prefers_footage_derived_effects_over_portal():
     direction = build_visual_direction(
         candidate(), section("euphoric"), rhythm_alignment=.8,
         source_playback_rate=1.0, transition=.8, occurrence=2,
         shot_index_in_section=1,
     )
     visible = [effect.kind for effect in direction.vector_effects if effect.visible]
-    assert visible[:2] == ["portal", "voronoi"]
+    assert visible[0] in {"voronoi", "flow_ribbons"}
+
+
+def test_portal_vector_effect_is_rare_across_prismatic_shots():
+    total = 0
+    portals = 0
+    for scene_id in range(1, 81):
+        d = build_visual_direction(
+            candidate(scene_id), section("euphoric"), rhythm_alignment=.8,
+            source_playback_rate=1.0, transition=.8, occurrence=1,
+            shot_index_in_section=2,
+        )
+        visible = [effect.kind for effect in d.vector_effects if effect.visible]
+        total += bool(visible)
+        portals += "portal" in visible
+    assert total > 40
+    assert 0 < portals < total * .25
 
 
 def test_vector_effects_have_deterministic_seeds_and_automation():

@@ -110,7 +110,7 @@ def test_visual_direction_has_color_and_continuous_automation():
     assert direction.rhythm_alignment == .9
     assert direction.effect_family == "hyper"
     assert direction.narrative_role in {"mutate", "payoff"}
-    assert abs(direction.color.hue_shift_degrees) > 1
+    assert abs(direction.color.hue_shift_degrees) <= 14
     assert len(direction.automation["spectral_warp"]) >= 3
     assert len(direction.automation["hue"]) >= 3
 

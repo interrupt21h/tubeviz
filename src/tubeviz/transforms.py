@@ -91,7 +91,11 @@ def plan_transform(
 
     zoom = 1.015 + intensity * (0.05 + 0.14 * energy + 0.04 * mutation)
     pan_amount = intensity * (0.04 + 0.12 * density)
-    hue = intensity * ((r2 - 0.5) * 22.0 + mutation * 7.0)
+    # Shot-local hue is optional.  Most shots retain the source hue exactly; a
+    # minority receive only a small offset so layer transforms cannot recreate an
+    # always-on color cast underneath the post-composite director.
+    hue_gate = _stable_unit(salt + ":hue")
+    hue = intensity * ((r2 - 0.5) * 10.0 + min(2.0, mutation * 1.0)) if hue_gate > .72 else 0.0
     saturation_target = _clamp(0.82 + brightness * 0.65 + energy * 0.18, 0.45, 1.8)
     contrast_target = _clamp(0.92 + energy * 0.38 + mutation * 0.06, 0.7, 1.75)
     brightness_target = _clamp(0.78 + brightness * 0.50 + energy * 0.16, 0.6, 1.45)
@@ -121,9 +125,11 @@ def plan_transform(
     # They deliberately remain modest as persistent treatments; musical edit cues pulse
     # them much harder at beats/bars/harmonic transitions.
     ripple = _clamp(intensity * (0.025 + 0.12 * density + 0.16 * bass + 0.06 * energy), 0.0, 0.42)
-    kaleidoscope = _clamp(
-        intensity * (0.015 + max(0.0, tonal - 0.55) * 0.14 + mutation * 0.025),
-        0.0, 0.24,
+    kaleidoscope_gate = _stable_unit(salt + ":kaleidoscope")
+    kaleidoscope = (
+        _clamp(intensity * (0.03 + max(0.0, tonal - 0.60) * 0.12 + mutation * 0.018), 0.0, 0.18)
+        if kaleidoscope_gate > .90 and vibe in {"ambient", "hypnotic", "euphoric"}
+        else 0.0
     )
     # Rectangular tiling is intentionally retired; organic flow/vortex
     # transforms provide the same multi-image energy without boxed overlays.
@@ -138,15 +144,32 @@ def plan_transform(
     # persistent treatments; edit cues can push them much harder on musical events.
     slit_scan = _clamp(intensity * (0.012 + 0.10 * density + 0.08 * percussive + 0.025 * mutation), 0.0, 0.38)
     frame_echo = _clamp(intensity * (0.02 + 0.11 * energy + 0.14 * tonal + 0.025 * mutation), 0.0, 0.44)
-    mirror_corridor = _clamp(intensity * (0.01 + 0.10 * mutation + 0.10 * max(0.0, energy - 0.60)), 0.0, 0.34)
-    mask_wipe = _clamp(intensity * (0.02 + 0.10 * density + 0.05 * (1.0 - brightness)), 0.0, 0.30)
-    solarize = _clamp(intensity * max(0.0, energy - 0.48) * (0.12 + 0.18 * density), 0.0, 0.34)
+    corridor_gate = _stable_unit(salt + ":corridor")
+    mask_gate = _stable_unit(salt + ":mask")
+    solarize_gate = _stable_unit(salt + ":solarize")
+    mirror_corridor = (
+        _clamp(intensity * (0.04 + 0.06 * mutation + 0.08 * max(0.0, energy - 0.62)), 0.0, 0.24)
+        if corridor_gate > .84 else 0.0
+    )
+    mask_wipe = (
+        _clamp(intensity * (0.05 + 0.06 * density + 0.03 * (1.0 - brightness)), 0.0, 0.18)
+        if mask_gate > .93 else 0.0
+    )
+    solarize = (
+        _clamp(intensity * max(0.0, energy - 0.62) * (0.08 + 0.12 * density), 0.0, 0.18)
+        if solarize_gate > .90 and vibe in {"fractured", "dark", "heavy"}
+        else 0.0
+    )
 
     datamosh = _clamp(intensity * max(0.0, density - 0.34) * (0.18 + 0.30 * energy), 0.0, 0.52)
     block_displace = _clamp(intensity * max(0.0, energy - 0.38) * (0.12 + 0.28 * density), 0.0, 0.48)
     chroma_delay = _clamp(intensity * (0.02 + 0.13 * energy + 0.07 * mutation), 0.0, 0.38)
     vhs_tracking = _clamp(intensity * (0.03 + 0.13 * (1.0 - brightness) + 0.10 * density), 0.0, 0.38)
-    vortex = _clamp(intensity * (0.01 + 0.05 * mutation + max(0.0, energy - 0.52) * 0.12 + tonal * 0.08), 0.0, 0.36)
+    vortex_gate = _stable_unit(salt + ":vortex")
+    vortex = (
+        _clamp(intensity * (0.03 + 0.04 * mutation + max(0.0, energy - 0.58) * 0.10 + tonal * 0.05), 0.0, 0.24)
+        if vortex_gate > .78 else 0.0
+    )
     motion_trails = _clamp(intensity * (0.02 + 0.12 * energy + 0.08 * density + 0.10 * tonal), 0.0, 0.48)
     slice_recursion = _clamp(intensity * max(0.0, density - 0.45) * (0.16 + 0.24 * energy), 0.0, 0.42)
 

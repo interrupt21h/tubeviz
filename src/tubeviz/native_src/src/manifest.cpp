@@ -212,6 +212,7 @@ Manifest load_manifest(const std::string& path) {
                 c.color_contrast = as_double(f, 96, 1.0);
                 c.color_brightness = as_double(f, 97, 1.0);
             }
+            if (f.size() >= 99) c.style_version = static_cast<int>(as_double(f, 98, 0.0));
         } else if (f[0] == "VEC") {
             if (!current) throw std::runtime_error("VEC before SHOT at line " + std::to_string(line_no));
             if (f.size() < 17) throw std::runtime_error("invalid VEC line " + std::to_string(line_no));

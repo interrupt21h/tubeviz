@@ -76,7 +76,7 @@ void apply_transform(
     // New timelines emit only subtle shot-local hue, and older timelines are
     // defensively clamped here so the pre-v0.33.5 absolute color steering cannot
     // reappear when rendering an existing plan.
-    const double hue_degrees = std::clamp(t.hue_degrees, -10.0, 10.0);
+    const double hue_degrees = std::clamp(t.hue_degrees, -6.0, 6.0);
     const bool color = std::abs(t.brightness - 1.0) > 1e-4 ||
                        std::abs(t.contrast - 1.0) > 1e-4 ||
                        std::abs(t.saturation - 1.0) > 1e-4 ||
@@ -502,12 +502,17 @@ void apply_native_portal(std::vector<std::uint8_t>& rgb,const std::vector<std::u
                          int width,int height,const VectorEffect& e,double amount,double phase){
     if(!companion||companion->size()!=rgb.size())return;
     const double radius=std::min(width,height)*(e.radius>0?e.radius:(.12+.18*amount));
-    const double cx=width*(.5+.18*std::sin(phase*.7+e.seed*.001)),cy=height*(.5+.14*std::cos(phase*.55+e.seed*.002));
+    const double cx=width*(.42+.22*std::sin(phase*.7+e.seed*.001)),cy=height*(.48+.18*std::cos(phase*.55+e.seed*.002));
+    const int variant=static_cast<int>(e.seed % 4u);
     for(int y=0;y<height;y++)for(int x=0;x<width;x++){
-        const double dx=x-cx,dy=y-cy,rr=std::sqrt(dx*dx+dy*dy);
-        const double wobble=radius*(1+.10*std::sin(std::atan2(dy,dx)*5+phase*1.7));
-        if(rr>wobble)continue;
-        const double edge=std::clamp((wobble-rr)/std::max(1.0,radius*.16),0.0,1.0);
+        const double dx=x-cx,dy=y-cy;
+        double q=0.0;
+        if(variant==0){const double rx=radius*1.25,ry=radius*.76;q=std::sqrt((dx*dx)/(rx*rx)+(dy*dy)/(ry*ry));}
+        else if(variant==1){q=std::abs(dx)/(radius*1.18)+std::abs(dy)/(radius*.86);}
+        else if(variant==2){q=std::max(std::abs(dx)/(radius*1.30),std::abs(dy)/(radius*.62));}
+        else{const double rr=std::hypot(dx,dy),a=std::atan2(dy,dx);q=rr/(radius*(1+.12*std::sin(a*5+phase*1.7)));}
+        if(q>1.0)continue;
+        const double edge=std::clamp((1.0-q)/.18,0.0,1.0);
         const double a=e.opacity*amount*edge;
         const auto i=static_cast<std::size_t>((y*width+x)*3);
         rgb[i]=clamp8(rgb[i]*(1-a)+(*companion)[i]*a);
@@ -541,22 +546,30 @@ inline void copy_pixel(const std::vector<std::uint8_t>& src, std::vector<std::ui
     for (int c = 0; c < 3; ++c) dst[di + c] = clamp8(dst[di + c] * (1.0 - a) + src[si + c] * a);
 }
 
+double creative_legacy_gate(const CreativeEffect& c, std::uint64_t salt) {
+    const auto key = static_cast<std::uint64_t>(std::llround(c.target_x*100000.0))*0x9e3779b97f4a7c15ULL
+        ^ static_cast<std::uint64_t>(std::llround(c.target_y*100000.0))*0xc2b2ae3d27d4eb4fULL
+        ^ static_cast<std::uint64_t>(c.symmetry_segments+17)*0x165667b19e3779f9ULL ^ salt;
+    return .5*(hash_noise(key)+1.0);
+}
+
 void native_directed_color(std::vector<std::uint8_t>& rgb, int width, int height,
                            const CreativeEffect& c, double fidelity) {
+    if(c.style_version<2 && creative_legacy_gate(c,31)<.70) return;
     const double room = std::clamp(1.0 - fidelity, 0.0, 1.0);
     if (room <= .005) return;
-    const double hue_deg = std::clamp(c.color_hue_shift, -28.0, 28.0);
+    const double hue_deg = std::clamp(c.color_hue_shift, -14.0, 14.0);
     const double sat = std::clamp(c.color_saturation, .5, 1.6);
     const double contrast = std::clamp(c.color_contrast, .6, 1.6);
     const double brightness = std::clamp(c.color_brightness, .65, 1.4);
     const double color_delta = std::min(
         1.0,
-        std::abs(hue_deg) / 28.0 +
+        std::abs(hue_deg) / 14.0 +
         .55 * std::abs(sat - 1.0) +
         .35 * std::abs(contrast - 1.0) +
         .25 * std::abs(brightness - 1.0)
     );
-    const double alpha = std::min(.34, .025 + room * (.48 + .34 * color_delta));
+    const double alpha = std::min(.24, .015 + room * (.34 + .26 * color_delta));
     if (alpha <= .005) return;
     const auto src = rgb;
     const double hue = hue_deg * 3.14159265358979323846 / 180.0;
@@ -758,14 +771,17 @@ void native_local_symmetry(std::vector<std::uint8_t>& rgb, int width, int height
     if (amount <= .02) return;
     const auto src = rgb;
     const double cx = c.target_x * width, cy = c.target_y * height;
-    const double radius = std::min(width,height) * (.12 + .16 * amount);
+    const double radius = std::min(width,height) * (.10 + .14 * amount);
     const int segments = std::max(2, std::min(12, c.symmetry_segments));
     const double wedge = 2.0 * 3.141592653589793 / segments;
-    const double alpha = .04 + .12 * amount;
-    const int x0 = std::max(0, static_cast<int>(cx-radius)), x1 = std::min(width-1, static_cast<int>(cx+radius));
+    const double alpha = .025 + .08 * amount;
+    const int variant=(segments+static_cast<int>(std::round(c.target_x*17)))%3;
+    const int x0 = std::max(0, static_cast<int>(cx-radius*1.4)), x1 = std::min(width-1, static_cast<int>(cx+radius*1.4));
     const int y0 = std::max(0, static_cast<int>(cy-radius)), y1 = std::min(height-1, static_cast<int>(cy+radius));
     for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
-        const double dx=x-cx,dy=y-cy,r=std::hypot(dx,dy);if(r>radius)continue;
+        const double dx=x-cx,dy=y-cy,r=std::hypot(dx,dy);
+        const double shape=(variant==0)?std::sqrt((dx*dx)/(radius*radius*1.55)+(dy*dy)/(radius*radius*.62)):(variant==1)?(std::abs(dx)/(radius*1.2)+std::abs(dy)/(radius*.82)):std::max(std::abs(dx)/(radius*1.35),std::abs(dy)/(radius*.58));
+        if(shape>1.0)continue;
         double a=std::atan2(dy,dx)+phase*.012*amount;a=std::fmod(a+20*wedge,wedge);if(a>wedge*.5)a=wedge-a;
         const int sx=std::clamp(static_cast<int>(cx+std::cos(a)*r),0,width-1),sy=std::clamp(static_cast<int>(cy+std::sin(a)*r),0,height-1);
         const auto di=static_cast<std::size_t>((y*width+x)*3),si=static_cast<std::size_t>((sy*width+sx)*3);
@@ -842,7 +858,7 @@ void apply_creative_effects(
     native_directed_color(rgb, width, height, c, fidelity);
 
     const double camera = c.camera_energy * creative_envelope(c.camera_envelope, progress);
-    const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress);
+    const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress) * (c.style_version<2 && creative_legacy_gate(c,89)<.70 ? 0.0 : 1.0);
     const double bloom = c.texture_bloom * creative_envelope(c.bloom_envelope, progress);
     const double streaks = c.texture_streaks * creative_envelope(c.streaks_envelope, progress);
     const double depth = std::max(
@@ -857,7 +873,7 @@ void apply_creative_effects(
     );
     const double smear = c.temporal_smear * creative_envelope(c.temporal_smear_envelope, progress);
     const double trails = c.flow_trails * creative_envelope(c.flow_trails_envelope, progress);
-    const double symmetry = c.local_symmetry * creative_envelope(c.symmetry_envelope, progress);
+    const double symmetry = c.local_symmetry * creative_envelope(c.symmetry_envelope, progress) * (c.style_version<2 && creative_legacy_gate(c,83)<.90 ? 0.0 : 1.0);
     const double feedback = c.feedback * creative_envelope(c.feedback_envelope, progress);
 
     // The native path is CPU-heavy, so insignificant curve tails are skipped.
@@ -887,8 +903,8 @@ void apply_creative_effects(
         } else if (c.hero_kind == "subject_echo") {
             native_temporal(rgb, previous, width, height, c, .55*hero, .36*hero, .42*hero, .40*hero);
         } else if (c.hero_kind == "time_prism") {
-            native_temporal(rgb, previous, width, height, c, .28*hero, .68*hero, .48*hero, .20*hero);
-            native_local_symmetry(rgb, width, height, c, .40*hero, phase);
+            native_temporal(rgb, previous, width, height, c, .28*hero, .62*hero, .44*hero, .20*hero);
+            native_flow_warp(rgb, previous, width, height, c, .24*hero);
         }
     }
     restore_subject(rgb, original, width, height, c, std::max(common_env, hero));

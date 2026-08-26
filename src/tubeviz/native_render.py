@@ -211,12 +211,12 @@ def _native_vector_effects(scene):
         return []
     family = scene.direction.effect_family or "cinematic"
     priority = {
-        "dream": ["vector_echo", "contours", "portal", "semantic_outline"],
-        "liquid": ["flow_ribbons", "vector_echo", "portal", "flow_particles"],
+        "dream": ["vector_echo", "contours", "semantic_outline", "portal"],
+        "liquid": ["flow_ribbons", "vector_echo", "flow_particles", "portal"],
         "analog": ["perspective_grid", "contours", "semantic_outline"],
         "fracture": ["delaunay_fracture", "voronoi", "portal"],
         "hyper": ["flow_ribbons", "delaunay_fracture", "flow_particles", "perspective_grid"],
-        "prismatic": ["portal", "voronoi", "flow_ribbons"],
+        "prismatic": ["voronoi", "flow_ribbons", "portal"],
         "cinematic": ["semantic_outline", "contours", "perspective_grid", "portal"],
     }.get(family, ["contours"])
     hidden = [effect for effect in effects if not effect.visible]
@@ -336,7 +336,9 @@ def _creative_fields(scene) -> list[str]:
     ]
     for name in channel_names[:-1]:
         fields.extend(f"{value:.9g}" for value in channels[name][1])
-    # v0.33.5 appends renderer-level source fidelity and the one authoritative
+    # v0.33.6 keeps the v0.33.5 color fields and appends a treatment-style version.
+    # The fields remain strictly append-only for older native manifests.
+    # v0.33.5 introduced renderer-level source fidelity and the one authoritative
     # post-composite color grade.  Older native manifests remain valid because
     # these fields are strictly appended after the v0.33 curve payload.
     color = scene.direction.color
@@ -346,6 +348,7 @@ def _creative_fields(scene) -> list[str]:
         f"{color.saturation_scale:.9g}",
         f"{color.contrast_scale:.9g}",
         f"{color.brightness_scale:.9g}",
+        str(int(c.style_version)),
     ])
     return fields
 

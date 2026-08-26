@@ -1,3 +1,16 @@
+# 0.33.6 — Visual treatment diversity and sparse masks
+
+- Add `CreativeEffectPlan.style_version=2` so renderers can recognize the sparse-treatment grammar. Existing v0.33.0-v0.33.5 timelines load as legacy style 0 and receive renderer-time sparsity guards for hue, masks, symmetry, palette overlays, and portals; regenerating the timeline is recommended but no longer required to eliminate the old always-on look.
+- Make hue grading optional per shot instead of inevitable: most shots now retain exactly the source hue, while active grades are source-relative and capped to a small ±14° range. AI hue requests are reduced to bounded accents rather than section-wide palette replacement.
+- Reduce persistent saturation/chromatic steering and raise normal source fidelity so different library clips retain visibly different palettes. Palette propagation is now gated to a minority of shots instead of having a non-zero floor everywhere.
+- Diversify effect families within a section using deterministic compatible variants. The section still establishes a coherent base vocabulary, but later shots no longer all inherit the exact same prismatic/liquid/etc. treatment.
+- Make local symmetry genuinely sparse. The old planner left a non-zero symmetry value on nearly every shot; v0.33.6 schedules it only on a small deterministic subset and uses ellipse, polygon, or strip-shaped local regions rather than one repeated circular window.
+- Make companion-video `portal` vector effects rare and remove `portal` as the first/default prismatic primitive. Browser and native vector priorities now favor footage-derived flow/voronoi/contour treatments first.
+- Gate legacy kaleidoscope, mask-wipe, solarize, mirror-corridor, and vortex effects so they act as punctuation instead of persistent wallpaper. Mask wipes now vary among diagonal, diamond, irregular polygon, and occasional ellipse shapes.
+- Remove local symmetry from the common `time_prism` hero treatment; it now uses temporal RGB/smear, displacement, and spectral/flow motion. `recursive_portal` remains the explicit rare symmetry/portal hero.
+- Diversify native portal and local-symmetry masks to ellipse, diamond, rounded-rect/strip, and irregular variants rather than a universal circle, and tighten legacy native hue clamps.
+- Add regression coverage for clean-hue shots, sparse symmetry/masks, rare portals, family diversity, and non-circular browser mask grammars.
+
 # 0.33.5 — Source-faithful color and temporal rendering
 
 - Replaced the browser renderer's fixed `hue-rotate(±105–125deg)`/`screen` chromatic overlays with true RGB-channel displacement using the source frame's real red, green, and blue samples. This covers prismatic shift, flow RGB, temporal RGB, chroma delay, RGB split, and treble beat-warp accents.

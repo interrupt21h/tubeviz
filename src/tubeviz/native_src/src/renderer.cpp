@@ -94,7 +94,7 @@ const Shot* Renderer::shot_at(double time, std::size_t& index) const {
     return &manifest_.shots[index];
 }
 
-std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot_time, double now) {
+std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot_time, double now, bool legacy_style) {
     const double span = std::max(0.001, layer.source_end - layer.source_start);
     const double elapsed = std::max(0.0, now - shot_time);
     double offset = std::fmod(elapsed * std::max(0.01, layer.transform.playback_rate), span);
@@ -104,12 +104,15 @@ std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot
     target = std::clamp(target, layer.source_start, std::max(layer.source_start, layer.source_end - 0.001));
 
     auto frame = decoder_for(layer.path).frame_at(target);
-    apply_transform(frame, width_, height_, layer.transform, static_cast<std::uint64_t>(std::llround(now * fps_)));
+    auto transform = layer.transform;
+    if (legacy_style) transform.hue_degrees = 0.0;
+    apply_transform(frame, width_, height_, transform, static_cast<std::uint64_t>(std::llround(now * fps_)));
     return frame;
 }
 
 std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bool allow_previous_effects) {
-    auto output = render_layer(shot.primary, shot.time, now);
+    const bool legacy_style = shot.creative.style_version < 2;
+    auto output = render_layer(shot.primary, shot.time, now, legacy_style);
     if (shot.primary.opacity < 0.999) {
         for (auto& c : output) c = static_cast<std::uint8_t>(c * std::clamp(shot.primary.opacity, 0.0, 1.0));
     }
@@ -117,7 +120,7 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
     std::vector<std::uint8_t> portal_companion;
     bool have_portal_companion = false;
     for (const auto& layer : shot.companions) {
-        auto companion = render_layer(layer, shot.time, now);
+        auto companion = render_layer(layer, shot.time, now, legacy_style);
         if (!have_portal_companion) {
             portal_companion = companion;
             have_portal_companion = true;
@@ -138,13 +141,22 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
         progress,
         now * 0.24
     );
+    auto vector_effects = shot.vector_effects;
+    if (legacy_style) {
+        vector_effects.erase(
+            std::remove_if(vector_effects.begin(), vector_effects.end(), [](const VectorEffect& e) {
+                return e.kind == "portal" && ((e.seed * 2654435761ULL + 71ULL) % 100ULL) < 90ULL;
+            }),
+            vector_effects.end()
+        );
+    }
     apply_vector_effects(
         output,
         have_portal_companion ? &portal_companion : nullptr,
         (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr,
         width_,
         height_,
-        shot.vector_effects,
+        vector_effects,
         progress,
         now * 0.24
     );

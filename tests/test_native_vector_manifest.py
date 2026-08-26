@@ -131,7 +131,8 @@ def test_native_manifest_serializes_creative_treatment(tmp_path: Path):
     assert float(fields[14]) == .8
     assert fields[28] == "depth_burst"
     assert float(fields[29]) == .85
-    assert len(fields) == 98
+    assert len(fields) == 99
+    assert int(fields[98]) == creative.style_version
     # Extended v0.33 manifest carries per-channel four-point envelopes.
     assert float(fields[37]) < float(fields[38])
     assert float(fields[93]) == .87

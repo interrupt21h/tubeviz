@@ -123,6 +123,7 @@ def test_creative_effects_can_be_disabled_without_losing_semantic_metadata():
     assert c.feedback == 0
     assert c.palette_strength == 0
     assert c.source_fidelity == 1.0
+    assert c.style_version == 2
     assert c.hero_kind is None
     assert c.semantic.person > 0
 
@@ -236,3 +237,46 @@ def test_browser_rgb_fx_use_real_channels_not_fixed_hue_overlays():
         assert old not in js
     assert "resetTemporalFxState" in js
     assert "source_fidelity" in js
+
+
+def test_most_shots_keep_source_hue_exactly_and_active_grades_are_small():
+    clean = 0
+    active = 0
+    for scene_id in range(1, 81):
+        c = candidate(scene_id)
+        d = direction(c, section(index=3), creative_intensity=1.0)
+        if abs(d.color.hue_shift_degrees) < 1e-9:
+            clean += 1
+        else:
+            active += 1
+            assert abs(d.color.hue_shift_degrees) <= 14.0
+    assert clean > active
+    assert active > 0
+
+
+def test_local_symmetry_and_palette_treatment_are_sparse():
+    symmetry = 0
+    palette = 0
+    from dataclasses import replace
+    for scene_id in range(1, 101):
+        c = replace(
+            candidate(scene_id, description="abstract architecture and geometric light"),
+            title="abstract architecture",
+            ai_description={"summary": "abstract architecture and geometric light", "semantic_tags": ["abstract", "architecture"]},
+        )
+        creative = direction(c, section(index=2), creative_intensity=1.0).creative
+        symmetry += creative.local_symmetry > 0
+        palette += creative.palette_strength > 0
+    assert 0 < symmetry < 18
+    assert 10 < palette < 45
+
+
+def test_browser_mask_and_symmetry_grammars_are_not_universal_circles():
+    from pathlib import Path
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    assert "variant=Math.abs(sceneSeed)%4" in js
+    assert "variant=Math.abs(Number(activeScene?.scene_id??0))%3" in js
+    assert "fx.arc(width/2,height/2" not in js
+    assert "case'time_prism':default" in js
+    time_prism = js.split("case'time_prism':default", 1)[1].split("break;", 1)[0]
+    assert "applyLocalSymmetryCreative" not in time_prism

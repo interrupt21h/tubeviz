@@ -132,7 +132,7 @@ def build_creative_effect_plan(
     sem = semantic_visual_profile(candidate)
     intensity = _clamp(intensity, 0.0, 2.0)
     if intensity <= 1e-6:
-        return CreativeEffectPlan(semantic=sem, source_fidelity=1.0)
+        return CreativeEffectPlan(style_version=2, semantic=sem, source_fidelity=1.0)
     energy = _clamp(section.energy)
     density = _clamp(section.onset_density / 0.70)
     bass = _clamp(section.bass_weight)
@@ -177,13 +177,13 @@ def build_creative_effect_plan(
     # texture until the music earns a stronger transformation.  Semantic subjects
     # and withholding raise fidelity; abstraction/payoff/mutation lower it modestly.
     source_fidelity = _clamp(
-        0.94
-        - 0.12 * abstraction
-        - 0.06 * payoff
-        - 0.035 * mutation
+        0.965
+        - 0.085 * abstraction
+        - 0.045 * payoff
+        - 0.025 * mutation
         + 0.045 * max(sem.person, sem.face, sem.text)
         + 0.04 * withholding,
-        0.76, 0.97,
+        0.84, 0.985,
     )
 
     # Semantic protection: recognisable subjects and text are allowed to move with
@@ -219,16 +219,26 @@ def build_creative_effect_plan(
     # Local symmetry is intentionally sparse and moved to the semantic focal point;
     # a portrait should not become a permanent centered kaleidoscope.
     symmetry_gate = _stable_unit(f"creative:{candidate.scene_id}:{section.index}:{shot_index}:sym")
-    local_symmetry = _clamp(
-        (0.03 + 0.22 * tonal + 0.20 * sem.abstract + 0.10 * mutation + 0.12 * payoff)
-        * (1.0 - 0.72 * subject_weight)
-        * (1.0 if symmetry_gate > 0.38 else 0.25)
-    )
+    # Symmetry is a rare accent.  Earlier versions always left a non-zero symmetry
+    # floor, which made circular/portal-looking masks appear on a large fraction of
+    # shots.  Only a small deterministic subset can schedule it now.
+    if symmetry_gate > 0.92:
+        local_symmetry = _clamp(
+            (0.05 + 0.18 * tonal + 0.18 * sem.abstract + 0.08 * mutation + 0.10 * payoff)
+            * (1.0 - 0.78 * subject_weight)
+        )
+    else:
+        local_symmetry = 0.0
     symmetry_segments = 3 + int(round(5 * _clamp(0.35 * tonal + 0.35 * complexity + 0.30 * abstraction)))
 
     texture_bloom = _clamp(0.04 + 0.32 * section.brightness + 0.20 * energy + 0.12 * sem.night)
     texture_streaks = _clamp(0.02 + 0.30 * motion + 0.20 * sem.night + 0.12 * sem.architecture + 0.10 * payoff)
-    palette_strength = _clamp(0.08 + 0.34 * contrast_target + 0.24 * energy + 0.16 * (1.0 - entropy))
+    palette_gate = _stable_unit(f"creative:{candidate.scene_id}:{section.index}:{shot_index}:palette")
+    palette_strength = (
+        _clamp(0.04 + 0.18 * contrast_target + 0.12 * energy + 0.08 * (1.0 - entropy))
+        if palette_gate > (0.72 if payoff < 0.5 else 0.64)
+        else 0.0
+    )
 
     # Shot-progress curves.  Effects ramp and release rather than living at a
     # constant strength. Builds escalate, payoffs front-load impact, and withholding
@@ -302,7 +312,7 @@ def build_creative_effect_plan(
     # aggressive values can lower fidelity, but still retain a substantial anchor.
     source_fidelity = _clamp(
         1.0 - (1.0 - source_fidelity) * max(0.20, min(1.60, intensity)),
-        0.66, 0.985,
+        0.76, 0.992,
     )
     automation = {
         key: [(p, scaled(v)) for p, v in curve]
@@ -310,6 +320,7 @@ def build_creative_effect_plan(
     }
 
     return CreativeEffectPlan(
+        style_version=2,
         flow_warp=flow_warp,
         flow_trails=flow_trails,
         flow_rgb=flow_rgb,

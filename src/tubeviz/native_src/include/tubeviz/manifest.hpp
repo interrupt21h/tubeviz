@@ -53,6 +53,7 @@ struct VectorEffect {
 };
 
 struct CreativeEffect {
+    int style_version{0};
     double flow_warp{0.0};
     double flow_trails{0.0};
     double flow_rgb{0.0};

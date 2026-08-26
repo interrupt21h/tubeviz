@@ -103,3 +103,21 @@ def test_materialize_selection_real_ffmpeg(tmp_path: Path):
     assert rendered.transform.materialized is True
     assert rendered.transform.playback_rate == 1.0
     assert rendered.start == 0.0
+
+
+def test_legacy_circular_and_color_fx_are_sparse_across_shots():
+    masks = kaleidos = solarized = hue_shifted = 0
+    count = 120
+    sec = _section(label="peak", energy=.9)
+    sec.vibe = "euphoric"
+    for i in range(count):
+        sel = _selection(index=i, occurrence=1).model_copy(update={"scene_id": 1000 + i})
+        t = plan_transform(sec, sel, TransformConfig(intensity=1.0))
+        masks += t.mask_wipe > 0
+        kaleidos += t.kaleidoscope > 0
+        solarized += t.solarize > 0
+        hue_shifted += abs(t.hue_degrees) > 1e-9
+    assert masks < count * .15
+    assert kaleidos < count * .15
+    assert solarized == 0  # euphoric is not an analog/fractured solarize family
+    assert hue_shifted < count * .40

@@ -17,15 +17,29 @@ from .choreography import shot_trajectory
 # euphoric -> 315 degrees), which could erase the source palette across unrelated
 # footage.  These bounded offsets keep the source hue authoritative.
 _VIBE_HUE_BIAS = {
-    "ambient": -6.0,
-    "hypnotic": 8.0,
-    "dark": -8.0,
-    "heavy": 10.0,
-    "driving": -5.0,
-    "euphoric": 12.0,
-    "fractured": -11.0,
-    "groove": 6.0,
+    "ambient": -3.0,
+    "hypnotic": 4.0,
+    "dark": -4.0,
+    "heavy": 5.0,
+    "driving": -2.5,
+    "euphoric": 5.0,
+    "fractured": -5.0,
+    "groove": 3.0,
     "neutral": 0.0,
+}
+
+# A section keeps a coherent base family, but shots are allowed to move through a
+# small compatible vocabulary.  This prevents a four-minute euphoric section from
+# becoming four minutes of the same prismatic/portal treatment.  The first shot of
+# a section stays on the base family; later shots deterministically branch.
+_FAMILY_VARIANTS = {
+    "dream": ("dream", "cinematic", "liquid"),
+    "liquid": ("liquid", "cinematic", "dream", "hyper"),
+    "analog": ("analog", "cinematic", "fracture"),
+    "fracture": ("fracture", "analog", "hyper", "cinematic"),
+    "hyper": ("hyper", "cinematic", "fracture", "liquid"),
+    "prismatic": ("prismatic", "cinematic", "dream", "hyper"),
+    "cinematic": ("cinematic", "dream", "analog", "liquid"),
 }
 
 _EFFECT_FAMILY = {
@@ -47,6 +61,17 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 def _shortest_hue_delta(source: float, target: float) -> float:
     return ((target - source + 180.0) % 360.0) - 180.0
+
+
+def _seed_unit(seed: int, salt: int = 0) -> float:
+    """Cheap deterministic [0,1] sample for per-shot treatment gates."""
+    x = (int(seed) + int(salt) * 0x9E3779B9) & 0xFFFFFFFF
+    x ^= x >> 16
+    x = (x * 0x7FEB352D) & 0xFFFFFFFF
+    x ^= x >> 15
+    x = (x * 0x846CA68B) & 0xFFFFFFFF
+    x ^= x >> 16
+    return x / 0xFFFFFFFF
 
 
 def motion_target(section: Section) -> float:
@@ -406,15 +431,24 @@ def _vector_effects(
     # contours, semantic edges, ribbons, particles, grids, portals and glyphs
     # were all drawn over the same shot.
     family_candidates: dict[str, list[VectorEffect]] = {
-        "dream": [echo, contour, portal],
-        "liquid": [flow, echo, portal],
+        "dream": [echo, contour],
+        "liquid": [flow, echo],
         "analog": [grid, contour],
         "fracture": [fracture, voronoi],
         "hyper": [flow, fracture, particles],
-        "prismatic": [portal, voronoi, flow],
-        "cinematic": [semantic if entropy < .62 else contour, grid, portal],
+        "prismatic": [voronoi, flow],
+        "cinematic": [semantic if entropy < .62 else contour, grid],
     }
-    candidates = family_candidates.get(family, [contour])
+    candidates = list(family_candidates.get(family, [contour]))
+    # Companion-video portals are deliberately exceptional.  They used to be the
+    # first visible primitive for every prismatic shot, producing a repeated central
+    # circular/oval window regardless of the footage.  Now they are eligible on only
+    # a small deterministic subset, and never displace the primary family treatment.
+    portal_gate = _seed_unit(seed, 71)
+    if portal_gate > (0.94 if section.label != "peak" else 0.90):
+        # At peaks, portal may become the secondary accent; outside peaks the rare
+        # gate can make it the one visible family for that shot.
+        candidates.insert(1 if section.label == "peak" and candidates else 0, portal)
 
     # Roughly one quarter of non-peak shots stay completely clean; low-energy
     # passages stay clean even more often. Visual contrast makes vector moments
@@ -585,38 +619,57 @@ def build_visual_direction(
 ) -> VisualDirection:
     f = candidate.visual_features or {}
     source_hue = float(f.get("dominant_hue", 0.0)) % 360.0
-    vibe_bias = _VIBE_HUE_BIAS.get(section.vibe, _VIBE_HUE_BIAS["neutral"])
+    shot_seed = (
+        candidate.scene_id * 1000003
+        + section.index * 9176
+        + shot_index_in_section * 137
+        + occurrence * 1009
+    ) & 0x7FFFFFFF
+
+    # Color grading is punctuation, not a mandatory LUT.  Most shots keep hue at
+    # exactly zero; the remaining shots receive a small source-relative bias.  This
+    # gives the source library's actual palette room to provide visual diversity.
+    color_gate = _seed_unit(shot_seed, 31)
+    color_active = color_gate >= (0.72 if section.label != "peak" else 0.68)
+    vibe_bias = _VIBE_HUE_BIAS.get(section.vibe, _VIBE_HUE_BIAS["neutral"]) if color_active else 0.0
     ai_bias = 0.0
-    if section.ai_direction is not None and section.ai_direction.target_hue is not None:
-        # AI palette direction may gently pull the footage toward a requested hue,
-        # but can no longer replace the source palette.  Even high-confidence plans
-        # are capped at a modest +/-18 degree contribution.
+    if color_active and section.ai_direction is not None and section.ai_direction.target_hue is not None:
         delta = _shortest_hue_delta(source_hue, section.ai_direction.target_hue)
-        w = .06 + .10 * _clamp(section.audio_semantic_confidence)
-        ai_bias = _clamp(delta * w, -18.0, 18.0)
-    # Small bounded structural drift keeps consecutive shots from receiving an
-    # identical grade while avoiding the old unbounded section-index hue walk.
-    structural_bias = (
-        4.0 * math.sin((section.index + 1) * .83)
-        + 2.5 * math.sin((shot_index_in_section + 1) * 1.37)
-        + min(3.5, max(0, occurrence - 1) * 1.5)
-    )
-    hue_shift = _clamp(vibe_bias + ai_bias + structural_bias, -28.0, 28.0)
+        w = .025 + .055 * _clamp(section.audio_semantic_confidence)
+        ai_bias = _clamp(delta * w, -8.0, 8.0)
+    structural_bias = 0.0
+    if color_active:
+        structural_bias = (
+            2.0 * math.sin((section.index + 1) * .83)
+            + 1.5 * math.sin((shot_index_in_section + 1) * 1.37)
+            + min(2.0, max(0, occurrence - 1) * .8)
+        )
+    hue_shift = _clamp(vibe_bias + ai_bias + structural_bias, -14.0, 14.0) if color_active else 0.0
     target_hue = (source_hue + hue_shift) % 360.0
 
-    # Tonal direction is intentionally moderate.  Source fidelity in the creative
-    # plan further controls how much of this post-composite grade is visible.
-    saturation_scale = _clamp(
-        .92 + .30 * section.energy + .10 * section.brightness,
-        .78, 1.42
-    )
+    # Saturation/contrast may still breathe with the music, but clean-color shots
+    # stay very close to neutral instead of being recolored simply because the track
+    # is energetic.
+    if color_active:
+        saturation_scale = _clamp(.96 + .18 * section.energy + .06 * section.brightness, .86, 1.25)
+    else:
+        saturation_scale = _clamp(.98 + .06 * section.energy, .94, 1.08)
     contrast_scale = _clamp(.95 + .30 * section.energy + .10 * section.noisiness, .82, 1.42)
     brightness_scale = _clamp(.90 + .16 * section.brightness + .07 * section.energy, .80, 1.24)
-    chroma = _clamp(.015 + .16 * section.energy + .10 * section.noisiness, 0.0, .36)
+    chroma = _clamp((.01 + .10 * section.energy + .07 * section.noisiness) * (1.0 if color_active else .28), 0.0, .24)
     family = _EFFECT_FAMILY.get(section.vibe, "cinematic")
     if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
         if section.audio_semantic_confidence >= .18:
             family = section.ai_direction.effect_family
+    # Keep the section vocabulary coherent while avoiding a single visual grammar on
+    # every shot.  The first shot establishes the base family; later shots branch to
+    # compatible families on roughly half of selections.
+    if shot_index_in_section > 0:
+        variants = _FAMILY_VARIANTS.get(family, (family,))
+        branch = _seed_unit(shot_seed, 43)
+        if len(variants) > 1 and branch > .48:
+            variant_index = 1 + int(_seed_unit(shot_seed, 47) * (len(variants) - 1))
+            family = variants[min(len(variants) - 1, variant_index)]
 
     narrative_role = "develop"
     if shot_index_in_section == 0 and occurrence == 1:
