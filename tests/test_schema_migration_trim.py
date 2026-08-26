@@ -25,4 +25,4 @@ def test_initialize_migrates_v4_library_with_trim_columns(tmp_path: Path):
         ).fetchone()["value"]
     assert "usable_start" in after
     assert "usable_end" in after
-    assert version == "5"
+    assert version == "6"

@@ -432,7 +432,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.29.3**.
+For this release, the header and `tubeviz.__version__` should report **0.30.1**.
 
 ```mermaid
 flowchart LR
@@ -464,6 +464,14 @@ tubeviz gui --host 0.0.0.0 --port 8090
 ```
 
 The GUI runs the same CLI workflows described below; it is not a separate rendering implementation.
+
+Long-running Studio jobs report their current stage, elapsed time, and live log.
+Operations with a known unit count—rendered frames, indexed scenes, CLAP
+windows, input URLs, search terms, or codec shots—also show a percentage,
+completed/total count, and ETA when the underlying process supplies one. Work
+such as initial model loading or DSP analysis uses an indeterminate progress bar
+until a measurable stage begins. Studio launches Python workers unbuffered, so
+new messages appear immediately rather than being delayed in stdout buffers.
 
 
 ## Studio GUI parity and manual URL ingestion
@@ -1106,6 +1114,20 @@ library/
 ```
 
 SQLite tracks discovery provenance, terms, status, source metadata, normalized media, scenes, duplicate relationships, AI scores, and scene embeddings.
+
+Studio also stores editable user tags and one temporary **output pool**. Tags are
+deliberately separate from discovery terms: a search term records how footage
+entered the library, while tags describe how you want to organize and reuse it.
+Each Library card can be tagged and independently marked for output. Studio can
+mark or unmark every visible ready clip, or every ready clip carrying the
+selected tag.
+
+The output pool is opt-in. With no marked clips, all ready clips remain eligible
+for scene planning. As soon as one clip is marked, new `analyze` and scene-replan
+operations consider only marked ready clips. **Clear pool** returns immediately
+to the full ready library. This selection changes neither clip status nor media,
+and manually rejecting a marked clip removes it from the active pool without
+discarding its tags.
 
 Studio playback resolves normalized media first, then canonical duplicate media, downloaded originals, and compatibility paths for older libraries.
 

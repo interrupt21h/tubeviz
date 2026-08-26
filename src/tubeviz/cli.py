@@ -83,6 +83,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         raise SystemExit("--ai-director requires --audio-ai so the whole-song plan is grounded in CLAP audio semantics")
     if getattr(args, "ai_director", False) and (not args.ai_director_base_url or not args.ai_director_model):
         raise SystemExit("--ai-director requires --ai-director-base-url and --ai-director-model")
+    print(f"Analyze: decoding and measuring {args.audio}", flush=True)
     analysis = analyze_track(
         args.audio,
         AnalysisConfig(
@@ -100,6 +101,10 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             tempo_octave_min=args.tempo_octave_min,
             tempo_octave_max=args.tempo_octave_max,
         ),
+    )
+    print(
+        f"Analyze: DSP complete ({analysis.duration:.1f}s, {len(analysis.events)} events, "
+        f"{len(analysis.sections)} sections)", flush=True,
     )
     if getattr(args, "music_ai", False):
         analysis = attach_music_embeddings(
@@ -162,8 +167,10 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
                 visual_arc_strength=max(0.0, min(1.5, getattr(args, "visual_arc_strength", 0.70))),
             ),
         )
+    print("Analyze: building musical cues and visual direction", flush=True)
     timeline = direct(analysis)
     if args.library:
+        print(f"Analyze: planning scenes from {args.library}", flush=True)
         library = ClipLibrary(args.library)
         library.initialize()
         timeline = attach_scene_plan(
@@ -171,7 +178,9 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
             library,
             _selector_config(args),
         )
+        print(f"Analyze: scene plan complete ({len(timeline.scene_plan)} shots)", flush=True)
     output = Path(args.output).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(timeline.model_dump_json(indent=2))
     tempo_values = sorted(point.bpm for point in analysis.tempo_curve)
     if len(tempo_values) >= 5:

@@ -1,3 +1,22 @@
+# 0.30.1 — Live processing progress
+
+- Added a first-class Studio progress panel with the current processing stage, elapsed time, determinate percentage/counts when available, ETA when reported, and an indeterminate animation for work whose total cannot be known.
+- Parse existing render frames, semantic/visual indexes, CLAP windows, ingest terms/URLs, and codec materialization counters into structured job progress without removing their detailed log lines.
+- Launch every Studio tubeviz child with Python unbuffered mode and `PYTHONUNBUFFERED=1`, so progress reaches the browser immediately instead of arriving in delayed blocks.
+- Added explicit DSP, direction, scene-planning, and timeline-write messages to `tubeviz analyze`.
+- Preserve the full live log below the progress panel for diagnostics and verbose yt-dlp/FFmpeg output.
+
+# 0.30.0 — Library tags and temporary output pool
+
+- Added persistent, editable user tags that are independent of ingest/search provenance terms.
+- Added tag filtering and per-clip tag editing to Studio's Library cards.
+- Added a non-destructive output pool: marking any ready clip temporarily restricts newly planned timelines to marked clips; clearing the pool restores the entire ready library.
+- Added individual, visible-result, and tag-based bulk mark/unmark actions.
+- Persisted the active pool in SQLite so Studio-launched analysis and replan child processes use the same selection.
+- Added schema-v6 migration tables for tags, clip/tag membership, and output selection.
+- Automatically remove manually rejected clips from the active output pool while leaving tags intact.
+- Made native toolchain diagnostics report all expected library keys even when `pkg-config` or development packages are absent.
+
 # 0.29.2 — Intuitive Studio ranges
 
 - Reorganized README as evergreen product documentation: screenshot first, followed by sample videos, architecture, installation, workflows, and reference material.

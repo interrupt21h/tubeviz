@@ -6,6 +6,7 @@ let activeTrim=null;
 let cliSchema=null;
 let commandJobId=null;
 let commandPollTimer=null;
+let libraryClips=[];
 
 function value(id){return $(id).value.trim()}
 function number(id){return Number($(id).value)}
@@ -69,11 +70,11 @@ const STATIC_HELP={
   aiLlmBaseUrl:"Optional OpenAI-compatible /v1 endpoint used to turn the visual brief into a structured acquisition plan.",aiLlmModel:"Model name for the acquisition planner. If blank, Tubeviz uses the deterministic short-query fallback.",aiLlmApiKey:"Optional planner API key. It is passed only through the child-process environment, never command history.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
   manualUrls:"Paste one hand-picked YouTube URL per line. Each accepted video enters the normal tubeviz download, normalization, scene-detection, visual-index, and duplicate-detection pipeline.",
   manualTerm:"Search/provenance tag assigned to manually ingested videos so they can be filtered and selected as a coherent source family.",manualCookies:"Optional browser cookies for manual yt-dlp ingestion.",manualMinDuration:"Reject manually supplied videos shorter than this duration. Zero disables.",manualHardMaxDuration:"Reject manually supplied videos longer than this duration. Zero disables, which is the manual-ingest default.",manualMinWidth:"Reject sources narrower than this width. Zero disables.",manualWidth:"Width of normalized library media.",manualHeight:"Height of normalized library media.",manualFps:"Frame rate of normalized library media.",manualSceneThreshold:"FFmpeg scene-change sensitivity used when detecting shot boundaries.",manualMinScene:"Minimum detected scene duration retained in the library.",manualSocketTimeout:"yt-dlp network socket timeout in seconds.",manualFragments:"Number of fragmented-media pieces yt-dlp may download concurrently.",manualRetries:"Number of overall download retries.",manualFragmentRetries:"Number of retries for individual media fragments.",manualKeepAudio:"Keep audio in the normalized library copy. Visual rendering does not require source audio.",manualNoScenes:"Skip scene detection and scene thumbnails for these manually added videos.",manualNoVisualIndex:"Skip motion/palette/visual-accent indexing for these videos.",manualForce:"Redownload/reprocess even when the source already exists in the library.",manualVerbose:"Show verbose yt-dlp diagnostics in the job log.",
-  statusFilter:"Filter Library cards by clip processing status.",termFilter:"Filter Library cards by provenance/search term.",trimIn:"Saved start of the usable source region. Material before this point is excluded from future scene selection.",trimOut:"Saved end of the usable source region. Material after this point is excluded from future scene selection.",loopTrim:"Loop only the highlighted usable range while editing a clip.",
+  statusFilter:"Filter Library cards by clip processing status.",termFilter:"Filter Library cards by provenance/search term.",tagFilter:"Filter Library cards by editable user tag.",trimIn:"Saved start of the usable source region. Material before this point is excluded from future scene selection.",trimOut:"Saved end of the usable source region. Material after this point is excluded from future scene selection.",loopTrim:"Loop only the highlighted usable range while editing a clip.",
 };
 
 const BUTTON_HELP={
-  refreshLibrary:"Refresh project/library statistics from SQLite.",previewBtn:"Launch a fresh browser preview using the currently selected timeline, audio, and library.",audioAiDoctorBtn:"Check CLAP/Transformers/PyTorch availability and resolved device.",musicAiDoctorBtn:"Check optional MERT/Transformers/PyTorch availability and resolved device. MERT model code is loaded only when you explicitly enable Music AI.",analyzeBtn:"Analyze the selected audio and build a new directed timeline.",nativeBuildBtn:"Clean/rebuild the packaged native C++ renderer.",codecDoctorBtn:"Check FFglitch/ffedit installation and codec capabilities.",codecMaterializeBtn:"Materialize scheduled FFglitch effects into cached MP4 shot assets.",renderBtn:"Render the currently selected timeline to the output video.",ingestBtn:"Start search-based clip ingestion using the selected terms file.",manualIngestBtn:"Ingest every URL currently listed in the manual URL editor.",clearManualUrls:"Clear the manual URL editor.",loadClips:"Refresh visible Library cards.",visualIndexBtn:"Rebuild temporal visual fingerprints for library scenes.",codecMotionBtn:"Extract/index codec motion-vector features using FFglitch where supported.",reloadCliSchema:"Reload Command Center directly from the current argparse tree.",syncCliProject:"Populate matching Command Center arguments from the Project fields.",runCliCommand:"Validate and launch the current Command Center argument vector.",refreshJobs:"Refresh background job history.",cancelJob:"Request cancellation of the active Create workflow job.",cancelCommandJob:"Request cancellation of the active Command Center job.",setTrimIn:"Set the clip's usable start to the current video playhead.",setTrimOut:"Set the clip's usable end to the current video playhead.",jumpTrimIn:"Seek playback to the current In marker.",jumpTrimOut:"Seek playback to the current Out marker.",clearTrim:"Remove saved source trim and restore the full video as eligible footage.",saveTrim:"Persist the selected usable In/Out range to the library database.",closeModal:"Close the clip playback/trim editor.",
+  refreshLibrary:"Refresh project/library statistics from SQLite.",previewBtn:"Launch a fresh browser preview using the currently selected timeline, audio, and library.",audioAiDoctorBtn:"Check CLAP/Transformers/PyTorch availability and resolved device.",musicAiDoctorBtn:"Check optional MERT/Transformers/PyTorch availability and resolved device. MERT model code is loaded only when you explicitly enable Music AI.",analyzeBtn:"Analyze the selected audio and build a new directed timeline.",nativeBuildBtn:"Clean/rebuild the packaged native C++ renderer.",codecDoctorBtn:"Check FFglitch/ffedit installation and codec capabilities.",codecMaterializeBtn:"Materialize scheduled FFglitch effects into cached MP4 shot assets.",renderBtn:"Render the currently selected timeline to the output video.",ingestBtn:"Start search-based clip ingestion using the selected terms file.",manualIngestBtn:"Ingest every URL currently listed in the manual URL editor.",clearManualUrls:"Clear the manual URL editor.",loadClips:"Refresh visible Library cards.",selectVisible:"Temporarily restrict future scene plans to include the visible ready clips in the output pool.",unselectVisible:"Remove the visible ready clips from the temporary output pool.",selectTag:"Add every ready clip with the selected tag to the output pool.",unselectTag:"Remove every clip with the selected tag from the output pool.",clearOutputSelection:"Disable the temporary output pool so all ready clips are eligible again.",visualIndexBtn:"Rebuild temporal visual fingerprints for library scenes.",codecMotionBtn:"Extract/index codec motion-vector features using FFglitch where supported.",reloadCliSchema:"Reload Command Center directly from the current argparse tree.",syncCliProject:"Populate matching Command Center arguments from the Project fields.",runCliCommand:"Validate and launch the current Command Center argument vector.",refreshJobs:"Refresh background job history.",cancelJob:"Request cancellation of the active Create workflow job.",cancelCommandJob:"Request cancellation of the active Command Center job.",setTrimIn:"Set the clip's usable start to the current video playhead.",setTrimOut:"Set the clip's usable end to the current video playhead.",jumpTrimIn:"Seek playback to the current In marker.",jumpTrimOut:"Seek playback to the current Out marker.",clearTrim:"Remove saved source trim and restore the full video as eligible footage.",saveTrim:"Persist the selected usable In/Out range to the library database.",closeModal:"Close the clip playback/trim editor.",
 };
 
 function tooltipTextFor(el){
@@ -225,8 +226,29 @@ async function startJob(kind, payload){
     activeJob=job.id;
     $("cancelJob").disabled=false;
     $("jobLog").textContent=(job.log||[]).join("\n");
+    renderJobProgress(job);
     pollActiveJob();
   }catch(e){$("jobLog").textContent=`Error: ${e.message}`}
+}
+
+function compactDuration(seconds){
+  const value=Math.max(0,Math.round(Number(seconds)||0));
+  const hours=Math.floor(value/3600),minutes=Math.floor((value%3600)/60),secs=value%60;
+  return hours?`${hours}h ${minutes}m ${secs}s`:minutes?`${minutes}m ${secs}s`:`${secs}s`;
+}
+function renderJobProgress(job){
+  const box=$("jobProgress"),bar=$("jobProgressBar");
+  const running=["queued","running","cancelling"].includes(job.status);
+  const percent=Number.isFinite(job.progress_percent)?Math.max(0,Math.min(100,job.progress_percent)):null;
+  box.className=`job-progress ${running?(percent===null?"indeterminate":"running"):job.status}`;
+  $("jobStage").textContent=job.stage||job.status||"Working";
+  const count=job.progress_total!=null?`${job.progress_current||0} / ${job.progress_total}`:"";
+  $("jobProgressText").textContent=percent===null?(running?"Working…":job.status):`${percent.toFixed(1)}%${count?` · ${count}`:""}`;
+  bar.style.width=percent===null?"35%":`${percent}%`;
+  const timing=[];
+  if(job.elapsed_seconds!=null)timing.push(`Elapsed ${compactDuration(job.elapsed_seconds)}`);
+  if(job.progress_eta_seconds!=null&&running)timing.push(`ETA ${compactDuration(job.progress_eta_seconds)}`);
+  $("jobTiming").textContent=timing.join(" · ");
 }
 
 function projectBase(){
@@ -348,6 +370,7 @@ async function startPreview(){
     activeJob=job.id;
     $("cancelJob").disabled=false;
     $("jobLog").textContent=(job.log||[]).join("\n");
+    renderJobProgress(job);
     waitForPreview(job.id,job.preview_url,preview);
     pollActiveJob();
   }catch(e){
@@ -393,6 +416,7 @@ async function pollActiveJob(){
   if(!activeJob)return;
   try{
     const job=await api(`/api/gui/jobs/${activeJob}?tail=800`);
+    renderJobProgress(job);
     $("jobLog").textContent=(job.log||[]).join("\n");
     $("jobLog").scrollTop=$("jobLog").scrollHeight;
     const running=["queued","running","cancelling"].includes(job.status);
@@ -546,20 +570,32 @@ async function loadClips(){
       library:value("libraryPath"),
       status:value("statusFilter"),
       term:value("termFilter"),
+      tag:value("tagFilter"),
       limit:300
     };
     const data=await api(`/api/gui/library?${qs(params)}`);
+    libraryClips=data.clips;
+    const tagFilter=$("tagFilter"),currentTag=tagFilter.value;
+    tagFilter.innerHTML=`<option value="">all tags</option>${(data.tags||[]).map(tag=>`<option value="${escapeHtml(tag.name)}">${escapeHtml(tag.name)} (${tag.clip_count})</option>`).join("")}`;
+    if((data.tags||[]).some(tag=>tag.name===currentTag))tagFilter.value=currentTag;
+    const pool=data.output_selection||{active:false,count:0};
+    $("outputPoolStatus").textContent=pool.active
+      ?`${pool.count} marked clip${pool.count===1?"":"s"}; only marked ready clips are eligible for newly planned output`
+      :"All ready clips are eligible; marking any clip activates the temporary pool";
     setStats($("libraryStats"),data.stats);
     if(!data.clips.length){grid.innerHTML="<p>No clips matched.</p>";return}
     grid.innerHTML=data.clips.map(c=>{
       const enc=encodeURIComponent(c.source_id);
       const lp=encodeURIComponent(value("libraryPath"));
       const rejected=c.status==="rejected_manual";
-      return `<div class="clip">
+      const tags=(c.tags||[]).map(tag=>`<span class="clip-tag">${escapeHtml(tag)}</span>`).join("");
+      return `<div class="clip${c.output_selected?" output-selected":""}">
         <img loading="lazy" src="/api/gui/clip/${enc}/thumbnail?library=${lp}" onerror="this.style.opacity=.15">
         <div class="clip-body">
+          <label class="clip-output-toggle"><input type="checkbox" ${c.output_selected?"checked":""} ${c.status!=="ready"?"disabled":""} onchange="toggleOutputClip(${c.id},this.checked)"> Use in output pool</label>
           <div class="clip-title">${escapeHtml(c.title||c.source_id)}</div>
           <div class="clip-meta">${escapeHtml(c.source_id)} · ${c.status} · ${c.scene_count} scenes · ${c.duration?Number(c.duration).toFixed(1)+"s":"?"}</div>
+          <div class="clip-tags">${tags||'<span class="clip-tag empty">no tags</span>'}</div>
           ${(c.usable_start!=null||c.usable_end!=null)?`<div class="clip-trim-badge">trimmed ${formatTime(c.usable_start??0)} → ${formatTime(c.usable_end??c.duration??0)}</div>`:""}
           <div class="clip-actions">
             ${c.media_available
@@ -568,6 +604,7 @@ async function loadClips(){
             ${rejected
               ?`<button onclick="restoreClip('${jsq(c.source_id)}')">Restore</button>`
               :`<button onclick="rejectClip('${jsq(c.source_id)}')">Reject</button>`}
+            <button onclick="editClipTags('${jsq(c.source_id)}','${jsq(c.source)}')">Edit tags</button>
             <button class="danger" onclick="deleteClip('${jsq(c.source_id)}')">Delete</button>
           </div>
         </div>
@@ -575,6 +612,25 @@ async function loadClips(){
     }).join("");
   }catch(e){grid.innerHTML=`<p>${escapeHtml(e.message)}</p>`}
 }
+
+async function updateOutputSelection(payload){
+  await api("/api/gui/library/output-selection",{method:"POST",body:JSON.stringify({library:value("libraryPath"),...payload})});
+  await loadClips();
+}
+window.toggleOutputClip=(clipId,selected)=>updateOutputSelection({clip_ids:[clipId],selected});
+window.editClipTags=async(id,source)=>{
+  const clip=libraryClips.find(item=>item.source_id===id&&item.source===source);
+  const raw=prompt("Tags (comma separated):",(clip?.tags||[]).join(", "));
+  if(raw===null)return;
+  const tags=raw.split(",").map(tag=>tag.trim()).filter(Boolean);
+  await api(`/api/gui/clip/${encodeURIComponent(id)}/tags`,{method:"POST",body:JSON.stringify({library:value("libraryPath"),source,tags})});
+  await loadClips();
+};
+$("selectVisible").onclick=()=>updateOutputSelection({clip_ids:libraryClips.filter(c=>c.status==="ready").map(c=>c.id),selected:true});
+$("unselectVisible").onclick=()=>updateOutputSelection({clip_ids:libraryClips.filter(c=>c.status==="ready").map(c=>c.id),selected:false});
+$("selectTag").onclick=()=>{const tag=value("tagFilter");if(tag)return updateOutputSelection({tag,selected:true});alert("Choose a tag first.")};
+$("unselectTag").onclick=()=>{const tag=value("tagFilter");if(tag)return updateOutputSelection({tag,selected:false});alert("Choose a tag first.")};
+$("clearOutputSelection").onclick=async()=>{await api("/api/gui/library/output-selection/clear",{method:"POST",body:JSON.stringify({library:value("libraryPath")})});await loadClips()};
 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 function jsq(s){return String(s).replaceAll("\\","\\\\").replaceAll("'","\\'")}
@@ -743,6 +799,7 @@ window.watchJob=(id,kind)=>{
 $("refreshJobs").onclick=refreshJobs;
 $("loadClips").onclick=loadClips;
 $("statusFilter").onchange=loadClips;
+$("tagFilter").onchange=loadClips;
 $("termFilter").onkeydown=e=>{if(e.key==="Enter")loadClips()};
 
 bindCredentialToggle();

@@ -473,9 +473,10 @@ def native_doctor(
 ) -> dict[str, object]:
     renderer = find_native_renderer(binary, build_dir=build_dir)
     pkg_config = shutil.which("pkg-config")
-    libraries: dict[str, str | None] = {}
+    library_names = ["libavformat", "libavcodec", "libavutil", "libswscale", "libplacebo"]
+    libraries: dict[str, str | None] = {name: None for name in library_names}
     if pkg_config:
-        for library in ["libavformat", "libavcodec", "libavutil", "libswscale", "libplacebo"]:
+        for library in library_names:
             result = subprocess.run(
                 [pkg_config, "--modversion", library],
                 text=True,

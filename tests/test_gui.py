@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from tubeviz.cli import build_parser
-from tubeviz.gui import JobRequest, _job_command, create_gui_app
+from tubeviz.gui import GuiJob, JobRequest, _job_command, create_gui_app
 from tubeviz.library import ClipLibrary, sha256_file
 
 
@@ -15,6 +15,19 @@ def test_gui_command_parses():
     assert args.library == "./clips"
     assert args.port == 9000
     assert args.no_open is True
+
+
+def test_gui_job_extracts_determinate_progress_and_eta():
+    job = GuiJob(id="job", kind="render", command=["tubeviz", "render"])
+    job.observe("  native frame 450/900 ( 50.0%) 30.0 fps ETA 15s")
+    assert job.stage == "Rendering video"
+    assert job.progress_current == 450
+    assert job.progress_total == 900
+    assert job.progress_percent == 50.0
+    assert job.progress_eta_seconds == 15.0
+    payload = job.payload()
+    assert payload["stage"] == "Rendering video"
+    assert "elapsed_seconds" in payload
 
 
 def test_gui_analyze_job_builds_safe_argument_vector():

@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.29.3">
+<link rel="stylesheet" href="/static/gui.css?v=0.30.1">
 </head>
 <body>
 <header>
@@ -229,6 +229,11 @@ https://youtu.be/..."></textarea>
 
   <article class="card terminal-card">
     <div class="row"><h2>Active Job</h2><button id="cancelJob" class="danger" disabled>Cancel</button></div>
+    <div id="jobProgress" class="job-progress idle">
+      <div class="job-progress-heading"><b id="jobStage">Idle</b><span id="jobProgressText">No active job</span></div>
+      <div class="job-progress-track"><div id="jobProgressBar"></div></div>
+      <div id="jobTiming" class="job-progress-timing"></div>
+    </div>
     <pre id="jobLog">No active job.</pre>
   </article>
 </section>
@@ -244,9 +249,21 @@ https://youtu.be/..."></textarea>
         <option value="download_error">download error</option>
       </select>
       <input id="termFilter" placeholder="term filter">
+      <select id="tagFilter"><option value="">all tags</option></select>
       <button id="loadClips">Refresh</button>
       <button id="visualIndexBtn">Rebuild Visual Index</button>
       <button id="codecMotionBtn">Codec Motion Index</button>
+    </div>
+    <div class="output-pool-toolbar">
+      <div>
+        <b>Output pool</b>
+        <span id="outputPoolStatus">All ready clips are eligible</span>
+      </div>
+      <button id="selectVisible">Mark visible</button>
+      <button id="unselectVisible">Unmark visible</button>
+      <button id="selectTag">Mark tag</button>
+      <button id="unselectTag">Unmark tag</button>
+      <button id="clearOutputSelection">Clear pool</button>
     </div>
     <div id="libraryStats" class="stats"></div>
     <div id="clipGrid" class="clip-grid"></div>
@@ -337,6 +354,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.29.3"></script>
+<script src="/static/gui.js?v=0.30.1"></script>
 </body>
 </html>

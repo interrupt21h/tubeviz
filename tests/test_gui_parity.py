@@ -65,8 +65,8 @@ def test_gui_generic_cli_job_is_argument_vector_and_validated():
             "--no-vector-effects",
         ]},
     ))
-    assert command[:3][-2:] == ["-m", "tubeviz.cli"]
-    assert command[3:] == [
+    assert command[1:4] == ["-u", "-m", "tubeviz.cli"]
+    assert command[4:] == [
         "analyze", "audio/song.mp3",
         "--library", "./library",
         "--audio-ai",

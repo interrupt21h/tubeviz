@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -187,6 +187,25 @@ class ClipLibrary:
 
                 CREATE INDEX IF NOT EXISTS idx_scene_visual_features_version
                     ON scene_visual_features(version, scene_id);
+
+                CREATE TABLE IF NOT EXISTS tags (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS clip_tags (
+                    clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+                    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    PRIMARY KEY(clip_id, tag_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS output_selection (
+                    clip_id INTEGER PRIMARY KEY REFERENCES clips(id) ON DELETE CASCADE,
+                    selected_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_clip_tags_tag ON clip_tags(tag_id, clip_id);
                 """
             )
             # Forward-compatible in-place migrations for persistent libraries.
@@ -423,6 +442,89 @@ class ClipLibrary:
                 ).fetchall()
         return [str(row["term"]) for row in rows]
 
+    def list_tags(self) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            rows = db.execute(
+                """
+                SELECT t.name, COUNT(ct.clip_id) AS clip_count,
+                       SUM(CASE WHEN os.clip_id IS NOT NULL THEN 1 ELSE 0 END) AS selected_count
+                FROM tags t
+                LEFT JOIN clip_tags ct ON ct.tag_id=t.id
+                LEFT JOIN output_selection os ON os.clip_id=ct.clip_id
+                GROUP BY t.id ORDER BY t.name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [{"name": str(row["name"]), "clip_count": int(row["clip_count"] or 0),
+                 "selected_count": int(row["selected_count"] or 0)} for row in rows]
+
+    @staticmethod
+    def _clean_tags(tags: list[str]) -> list[str]:
+        cleaned: dict[str, str] = {}
+        for raw in tags:
+            name = " ".join(str(raw).strip().split())
+            if not name:
+                continue
+            if len(name) > 64:
+                raise ValueError("tags must be at most 64 characters")
+            cleaned.setdefault(name.casefold(), name)
+        if len(cleaned) > 50:
+            raise ValueError("a clip may have at most 50 tags")
+        return sorted(cleaned.values(), key=str.casefold)
+
+    def set_clip_tags(self, source: str, source_id: str, tags: list[str]) -> list[str]:
+        names = self._clean_tags(tags)
+        with self.connect() as db:
+            row = db.execute("SELECT id FROM clips WHERE source=? AND source_id=?", (source, source_id)).fetchone()
+            if row is None:
+                raise KeyError(f"clip not found: {source}:{source_id}")
+            clip_id = int(row["id"])
+            db.execute("DELETE FROM clip_tags WHERE clip_id=?", (clip_id,))
+            for name in names:
+                db.execute("INSERT INTO tags(name, created_at) VALUES(?,?) ON CONFLICT(name) DO NOTHING", (name, utcnow()))
+                tag_id = int(db.execute("SELECT id FROM tags WHERE name=? COLLATE NOCASE", (name,)).fetchone()[0])
+                db.execute("INSERT INTO clip_tags(clip_id, tag_id) VALUES(?,?)", (clip_id, tag_id))
+            db.execute("DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM clip_tags ct WHERE ct.tag_id=tags.id)")
+        return names
+
+    def set_output_selected(self, clip_ids: list[int], selected: bool) -> int:
+        ids = sorted({int(value) for value in clip_ids})
+        if not ids:
+            return 0
+        with self.connect() as db:
+            placeholders = ",".join("?" for _ in ids)
+            status_clause = " AND status='ready'" if selected else ""
+            valid = [int(row[0]) for row in db.execute(
+                f"SELECT id FROM clips WHERE id IN ({placeholders}){status_clause}", ids
+            ).fetchall()]
+            if selected:
+                db.executemany(
+                    "INSERT INTO output_selection(clip_id, selected_at) VALUES(?,?) ON CONFLICT(clip_id) DO UPDATE SET selected_at=excluded.selected_at",
+                    [(clip_id, utcnow()) for clip_id in valid],
+                )
+            elif valid:
+                marks = ",".join("?" for _ in valid)
+                db.execute(f"DELETE FROM output_selection WHERE clip_id IN ({marks})", valid)
+        return len(valid)
+
+    def select_output_by_tag(self, tag: str, selected: bool) -> int:
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT c.id FROM clips c JOIN clip_tags ct ON ct.clip_id=c.id
+                   JOIN tags t ON t.id=ct.tag_id WHERE t.name=? COLLATE NOCASE AND c.status='ready'""",
+                (tag,),
+            ).fetchall()
+        return self.set_output_selected([int(row[0]) for row in rows], selected)
+
+    def clear_output_selection(self) -> int:
+        with self.connect() as db:
+            count = int(db.execute("SELECT COUNT(*) FROM output_selection").fetchone()[0])
+            db.execute("DELETE FROM output_selection")
+        return count
+
+    def output_selection_count(self) -> int:
+        with self.connect() as db:
+            return int(db.execute("SELECT COUNT(*) FROM output_selection").fetchone()[0])
+
     def visual_preference_profile(self, *, min_rejected_scenes: int = 3) -> dict[str, object] | None:
         """Build a lightweight negative preference profile from manual rejects.
 
@@ -481,6 +583,8 @@ class ClipLibrary:
         clauses = [
             "c.status='ready'",
             "c.normalized_path IS NOT NULL",
+            "(NOT EXISTS (SELECT 1 FROM output_selection) OR EXISTS "
+            "(SELECT 1 FROM output_selection os WHERE os.clip_id=c.id))",
             f"({end_expr} - {start_expr})>=?",
         ]
         params: list[object] = [max(0.0, min_duration)]
@@ -623,6 +727,7 @@ class ClipLibrary:
         status: str | None = None,
         term: str | None = None,
         source: str | None = None,
+        tag: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         clauses = ["1=1"]
@@ -640,6 +745,12 @@ class ClipLibrary:
         if source:
             clauses.append("c.source=?")
             params.append(source)
+        if tag:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM clip_tags ct3 JOIN tags t3 ON t3.id=ct3.tag_id "
+                "WHERE ct3.clip_id=c.id AND t3.name=? COLLATE NOCASE)"
+            )
+            params.append(tag)
 
         params.append(max(1, int(limit)))
         sql = f"""
@@ -648,6 +759,9 @@ class ClipLibrary:
                 c.width, c.height, c.status, c.error,
                 c.original_path, c.normalized_path, c.duplicate_of_clip_id,
                 c.usable_start, c.usable_end,
+                EXISTS(SELECT 1 FROM output_selection os WHERE os.clip_id=c.id) AS output_selected,
+                (SELECT GROUP_CONCAT(t.name, char(31)) FROM clip_tags ctag
+                 JOIN tags t ON t.id=ctag.tag_id WHERE ctag.clip_id=c.id) AS tags,
                 COUNT(DISTINCT sc.id) AS scene_count,
                 COUNT(DISTINCT se.scene_id) AS embedded_scene_count,
                 GROUP_CONCAT(DISTINCT st.term) AS terms
@@ -686,6 +800,8 @@ class ClipLibrary:
                 "duplicate_of_clip_id": row["duplicate_of_clip_id"],
                 "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
                 "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
+                "output_selected": bool(row["output_selected"]),
+                "tags": sorted((x for x in str(row["tags"] or "").split(chr(31)) if x), key=str.casefold),
                 "usable_duration": max(
                     0.0,
                     (float(row["usable_end"]) if row["usable_end"] is not None else float(row["duration"] or 0.0))
@@ -744,6 +860,14 @@ class ClipLibrary:
                 """,
                 (int(row["id"]),),
             ).fetchall()
+            output_selected = bool(db.execute(
+                "SELECT 1 FROM output_selection WHERE clip_id=?", (int(row["id"]),)
+            ).fetchone())
+            tag_rows = db.execute(
+                "SELECT t.name FROM clip_tags ct JOIN tags t ON t.id=ct.tag_id "
+                "WHERE ct.clip_id=? ORDER BY t.name COLLATE NOCASE",
+                (int(row["id"]),),
+            ).fetchall()
 
         try:
             metadata = json.loads(row["metadata_json"] or "{}")
@@ -772,6 +896,8 @@ class ClipLibrary:
             "normalized_sha256": row["normalized_sha256"],
             "usable_start": float(row["usable_start"]) if row["usable_start"] is not None else None,
             "usable_end": float(row["usable_end"]) if row["usable_end"] is not None else None,
+            "output_selected": output_selected,
+            "tags": [str(item[0]) for item in tag_rows],
             "usable_duration": max(
                 0.0,
                 (float(row["usable_end"]) if row["usable_end"] is not None else float(row["duration"] or 0.0))
@@ -987,6 +1113,7 @@ class ClipLibrary:
         if record is None:
             raise KeyError(f"clip not found: {source}:{source_id}")
         with self.connect() as db:
+            db.execute("DELETE FROM output_selection WHERE clip_id=?", (record.id,))
             db.execute(
                 """
                 UPDATE clips
@@ -1344,6 +1471,8 @@ class ClipLibrary:
             result["visual_features"] = int(
                 db.execute("SELECT COUNT(*) FROM scene_visual_features").fetchone()[0]
             )
+            result["tags"] = int(db.execute("SELECT COUNT(*) FROM tags").fetchone()[0])
+            result["output_selected"] = int(db.execute("SELECT COUNT(*) FROM output_selection").fetchone()[0])
         return result
 
     @staticmethod

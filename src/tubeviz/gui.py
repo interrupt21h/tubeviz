@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -54,6 +55,19 @@ class ClipTrimAction(BaseModel):
     usable_end: float | None = None
 
 
+class ClipTagsAction(BaseModel):
+    library: str = "./library"
+    source: str = "youtube"
+    tags: list[str] = Field(default_factory=list)
+
+
+class OutputSelectionAction(BaseModel):
+    library: str = "./library"
+    clip_ids: list[int] = Field(default_factory=list)
+    tag: str | None = None
+    selected: bool = True
+
+
 @dataclass
 class GuiJob:
     id: str
@@ -68,6 +82,45 @@ class GuiJob:
     process: subprocess.Popen[str] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     env_overrides: dict[str, str] = field(default_factory=dict, repr=False)
+    stage: str = "Queued"
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_percent: float | None = None
+    progress_eta_seconds: float | None = None
+
+    def observe(self, line: str) -> None:
+        """Extract stable progress metadata while retaining the original log line."""
+        text = line.strip()
+        if not text:
+            return
+        lower = text.lower()
+        stage_rules = (
+            ("search", "Discovering footage"), ("preview", "Evaluating previews"),
+            ("download", "Downloading media"), ("normalize", "Normalizing media"),
+            ("visual feature", "Indexing visual features"), ("embedded", "Embedding scenes"),
+            ("semantic", "Classifying scenes"), ("audio ai", "Analyzing audio semantics"),
+            ("music ai", "Analyzing music representations"), ("analy", "Analyzing music"),
+            ("scene", "Planning scenes"), ("materializ", "Materializing effects"),
+            ("native build", "Building native renderer"), ("native configure", "Configuring native renderer"),
+            ("native frame", "Rendering video"), ("frame ", "Rendering video"),
+            ("codec", "Processing codec effects"), ("wrote ", "Finalizing output"),
+        )
+        for needle, label in stage_rules:
+            if needle in lower:
+                self.stage = label
+                break
+        matches = list(re.finditer(r"(?<![\d.])(\d+)\s*/\s*(\d+)(?![\d.])", text))
+        if matches:
+            current, total = (int(value) for value in matches[-1].groups())
+            if total > 0 and 0 <= current <= total:
+                self.progress_current, self.progress_total = current, total
+                self.progress_percent = min(100.0, 100.0 * current / total)
+        percent = re.search(r"\(\s*(\d+(?:\.\d+)?)%\s*\)", text)
+        if percent:
+            self.progress_percent = max(0.0, min(100.0, float(percent.group(1))))
+        eta = re.search(r"\bETA\s+(\d+(?:\.\d+)?)s\b", text, re.IGNORECASE)
+        if eta:
+            self.progress_eta_seconds = float(eta.group(1))
 
     def payload(self, *, tail: int = 250) -> dict[str, Any]:
         lines = list(self.log)
@@ -82,6 +135,12 @@ class GuiJob:
             "ended_at": self.ended_at,
             "returncode": self.returncode,
             "status": self.status,
+            "stage": self.stage,
+            "progress_current": self.progress_current,
+            "progress_total": self.progress_total,
+            "progress_percent": self.progress_percent,
+            "progress_eta_seconds": self.progress_eta_seconds,
+            "elapsed_seconds": max(0.0, (self.ended_at or time.time()) - (self.started_at or self.created_at)),
             "log": lines,
             **self.metadata,
         }
@@ -118,6 +177,7 @@ class JobManager:
             job.ended_at = time.time()
             return
         job.status = "running"
+        job.stage = "Starting"
         job.started_at = time.time()
         job.log.append("$ " + " ".join(job.command))
         env = os.environ.copy()
@@ -137,9 +197,14 @@ class JobManager:
             job.process = proc
             assert proc.stdout is not None
             for line in proc.stdout:
-                job.log.append(line.rstrip())
+                clean = line.rstrip()
+                job.log.append(clean)
+                job.observe(clean)
             job.returncode = proc.wait()
             job.status = "complete" if job.returncode == 0 else "failed"
+            job.stage = "Complete" if job.returncode == 0 else "Failed"
+            if job.returncode == 0:
+                job.progress_percent = 100.0
         except Exception as exc:
             job.log.append(f"GUI job error: {exc}")
             job.returncode = -1
@@ -198,7 +263,7 @@ def _free_tcp_port(host: str = "127.0.0.1") -> int:
 
 
 def _tubeviz_command(*parts: str) -> list[str]:
-    return [sys.executable, "-m", "tubeviz.cli", *parts]
+    return [sys.executable, "-u", "-m", "tubeviz.cli", *parts]
 
 
 def _flag(command: list[str], name: str, value: Any, *, boolean: bool = False) -> None:
@@ -623,6 +688,7 @@ def create_gui_app(
         library: str = Query(default=str(default_library)),
         status: str | None = None,
         term: str | None = None,
+        tag: str | None = None,
         limit: int = 200,
     ) -> dict[str, Any]:
         lib = ClipLibrary(library)
@@ -630,8 +696,40 @@ def create_gui_app(
         return {
             "stats": lib.stats(),
             "terms": lib.list_terms(),
-            "clips": lib.list_clips(status=status, term=term, limit=min(1000, max(1, limit))),
+            "tags": lib.list_tags(),
+            "output_selection": {"active": lib.output_selection_count() > 0,
+                                 "count": lib.output_selection_count()},
+            "clips": lib.list_clips(status=status, term=term, tag=tag,
+                                    limit=min(1000, max(1, limit))),
         }
+
+    @app.post("/api/gui/clip/{source_id}/tags")
+    async def save_clip_tags(source_id: str, action: ClipTagsAction) -> dict[str, Any]:
+        lib = ClipLibrary(action.library)
+        lib.initialize()
+        try:
+            tags = lib.set_clip_tags(action.source, source_id, action.tags)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"source_id": source_id, "tags": tags}
+
+    @app.post("/api/gui/library/output-selection")
+    async def update_output_selection(action: OutputSelectionAction) -> dict[str, Any]:
+        lib = ClipLibrary(action.library)
+        lib.initialize()
+        changed = (lib.select_output_by_tag(action.tag, action.selected)
+                   if action.tag else lib.set_output_selected(action.clip_ids, action.selected))
+        count = lib.output_selection_count()
+        return {"changed": changed, "count": count, "active": count > 0}
+
+    @app.post("/api/gui/library/output-selection/clear")
+    async def clear_output_selection(action: OutputSelectionAction) -> dict[str, Any]:
+        lib = ClipLibrary(action.library)
+        lib.initialize()
+        changed = lib.clear_output_selection()
+        return {"changed": changed, "count": 0, "active": False}
 
     @app.get("/api/gui/clip/{source_id}")
     async def clip_details(
