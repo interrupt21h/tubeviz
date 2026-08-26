@@ -222,3 +222,20 @@ def test_ingest_never_reuses_manually_rejected_clip_even_with_force(tmp_path: Pa
     assert source.hydrate_called is False
     assert source.download_called is False
     assert library.get_clip("youtube", "abc123").status == "rejected_manual"
+
+
+def test_delete_keep_original_preserves_direct_ready_media(tmp_path: Path):
+    library = ClipLibrary(tmp_path / "library")
+    library.initialize()
+    clip_id = library.upsert_discovery(
+        source="youtube", source_id="direct", source_url="https://youtu.be/direct",
+        term="direct", rank=1, metadata={"title": "Direct"},
+    )
+    original = library.originals_dir / "direct.webm"
+    original.write_bytes(b"direct")
+    library.mark_downloaded(clip_id, original_path=original, info_json_path=None, sha256=sha256_file(original))
+    library.mark_ready_media(clip_id, original, sha256_file(original))
+
+    library.delete_clip("youtube", "direct", keep_original=True)
+    assert original.exists()
+    assert library.get_clip("youtube", "direct") is None

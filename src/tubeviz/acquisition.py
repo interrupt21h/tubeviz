@@ -10,6 +10,7 @@ import numpy as np
 
 from .analysis import analyze_track
 from .semantic import OpenClipEmbedder, SemanticConfig, cosine_similarity
+from .settings import resolve_llm_api_key
 from .visual_features import VisualFeatureConfig, analyze_scene_visuals
 
 
@@ -187,7 +188,8 @@ Prefer queries that fill coverage gaps rather than duplicating an already satura
         {"role":"system","content":"You are a cinematographer and footage acquisition planner. Output strict JSON only."},
         {"role":"user","content":prompt}]}).encode()
     headers={"Content-Type":"application/json"}
-    if cfg.llm_api_key: headers["Authorization"]="Bearer "+cfg.llm_api_key
+    api_key = resolve_llm_api_key(cfg.llm_base_url, cfg.llm_api_key)
+    if api_key: headers["Authorization"]="Bearer "+api_key
     try:
         req=urllib.request.Request(cfg.llm_base_url.rstrip('/')+'/chat/completions',data=payload,headers=headers,method='POST')
         with urllib.request.urlopen(req,timeout=cfg.llm_timeout) as r: raw=json.loads(r.read().decode())

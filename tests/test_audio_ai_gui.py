@@ -31,7 +31,8 @@ def test_gui_analyze_job_includes_audio_ai_and_llm_director():
     assert "--ai-director" in command
     assert "--ai-director-base-url http://localhost:8000/v1" in joined
     assert "--ai-director-model local-model" in joined
-    assert "--ai-director-api-key secret" in joined
+    assert "--ai-director-api-key" not in joined
+    assert "secret" not in joined
 
 
 def test_gui_audio_ai_doctor_job():

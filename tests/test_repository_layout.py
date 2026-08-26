@@ -18,4 +18,20 @@ def test_repository_has_apache_license_metadata():
 
 
 def test_readme_screenshot_stays_first():
-    assert Path("README.md").read_text().startswith("![tubeviz screenshot](screenshot.png)\n")
+    assert Path("README.md").read_text().startswith("![tubeviz Studio — Create](screenshots/screenshot-create.png)\n")
+
+
+def test_readme_tab_screenshots_live_in_screenshots_directory():
+    readme = Path("README.md").read_text()
+    names = [
+        "screenshot-ai.png",
+        "screenshot-command.png",
+        "screenshot-create.png",
+        "screenshot-jobs.png",
+        "screenshot-library.png",
+    ]
+    for name in names:
+        path = Path("screenshots") / name
+        assert path.is_file()
+        assert f"screenshots/{name}" in readme
+    assert "![tubeviz screenshot](screenshot.png)" not in readme

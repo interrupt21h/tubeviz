@@ -366,7 +366,26 @@ def materialize_selection(
         existing = library_root / "transforms" / selection.media_file
         if existing.exists() and not force:
             return selection
-    source = library_root / "normalized" / selection.media_file
+    raw = Path(selection.media_file)
+    candidates: list[Path] = []
+    if raw.parts and raw.parts[0] in {"normalized", "originals", "transforms", "codec-glitch"}:
+        candidates.append(library_root / raw)
+    if selection.media_url:
+        url = selection.media_url.split("?", 1)[0].split("#", 1)[0]
+        if url.startswith("/originals/"):
+            candidates.append(library_root / "originals" / url.removeprefix("/originals/"))
+        elif url.startswith("/media/"):
+            candidates.append(library_root / "normalized" / url.removeprefix("/media/"))
+        elif url.startswith("/transforms/"):
+            candidates.append(library_root / "transforms" / url.removeprefix("/transforms/"))
+        elif url.startswith("/codec-glitch/"):
+            candidates.append(library_root / "codec-glitch" / url.removeprefix("/codec-glitch/"))
+    candidates.extend([
+        library_root / "normalized" / raw,
+        library_root / "originals" / raw,
+        library_root / raw,
+    ])
+    source = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
     if not source.exists():
         raise FileNotFoundError(source)
     transform_id = _transform_key(selection, source, cfg)

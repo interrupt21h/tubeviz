@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .library import ClipLibrary, sha256_file
-from .media import detect_scene_boundaries, make_thumbnail, normalize_video, probe, require_media_tools
+from .media import detect_scene_boundaries, make_thumbnail, prepare_media, probe, require_media_tools
 from .youtube import DownloadFailure, SearchResult, YouTubeSource
 from .discovery_ai import DiscoveryAIConfig, discover_candidates, rank_candidates, index_clip_scene_embeddings
 from .semantic import OpenClipEmbedder, SemanticConfig, classify_scene_thumbnails
@@ -33,9 +33,13 @@ class IngestConfig:
     min_width: int = 0
     min_source_height: int = 1080
     max_source_height: int = 1080
-    normalize_width: int = 1280
-    normalize_height: int = 720
-    normalize_fps: int = 30
+    # Compatibility proxy dimensions/rate. Zero preserves the downloaded source.
+    normalize_width: int = 0
+    normalize_height: int = 0
+    normalize_fps: int = 0
+    # auto: direct-play compatible source, otherwise proxy; source: never proxy; normalize: always proxy.
+    media_prep: str = "auto"
+    normalize_encoder: str = "auto"
     scene_threshold: float = 0.40
     min_scene_seconds: float = 1.5
     keep_audio: bool = False
@@ -802,27 +806,31 @@ def ingest_terms(
                         )
                         summary.downloaded += 1
 
-                    normalized = library.normalized_dir / f"{hydrated.source_id}.mp4"
-                    if cfg.force or not normalized.exists():
-                        progress(f"  normalize: {hydrated.source_id}")
-                        try:
-                            normalize_video(
-                                original,
-                                normalized,
-                                width=cfg.normalize_width,
-                                height=cfg.normalize_height,
-                                fps=cfg.normalize_fps,
-                                keep_audio=cfg.keep_audio,
-                            )
-                        except Exception as exc:
-                            library.mark_failure(clip_id, "normalize_error", str(exc))
-                            _record_failure(summary, "normalize_error")
-                            progress(
-                                f"  normalize_error: {hydrated.source_id}: {exc}"
-                            )
-                            continue
-                    library.mark_normalized(
-                        clip_id, normalized, sha256_file(normalized)
+                    proxy = library.normalized_dir / f"{hydrated.source_id}.mp4"
+                    progress(f"  media prep: {hydrated.source_id}")
+                    try:
+                        prepared = prepare_media(
+                            original,
+                            proxy,
+                            mode=cfg.media_prep,
+                            width=cfg.normalize_width,
+                            height=cfg.normalize_height,
+                            fps=cfg.normalize_fps,
+                            keep_audio=cfg.keep_audio,
+                            encoder=cfg.normalize_encoder,
+                            progress=progress,
+                            force=cfg.force,
+                        )
+                    except Exception as exc:
+                        library.mark_failure(clip_id, "normalize_error", str(exc))
+                        _record_failure(summary, "normalize_error")
+                        progress(f"  media_prepare_error: {hydrated.source_id}: {exc}")
+                        continue
+                    media = prepared.path
+                    mode_label = "proxy" if media == proxy else "source"
+                    progress(f"  media prep: {hydrated.source_id} -> {mode_label} ({prepared.reason})")
+                    library.mark_ready_media(
+                        clip_id, media, sha256_file(media)
                     )
 
                     if cfg.detect_scenes:
@@ -830,7 +838,7 @@ def ingest_terms(
                             library,
                             clip_id,
                             hydrated.source_id,
-                            normalized,
+                            media,
                             threshold=cfg.scene_threshold,
                             min_scene_seconds=cfg.min_scene_seconds,
                         )
@@ -993,15 +1001,19 @@ def ingest_urls(
                 library.mark_downloaded(clip_id, original_path=original, info_json_path=info_json, sha256=original_hash)
                 summary.downloaded += 1
 
-            normalized = library.normalized_dir / f"{hydrated.source_id}.mp4"
-            if cfg.force or not normalized.exists():
-                progress(f"  normalize: {hydrated.source_id}")
-                normalize_video(original, normalized, width=cfg.normalize_width, height=cfg.normalize_height,
-                                fps=cfg.normalize_fps, keep_audio=cfg.keep_audio)
-            library.mark_normalized(clip_id, normalized, sha256_file(normalized))
+            proxy = library.normalized_dir / f"{hydrated.source_id}.mp4"
+            progress(f"  media prep: {hydrated.source_id}")
+            prepared = prepare_media(
+                original, proxy, mode=cfg.media_prep,
+                width=cfg.normalize_width, height=cfg.normalize_height, fps=cfg.normalize_fps,
+                keep_audio=cfg.keep_audio, encoder=cfg.normalize_encoder, progress=progress, force=cfg.force)
+            media = prepared.path
+            mode_label = "proxy" if media == proxy else "source"
+            progress(f"  media prep: {hydrated.source_id} -> {mode_label} ({prepared.reason})")
+            library.mark_ready_media(clip_id, media, sha256_file(media))
 
             if cfg.detect_scenes:
-                scene_count = _index_scenes(library, clip_id, hydrated.source_id, normalized,
+                scene_count = _index_scenes(library, clip_id, hydrated.source_id, media,
                                             threshold=cfg.scene_threshold,
                                             min_scene_seconds=cfg.min_scene_seconds)
                 summary.scenes += scene_count

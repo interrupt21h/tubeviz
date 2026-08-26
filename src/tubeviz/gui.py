@@ -112,7 +112,8 @@ class GuiJob:
         stage_rules = (
             ("ai describe", "Understanding video content"),
             ("search", "Discovering footage"), ("preview", "Evaluating previews"),
-            ("download", "Downloading media"), ("normalize", "Normalizing media"),
+            ("download", "Downloading media"), ("media prep", "Preparing media"),
+            ("transcode", "Creating compatibility proxy"), ("normalize", "Creating compatibility proxy"),
             ("visual feature", "Indexing visual features"), ("embedded", "Embedding scenes"),
             ("semantic", "Classifying scenes"), ("audio ai", "Analyzing audio semantics"),
             ("music ai", "Analyzing music representations"), ("analy", "Analyzing music"),
@@ -428,9 +429,11 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--min-width", o.get("min_width", 0))
         _flag(command, "--min-source-height", o.get("min_source_height", 1080))
         _flag(command, "--max-source-height", o.get("max_source_height", 1080))
-        _flag(command, "--width", o.get("width", 1280))
-        _flag(command, "--height", o.get("height", 720))
-        _flag(command, "--fps", o.get("fps", 30))
+        _flag(command, "--media-prep", o.get("media_prep", "auto"))
+        _flag(command, "--normalize-encoder", o.get("normalize_encoder", "auto"))
+        _flag(command, "--width", o.get("width", 0))
+        _flag(command, "--height", o.get("height", 0))
+        _flag(command, "--fps", o.get("fps", 0))
         _flag(command, "--scene-threshold", o.get("scene_threshold", 0.40))
         _flag(command, "--min-scene-seconds", o.get("min_scene_seconds", 1.5))
         _flag(command, "--keep-audio", o.get("keep_audio", False), boolean=True)
@@ -489,7 +492,6 @@ def _job_command(request: JobRequest) -> list[str]:
             command.append("--ai-director")
             _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
             _flag(command, "--ai-director-model", o.get("ai_director_model"))
-            _flag(command, "--ai-director-api-key", o.get("ai_director_api_key"))
             _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
         _flag(command, "--section-bars", o.get("section_bars", 8))
         _flag(command, "--max-video-layers", o.get("max_video_layers", 3))
@@ -553,6 +555,11 @@ def _job_command(request: JobRequest) -> list[str]:
         _flag(command, "--hard-max-duration", o.get("hard_max_duration", 600))
         _flag(command, "--min-source-height", o.get("min_source_height", 1080))
         _flag(command, "--max-source-height", o.get("max_source_height", 1080))
+        _flag(command, "--media-prep", o.get("media_prep", "auto"))
+        _flag(command, "--normalize-encoder", o.get("normalize_encoder", "auto"))
+        _flag(command, "--width", o.get("width", 0))
+        _flag(command, "--height", o.get("height", 0))
+        _flag(command, "--fps", o.get("fps", 0))
         _flag(command, "--cookies-from-browser", o.get("cookies_from_browser"))
         _flag(command, "--ai-discovery", o.get("ai_discovery", True), boolean=True)
         _flag(command, "--ai-device", o.get("ai_device", "auto"))
@@ -666,6 +673,33 @@ def _job_command(request: JobRequest) -> list[str]:
         return command
 
     raise ValueError(f"unsupported GUI job kind: {kind}")
+
+
+def _job_env_overrides(request: JobRequest) -> dict[str, str]:
+    """Build the process-local credential environment for a Studio job.
+
+    The persisted OpenAI credential is exported only as OPENAI_API_KEY. Generic
+    compatible endpoints use an explicit per-job TUBEVIZ_LLM_API_KEY override;
+    OpenAI-specific call sites resolve the saved key when their destination is
+    api.openai.com. This keeps secrets out of argv/job logs and avoids sending an
+    OpenAI key to arbitrary compatible endpoints.
+    """
+    env_overrides: dict[str, str] = {}
+    settings = load_settings()
+    env_overrides["TUBEVIZ_AI_ENABLED"] = "1" if settings.ai_enabled else "0"
+    if settings.effective_openai_key():
+        env_overrides["OPENAI_API_KEY"] = settings.effective_openai_key()
+    if settings.effective_hf_token():
+        env_overrides["HF_TOKEN"] = settings.effective_hf_token()
+        env_overrides["HUGGING_FACE_HUB_TOKEN"] = settings.effective_hf_token()
+    token = (request.hf_token or "").strip()
+    if token:
+        env_overrides["HF_TOKEN"] = token
+        env_overrides["HUGGING_FACE_HUB_TOKEN"] = token
+    llm_key = (request.llm_api_key or "").strip()
+    if llm_key:
+        env_overrides["TUBEVIZ_LLM_API_KEY"] = llm_key
+    return env_overrides
 
 
 def create_gui_app(
@@ -935,25 +969,7 @@ def create_gui_app(
             command = _job_command(effective)
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        env_overrides: dict[str, str] = {}
-        settings = load_settings()
-        env_overrides["TUBEVIZ_AI_ENABLED"] = "1" if settings.ai_enabled else "0"
-        if settings.effective_openai_key():
-            env_overrides["OPENAI_API_KEY"] = settings.effective_openai_key()
-            env_overrides["TUBEVIZ_LLM_API_KEY"] = settings.effective_openai_key()
-        if settings.effective_hf_token():
-            env_overrides["HF_TOKEN"] = settings.effective_hf_token()
-            env_overrides["HUGGING_FACE_HUB_TOKEN"] = settings.effective_hf_token()
-        token = (request.hf_token or "").strip()
-        if token:
-            # HF_TOKEN is the canonical huggingface_hub override. Keep the
-            # legacy variable too for libraries that still inspect it. Tokens
-            # are process-local: never put them in argv, job metadata, or logs.
-            env_overrides["HF_TOKEN"] = token
-            env_overrides["HUGGING_FACE_HUB_TOKEN"] = token
-        llm_key = (request.llm_api_key or "").strip()
-        if llm_key:
-            env_overrides["TUBEVIZ_LLM_API_KEY"] = llm_key
+        env_overrides = _job_env_overrides(request)
         return jobs.create(
             request.kind, command, metadata=metadata, env_overrides=env_overrides
         ).payload()

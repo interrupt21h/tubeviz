@@ -115,7 +115,7 @@ if(!offlineMode){
 }
 
 function waitMetadata(v){if(v.readyState>=1)return Promise.resolve();return new Promise((res,rej)=>{const ok=()=>{clean();res();},bad=()=>{clean();rej(v.error||new Error('metadata load failed'));},clean=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});});}
-function mediaUrl(layer){if(layer.media_url)return layer.media_url;return `/media/${layer.media_file.split('/').map(encodeURIComponent).join('/')}`;}
+function mediaUrl(layer){if(layer.media_url)return layer.media_url;const parts=String(layer.media_file||"").split("/");const root=parts[0]==="originals"?"/originals/":"/media/";if(parts[0]==="originals"||parts[0]==="normalized")parts.shift();return root+parts.map(encodeURIComponent).join("/");}
 function allLayers(scene){return [{...scene,role:'primary',opacity:scene.opacity??.92,blend_mode:scene.transform?.blend_mode??'normal'},...(scene.layers??[])].slice(0,4);}
 
 async function loadBank(bankIndex,scene){

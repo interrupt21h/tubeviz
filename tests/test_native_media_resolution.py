@@ -152,3 +152,19 @@ def test_missing_media_error_reports_all_lookup_locations(tmp_path: Path):
     message = str(exc.value)
     assert "missing-id" in message
     assert str((library / "normalized" / "missing.mp4").resolve()) in message
+
+
+def test_original_media_url_resolves_under_originals(tmp_path: Path):
+    library = tmp_path / "library"
+    originals = library / "originals"
+    originals.mkdir(parents=True)
+    expected = originals / "direct.webm"
+    expected.write_bytes(b"video")
+
+    resolved = _resolve_media(
+        library,
+        "originals/direct.webm",
+        media_url="/originals/direct.webm",
+        materialized=False,
+    )
+    assert resolved == expected.resolve()

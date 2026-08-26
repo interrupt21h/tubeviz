@@ -11,6 +11,7 @@ import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 
 def settings_path() -> Path:
@@ -34,7 +35,7 @@ class UserSettings:
     hf_token: str = ""
 
     def effective_openai_key(self) -> str:
-        return self.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+        return (self.openai_api_key or os.environ.get("OPENAI_API_KEY", "")).strip()
 
     def effective_hf_token(self) -> str:
         return self.hf_token or os.environ.get("HF_TOKEN", "") or os.environ.get("HUGGING_FACE_HUB_TOKEN", "")
@@ -61,6 +62,44 @@ def load_settings() -> UserSettings:
         return UserSettings(**{key: value for key, value in raw.items() if key in allowed})
     except (OSError, ValueError, TypeError):
         return UserSettings()
+
+
+def is_openai_api_url(base_url: str | None) -> bool:
+    """Return True only for the first-party OpenAI API host.
+
+    This guard is intentionally strict so a saved OpenAI credential is never
+    forwarded automatically to an arbitrary OpenAI-compatible endpoint.
+    """
+    if not base_url:
+        return False
+    try:
+        return (urlsplit(base_url).hostname or "").lower() == "api.openai.com"
+    except ValueError:
+        return False
+
+
+def resolve_llm_api_key(
+    base_url: str | None,
+    explicit: str | None = None,
+    *,
+    settings: UserSettings | None = None,
+) -> str:
+    """Resolve credentials for OpenAI-compatible LLM requests safely.
+
+    Precedence is: explicit call-site key, TUBEVIZ_LLM_API_KEY, then the
+    persistent/user OPENAI_API_KEY only when the destination is api.openai.com.
+    That makes the AI Settings key available everywhere Tubeviz talks to OpenAI
+    without leaking it to local or third-party compatible endpoints.
+    """
+    explicit_value = (explicit or "").strip()
+    if explicit_value:
+        return explicit_value
+    llm_value = os.environ.get("TUBEVIZ_LLM_API_KEY", "").strip()
+    if llm_value:
+        return llm_value
+    if is_openai_api_url(base_url):
+        return (settings or load_settings()).effective_openai_key()
+    return ""
 
 
 def save_settings(changes: dict[str, Any], *, clear_openai: bool = False, clear_hf: bool = False) -> UserSettings:

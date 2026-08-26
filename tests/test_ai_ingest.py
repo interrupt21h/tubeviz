@@ -6,6 +6,7 @@ import numpy as np
 import tubeviz.ingest as ingest_module
 from tubeviz.discovery_ai import RankedCandidate
 from tubeviz.ingest import IngestConfig, ingest_terms
+from tubeviz.media import MediaInfo, PreparedMedia
 from tubeviz.library import ClipLibrary
 from tubeviz.youtube import SearchResult
 
@@ -62,8 +63,11 @@ def test_ai_ingest_downloads_ranked_shortlist_and_persists_score(tmp_path: Path,
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
     monkeypatch.setattr(
         ingest_module,
-        "normalize_video",
-        lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()),
+        "prepare_media",
+        lambda source, proxy, **kwargs: PreparedMedia(
+            path=source, transcoded=False, encoder=None, reason="test direct source",
+            info=MediaInfo(duration=10.0, width=1920, height=1080, fps=30.0, codec_name="h264", pixel_format="yuv420p", format_name="mov,mp4")
+        ),
     )
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 0)
 

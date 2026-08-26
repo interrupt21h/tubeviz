@@ -3,9 +3,21 @@ from pathlib import Path
 
 import tubeviz.ingest as ingest_module
 from tubeviz.ingest import IngestConfig, ingest_terms, read_search_terms
+from tubeviz.media import MediaInfo, PreparedMedia
 from tubeviz.library import ClipLibrary
 from tubeviz.youtube import SearchResult
 
+
+
+
+def _fake_prepare(source: Path, proxy: Path, **kwargs) -> PreparedMedia:
+    return PreparedMedia(
+        path=source,
+        transcoded=False,
+        encoder=None,
+        reason="test direct source",
+        info=MediaInfo(duration=10.0, width=1920, height=1080, fps=30.0, codec_name="h264", pixel_format="yuv420p", format_name="mov,mp4"),
+    )
 
 class FakeSource:
     def search(self, term: str, limit: int):
@@ -45,7 +57,7 @@ def test_ingest_is_idempotent_for_ready_clip(tmp_path: Path, monkeypatch):
     library = ClipLibrary(tmp_path / "library")
 
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
-    monkeypatch.setattr(ingest_module, "normalize_video", lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()))
+    monkeypatch.setattr(ingest_module, "prepare_media", _fake_prepare)
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 3)
 
     first = ingest_terms(
@@ -113,7 +125,7 @@ def test_ingest_keeps_searching_until_ready_quota(tmp_path: Path, monkeypatch):
     source = QuotaSource()
 
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
-    monkeypatch.setattr(ingest_module, "normalize_video", lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()))
+    monkeypatch.setattr(ingest_module, "prepare_media", _fake_prepare)
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 1)
 
     summary = ingest_terms(
@@ -147,7 +159,7 @@ def test_soft_duration_is_not_a_rejection(tmp_path: Path, monkeypatch):
 
     library = ClipLibrary(tmp_path / "library")
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
-    monkeypatch.setattr(ingest_module, "normalize_video", lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()))
+    monkeypatch.setattr(ingest_module, "prepare_media", _fake_prepare)
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 1)
 
     summary = ingest_terms(
@@ -211,7 +223,7 @@ def test_ingest_progressively_expands_search_for_restrictive_hard_max(tmp_path: 
     library = ClipLibrary(tmp_path / "library")
     source = ExpandingSource()
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
-    monkeypatch.setattr(ingest_module, "normalize_video", lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()))
+    monkeypatch.setattr(ingest_module, "prepare_media", _fake_prepare)
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 1)
 
     summary = ingest_terms(
@@ -274,11 +286,7 @@ def test_long_video_is_range_downloaded_instead_of_rejected(tmp_path: Path, monk
     library = ClipLibrary(tmp_path / "library")
     source = RangeSource()
     monkeypatch.setattr(ingest_module, "require_media_tools", lambda: None)
-    monkeypatch.setattr(
-        ingest_module,
-        "normalize_video",
-        lambda source, destination, **kwargs: destination.write_bytes(source.read_bytes()),
-    )
+    monkeypatch.setattr(ingest_module, "prepare_media", _fake_prepare)
     monkeypatch.setattr(ingest_module, "_index_scenes", lambda *args, **kwargs: 1)
 
     summary = ingest_terms(

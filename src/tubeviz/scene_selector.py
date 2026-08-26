@@ -97,12 +97,24 @@ def _stable_u64(value: str) -> int:
     return int.from_bytes(digest, "big")
 
 
-def _media_file(normalized_path: str) -> str:
-    path = Path(normalized_path)
+def _media_file(media_path: str) -> str:
+    # Keep the library-relative directory explicit.  New libraries may point
+    # ready clips directly at originals/ while legacy/proxied clips live under
+    # normalized/.  Explicit paths remove the old native-renderer ambiguity.
+    return Path(media_path).as_posix()
+
+
+def _media_url(media_path: str) -> str:
+    path = Path(media_path)
     parts = path.parts
+    if parts and parts[0] == "originals":
+        relative = Path(*parts[1:]).as_posix()
+        return f"/originals/{quote(relative)}"
     if parts and parts[0] == "normalized":
-        path = Path(*parts[1:])
-    return path.as_posix()
+        relative = Path(*parts[1:]).as_posix()
+        return f"/media/{quote(relative)}"
+    # Backward compatibility for custom/basename-only scene candidates.
+    return f"/media/{quote(path.as_posix())}"
 
 
 def _intent_query(
@@ -928,7 +940,7 @@ def build_scene_plan(
                         source_id=companion.source_id,
                         title=companion.title,
                         media_file=companion_file,
-                        media_url=f"/media/{quote(companion_file)}",
+                        media_url=_media_url(companion.normalized_path),
                         start=companion_start,
                         end=companion_end,
                         duration=companion_end - companion_start,
@@ -964,7 +976,7 @@ def build_scene_plan(
                     source_id=selected.source_id,
                     title=selected.title,
                     media_file=media_file,
-                    media_url=f"/media/{quote(media_file)}",
+                    media_url=_media_url(selected.normalized_path),
                     start=source_start,
                     end=source_end,
                     duration=source_end - source_start,

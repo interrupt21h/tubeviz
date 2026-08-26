@@ -421,7 +421,13 @@ class ClipLibrary:
                 ),
             )
 
-    def mark_normalized(self, clip_id: int, path: Path, sha256: str) -> None:
+    def mark_ready_media(self, clip_id: int, path: Path, sha256: str) -> None:
+        """Mark the canonical media used by scene planning/rendering as ready.
+
+        ``normalized_path`` remains the on-disk schema column for backward
+        compatibility, but since v0.32 it may reference either an originals/
+        source file or a normalized/ compatibility proxy.
+        """
         now = utcnow()
         with self.connect() as db:
             db.execute(
@@ -431,6 +437,10 @@ class ClipLibrary:
                 """,
                 (str(path.relative_to(self.root)), sha256, now, now, clip_id),
             )
+
+    def mark_normalized(self, clip_id: int, path: Path, sha256: str) -> None:
+        # Backward-compatible API used by older integrations/tests.
+        self.mark_ready_media(clip_id, path, sha256)
 
     def mark_failure(self, clip_id: int, status: str, error: str) -> None:
         if status not in {
@@ -1287,7 +1297,13 @@ class ClipLibrary:
             if not keep_original and row["original_path"]:
                 candidates.add(self.root / str(row["original_path"]))
             if row["normalized_path"]:
-                candidates.add(self.root / str(row["normalized_path"]))
+                normalized_value = str(row["normalized_path"])
+                original_value = str(row["original_path"]) if row["original_path"] else None
+                # With direct-source media, the legacy normalized_path column
+                # intentionally points at original_path. --keep-original must
+                # not delete that shared canonical file.
+                if not (keep_original and original_value == normalized_value):
+                    candidates.add(self.root / normalized_value)
             if not keep_original and row["info_json_path"]:
                 candidates.add(self.root / str(row["info_json_path"]))
 

@@ -73,24 +73,24 @@ def _resolve_media(
 ) -> Path:
     """Resolve a timeline media reference using tubeviz library conventions.
 
-    SceneSelection.media_file intentionally contains a basename relative to the
-    browser's /media mount for normal clips. Materialized transforms use the
-    /transforms mount. Native rendering has no HTTP mount, so it must recreate
-    those mappings explicitly instead of assuming media_file is library-root
-    relative.
+    Current timelines keep an explicit library-relative path (for example
+    originals/foo.webm or normalized/foo.mp4) plus the browser mount URL. Older
+    basename-only timelines remain supported. Native rendering has no HTTP mount,
+    so it recreates those mappings explicitly.
     """
     raw = Path(media_file).expanduser()
     if raw.is_absolute():
         return raw.resolve()
 
     normalized = library / "normalized"
+    originals = library / "originals"
     transforms = library / "transforms"
     codec_glitch = library / "codec-glitch"
 
     # Explicit relative paths from old/custom timelines remain supported.
     candidates: list[Path] = []
     parts = raw.parts
-    if parts and parts[0] in {"normalized", "transforms", "codec-glitch"}:
+    if parts and parts[0] in {"normalized", "originals", "transforms", "codec-glitch"}:
         candidates.append(library / raw)
 
     # media_url is the authoritative browser mapping when present.
@@ -102,12 +102,14 @@ def _resolve_media(
             candidates.append(codec_glitch / url_path.removeprefix("/codec-glitch/"))
         elif url_path.startswith("/media/"):
             candidates.append(normalized / url_path.removeprefix("/media/"))
+        elif url_path.startswith("/originals/"):
+            candidates.append(originals / url_path.removeprefix("/originals/"))
 
     # Current timeline convention.
     if materialized:
-        candidates.extend([transforms / raw, normalized / raw])
+        candidates.extend([transforms / raw, normalized / raw, originals / raw])
     else:
-        candidates.extend([normalized / raw, transforms / raw])
+        candidates.extend([normalized / raw, originals / raw, transforms / raw])
 
     # Last-resort legacy root-relative path.
     candidates.append(library / raw)
@@ -140,7 +142,7 @@ def _media_resolution_candidates(
     if raw.is_absolute():
         return [raw.resolve()]
     candidates: list[Path] = []
-    if raw.parts and raw.parts[0] in {"normalized", "transforms", "codec-glitch"}:
+    if raw.parts and raw.parts[0] in {"normalized", "originals", "transforms", "codec-glitch"}:
         candidates.append(library / raw)
     if media_url:
         url_path = unquote(media_url.split("?", 1)[0].split("#", 1)[0])
@@ -150,10 +152,12 @@ def _media_resolution_candidates(
             candidates.append(library / "codec-glitch" / url_path.removeprefix("/codec-glitch/"))
         elif url_path.startswith("/media/"):
             candidates.append(library / "normalized" / url_path.removeprefix("/media/"))
+        elif url_path.startswith("/originals/"):
+            candidates.append(library / "originals" / url_path.removeprefix("/originals/"))
     if materialized:
-        candidates.extend([library / "transforms" / raw, library / "normalized" / raw])
+        candidates.extend([library / "transforms" / raw, library / "normalized" / raw, library / "originals" / raw])
     else:
-        candidates.extend([library / "normalized" / raw, library / "transforms" / raw])
+        candidates.extend([library / "normalized" / raw, library / "originals" / raw, library / "transforms" / raw])
     candidates.append(library / raw)
     result: list[Path] = []
     seen: set[Path] = set()

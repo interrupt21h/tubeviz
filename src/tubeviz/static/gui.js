@@ -68,9 +68,9 @@ const STATIC_HELP={
   codec:"Final video encoder used by FFmpeg.",nativePreset:"FFmpeg/native encoder speed-quality preset.",decoderCache:"Number of native decoder contexts retained across cuts to reduce reopen/decode overhead.",nativeThreads:"Native effect worker count. Zero lets the runtime choose automatically.",
   buildMissing:"Build the native C++ renderer automatically when the executable is missing.",codecRenderMaterialize:"Materialize scheduled FFglitch effects before final rendering.",
   visualBrief:"Describe the desired visual world in natural language. Tubeviz converts this prose into short YouTube-native searches; the brief itself is never used as a search query.",
-  aiLlmBaseUrl:"Optional OpenAI-compatible /v1 endpoint used to turn the visual brief into a structured acquisition plan.",aiLlmModel:"Model name for the acquisition planner. If blank, Tubeviz uses the deterministic short-query fallback.",aiLlmApiKey:"Optional planner API key. It is passed only through the child-process environment, never command history.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minSourceHeight:"Reject sources whose best reported height is below this value. The default requires 1080p footage.",maxSourceHeight:"Highest source format Tubeviz will download. The default caps acquisition at 1080p even when 1440p or 4K is available; zero disables the cap.",manualMinSourceHeight:"Reject a manual source when its reported height is below this value.",manualMaxSourceHeight:"Highest format downloaded for a manual source. The default prevents unnecessary 4K acquisition before normalization.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
+  aiLlmBaseUrl:"Optional OpenAI-compatible /v1 endpoint used to turn the visual brief into a structured acquisition plan.",aiLlmModel:"Model name for the acquisition planner. If blank, Tubeviz uses the deterministic short-query fallback.",aiLlmApiKey:"Optional planner API key. It is passed only through the child-process environment, never command history.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minSourceHeight:"Reject sources whose best reported height is below this value. The default requires 1080p footage.",maxSourceHeight:"Highest source format Tubeviz will download. The default caps acquisition at 1080p even when 1440p or 4K is available; zero disables the cap.",manualMinSourceHeight:"Reject a manual source when its reported height is below this value.",manualMaxSourceHeight:"Highest format downloaded for a manual source. The default caps acquisition at 1080p without forcing a later downscale.",mediaPrep:"Auto reuses H.264/MP4, VP8/VP9/WebM, and AV1 sources directly and creates an H.264 proxy only for incompatible media. Source never transcodes. Normalize forces the legacy proxy behavior.",normalizeEncoder:"Encoder used only when a compatibility proxy is required. Auto tests NVENC at runtime and otherwise uses libx264.",manualMediaPrep:"Choose whether manual ingest reuses compatible source media or creates an H.264 compatibility proxy.",manualNormalizeEncoder:"Compatibility-proxy encoder; Auto prefers working NVIDIA NVENC and falls back to libx264.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
   manualUrls:"Paste one hand-picked YouTube URL per line. Each accepted video enters the normal tubeviz download, normalization, scene-detection, visual-index, and duplicate-detection pipeline.",
-  manualTerm:"Search/provenance tag assigned to manually ingested videos so they can be filtered and selected as a coherent source family.",manualCookies:"Optional browser cookies for manual yt-dlp ingestion.",manualMinDuration:"Reject manually supplied videos shorter than this duration. Zero disables.",manualHardMaxDuration:"Reject manually supplied videos longer than this duration. Zero disables, which is the manual-ingest default.",manualMinWidth:"Reject sources narrower than this width. Zero disables.",manualWidth:"Width of normalized library media.",manualHeight:"Height of normalized library media.",manualFps:"Frame rate of normalized library media.",manualSceneThreshold:"FFmpeg scene-change sensitivity used when detecting shot boundaries.",manualMinScene:"Minimum detected scene duration retained in the library.",manualSocketTimeout:"yt-dlp network socket timeout in seconds.",manualFragments:"Number of fragmented-media pieces yt-dlp may download concurrently.",manualRetries:"Number of overall download retries.",manualFragmentRetries:"Number of retries for individual media fragments.",manualKeepAudio:"Keep audio in the normalized library copy. Visual rendering does not require source audio.",manualNoScenes:"Skip scene detection and scene thumbnails for these manually added videos.",manualNoVisualIndex:"Skip motion/palette/visual-accent indexing for these videos.",manualForce:"Redownload/reprocess even when the source already exists in the library.",manualVerbose:"Show verbose yt-dlp diagnostics in the job log.",
+  manualTerm:"Search/provenance tag assigned to manually ingested videos so they can be filtered and selected as a coherent source family.",manualCookies:"Optional browser cookies for manual yt-dlp ingestion.",manualMinDuration:"Reject manually supplied videos shorter than this duration. Zero disables.",manualHardMaxDuration:"Reject manually supplied videos longer than this duration. Zero disables, which is the manual-ingest default.",manualMinWidth:"Reject sources narrower than this width. Zero disables.",manualWidth:"Compatibility-proxy width. Zero preserves source geometry.",manualHeight:"Compatibility-proxy height. Zero preserves source geometry.",manualFps:"Compatibility-proxy frame rate. Zero preserves source timing.",manualSceneThreshold:"FFmpeg scene-change sensitivity used when detecting shot boundaries.",manualMinScene:"Minimum detected scene duration retained in the library.",manualSocketTimeout:"yt-dlp network socket timeout in seconds.",manualFragments:"Number of fragmented-media pieces yt-dlp may download concurrently.",manualRetries:"Number of overall download retries.",manualFragmentRetries:"Number of retries for individual media fragments.",manualKeepAudio:"Keep AAC audio when a compatibility proxy is created. Direct source media is never re-encoded merely to strip audio.",manualNoScenes:"Skip scene detection and scene thumbnails for these manually added videos.",manualNoVisualIndex:"Skip motion/palette/visual-accent indexing for these videos.",manualForce:"Redownload/reprocess even when the source already exists in the library.",manualVerbose:"Show verbose yt-dlp diagnostics in the job log.",
   statusFilter:"Filter Library cards by clip processing status.",termFilter:"Filter Library cards by provenance/search term.",tagFilter:"Filter Library cards by editable user tag.",trimIn:"Saved start of the usable source region. Material before this point is excluded from future scene selection.",trimOut:"Saved end of the usable source region. Material after this point is excluded from future scene selection.",loopTrim:"Loop only the highlighted usable range while editing a clip.",
 };
 
@@ -246,7 +246,7 @@ async function startJob(kind, payload){
     const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind,...payload,hf_token:hfToken,llm_api_key:llmKey})});
     activeJob=job.id;
     $("cancelJob").disabled=false;
-    $("jobLog").textContent=(job.log||[]).join("\n");
+    updateLiveLog($("jobLog"),job.log,{forceFollow:true});
     renderJobProgress(job);
     pollActiveJob();
   }catch(e){$("jobLog").textContent=`Error: ${e.message}`}
@@ -327,6 +327,7 @@ $("ingestBtn").onclick=()=>startJob("ingest",{
   options:{
     results_per_term:number("resultsPerTerm"),hard_max_duration:number("hardMaxDuration"),
     min_source_height:number("minSourceHeight"),max_source_height:number("maxSourceHeight"),
+    media_prep:value("mediaPrep")||"auto",normalize_encoder:value("normalizeEncoder")||"auto",width:0,height:0,fps:0,
     cookies_from_browser:value("cookiesBrowser")||null,ai_discovery:aiSettings.ai_enabled&&checked("aiDiscovery"),
     ai_device:value("aiDevice"),ai_candidates_per_term:number("aiCandidates"),
     ai_query_count:number("aiQueries"),acquisition_query_count:number("acquisitionQueries"),target_clips:number("targetClips"),
@@ -348,7 +349,7 @@ $("manualIngestBtn").onclick=()=>{
     options:{
       term:value("manualTerm")||"manual",
       min_duration:number("manualMinDuration"),hard_max_duration:number("manualHardMaxDuration"),
-      min_width:number("manualMinWidth"),min_source_height:number("manualMinSourceHeight"),max_source_height:number("manualMaxSourceHeight"),width:number("manualWidth"),height:number("manualHeight"),fps:number("manualFps"),
+      min_width:number("manualMinWidth"),min_source_height:number("manualMinSourceHeight"),max_source_height:number("manualMaxSourceHeight"),media_prep:value("manualMediaPrep")||"auto",normalize_encoder:value("manualNormalizeEncoder")||"auto",width:number("manualWidth"),height:number("manualHeight"),fps:number("manualFps"),
       scene_threshold:number("manualSceneThreshold"),min_scene_seconds:number("manualMinScene"),
       cookies_from_browser:value("manualCookies")||null,download_socket_timeout:number("manualSocketTimeout"),
       concurrent_fragments:number("manualFragments"),download_retries:number("manualRetries"),fragment_retries:number("manualFragmentRetries"),
@@ -391,7 +392,7 @@ async function startPreview(){
     });
     activeJob=job.id;
     $("cancelJob").disabled=false;
-    $("jobLog").textContent=(job.log||[]).join("\n");
+    updateLiveLog($("jobLog"),job.log,{forceFollow:true});
     renderJobProgress(job);
     waitForPreview(job.id,job.preview_url,preview);
     pollActiveJob();
@@ -433,14 +434,22 @@ $("cancelJob").onclick=async()=>{
   await api(`/api/gui/jobs/${activeJob}/cancel`,{method:"POST"});
 };
 
+function updateLiveLog(element, lines, {forceFollow=false}={}){
+  const distanceFromBottom=element.scrollHeight-element.clientHeight-element.scrollTop;
+  const wasFollowing=forceFollow||distanceFromBottom<=24;
+  const previousScrollTop=element.scrollTop;
+  element.textContent=(lines||[]).join("\n");
+  if(wasFollowing)element.scrollTop=element.scrollHeight;
+  else element.scrollTop=previousScrollTop;
+}
+
 async function pollActiveJob(){
   if(pollTimer)clearTimeout(pollTimer);
   if(!activeJob)return;
   try{
-    const job=await api(`/api/gui/jobs/${activeJob}?tail=800`);
+    const job=await api(`/api/gui/jobs/${activeJob}?tail=4000`);
     renderJobProgress(job);
-    $("jobLog").textContent=(job.log||[]).join("\n");
-    $("jobLog").scrollTop=$("jobLog").scrollHeight;
+    updateLiveLog($("jobLog"),job.log);
     const running=["queued","running","cancelling"].includes(job.status);
     $("cancelJob").disabled=!running;
     if(running){
@@ -566,13 +575,13 @@ async function startCommandJob(){
   if(!argv.length)return;
   try{
     const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind:"cli",library:value("libraryPath"),hf_token:value("hfToken")||null,options:{argv}})});
-    commandJobId=job.id;$("cancelCommandJob").disabled=false;$("commandJobLog").textContent=(job.log||[]).join("\n");pollCommandJob();refreshJobs();
+    commandJobId=job.id;$("cancelCommandJob").disabled=false;updateLiveLog($("commandJobLog"),job.log,{forceFollow:true});pollCommandJob();refreshJobs();
   }catch(e){$("commandJobLog").textContent=`Error: ${e.message}`}
 }
 async function pollCommandJob(){
   if(commandPollTimer)clearTimeout(commandPollTimer);if(!commandJobId)return;
   try{
-    const job=await api(`/api/gui/jobs/${commandJobId}?tail=1000`);$("commandJobLog").textContent=(job.log||[]).join("\n");$("commandJobLog").scrollTop=$("commandJobLog").scrollHeight;
+    const job=await api(`/api/gui/jobs/${commandJobId}?tail=4000`);updateLiveLog($("commandJobLog"),job.log);
     const running=["queued","running","cancelling"].includes(job.status);$("cancelCommandJob").disabled=!running;
     if(running)commandPollTimer=setTimeout(pollCommandJob,600);else{commandJobId=null;refreshLibrarySummary();loadClips();refreshJobs()}
   }catch(e){$("commandJobLog").textContent+=`\n${e.message}`}

@@ -2,9 +2,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tubeviz.gui import create_gui_app
+from tubeviz.gui import JobRequest, _job_env_overrides, create_gui_app
 from tubeviz.library import ClipLibrary
-from tubeviz.settings import load_settings, save_settings, settings_path
+from tubeviz.settings import load_settings, resolve_llm_api_key, save_settings, settings_path
 
 
 def test_user_settings_persist_secrets_without_returning_them(monkeypatch, tmp_path: Path):
@@ -67,3 +67,42 @@ def test_gui_ai_settings_are_centralized(monkeypatch, tmp_path: Path):
     assert response.json()["openai_key_configured"] is True
     assert "secret" not in response.text
     assert client.get("/api/gui/ai-settings").json()["openai_vision_model"] == "vision-test"
+
+
+def test_saved_openai_key_is_reused_for_first_party_llm_calls_only(monkeypatch, tmp_path: Path):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("TUBEVIZ_CONFIG", str(path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("TUBEVIZ_LLM_API_KEY", raising=False)
+    save_settings({"openai_api_key": "sk-central"})
+
+    assert resolve_llm_api_key("https://api.openai.com/v1") == "sk-central"
+    assert resolve_llm_api_key("https://api.openai.com/v1/chat/completions") == "sk-central"
+    assert resolve_llm_api_key("http://localhost:8000/v1") == ""
+    assert resolve_llm_api_key("https://compatible.example/v1") == ""
+
+
+def test_explicit_compatible_llm_key_overrides_saved_openai_key(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("TUBEVIZ_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setenv("TUBEVIZ_LLM_API_KEY", "local-secret")
+    save_settings({"openai_api_key": "sk-central"})
+
+    assert resolve_llm_api_key("http://localhost:8000/v1") == "local-secret"
+    assert resolve_llm_api_key("https://api.openai.com/v1") == "local-secret"
+    assert resolve_llm_api_key("https://api.openai.com/v1", "explicit-secret") == "explicit-secret"
+
+
+def test_studio_jobs_export_saved_openai_key_without_relabeling_it_as_generic_llm_key(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("TUBEVIZ_CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("TUBEVIZ_LLM_API_KEY", raising=False)
+    save_settings({"openai_api_key": "sk-central", "hf_token": "hf-central"})
+
+    env = _job_env_overrides(JobRequest(kind="ai-describe"))
+    assert env["OPENAI_API_KEY"] == "sk-central"
+    assert env["HF_TOKEN"] == "hf-central"
+    assert "TUBEVIZ_LLM_API_KEY" not in env
+
+    override = _job_env_overrides(JobRequest(kind="analyze", llm_api_key="compatible-secret"))
+    assert override["OPENAI_API_KEY"] == "sk-central"
+    assert override["TUBEVIZ_LLM_API_KEY"] == "compatible-secret"

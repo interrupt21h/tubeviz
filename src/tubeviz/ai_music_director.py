@@ -13,6 +13,7 @@ from typing import Any
 
 from .audio_ai import top_audio_concepts
 from .models import Section, SectionAIDirection, TrackAnalysis
+from .settings import resolve_llm_api_key
 
 
 @dataclass(frozen=True)
@@ -283,8 +284,9 @@ def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig) -> dict[str, Any]:
     payload = _request_payload(track, cfg)
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    if cfg.api_key:
-        headers["Authorization"] = f"Bearer {cfg.api_key}"
+    api_key = resolve_llm_api_key(cfg.base_url, cfg.api_key)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(_endpoint(cfg.base_url), data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=cfg.timeout) as response:

@@ -56,3 +56,14 @@ def test_help_tooltip_uses_body_portal():
     assert 'positionStudioTooltip' in js
     assert 'window.innerWidth' in js
     assert 'window.innerHeight' in js
+
+
+def test_live_job_logs_only_auto_follow_when_user_is_at_bottom():
+    js = _static("gui.js")
+    assert 'function updateLiveLog(element, lines, {forceFollow=false}={})' in js
+    assert 'const distanceFromBottom=element.scrollHeight-element.clientHeight-element.scrollTop;' in js
+    assert 'if(wasFollowing)element.scrollTop=element.scrollHeight;' in js
+    assert 'else element.scrollTop=previousScrollTop;' in js
+    assert '?tail=4000' in js
+    assert '$("jobLog").scrollTop=$("jobLog").scrollHeight' not in js
+    assert '$("commandJobLog").scrollTop=$("commandJobLog").scrollHeight' not in js

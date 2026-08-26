@@ -9,6 +9,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
+
 from .library import ClipLibrary
 from .models import DirectedTimeline, SceneSelection
 from .scene_selector import SceneSelectorConfig, attach_scene_plan
@@ -98,15 +100,23 @@ def create_app(
     package_dir = Path(__file__).resolve().parent
     static_dir = package_dir / "static"
 
-    app = FastAPI(title="tubeviz", version="0.26.6")
+    app = FastAPI(title="tubeviz", version=__version__)
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     if library is not None:
-        # StaticFiles resolves requests beneath this directory and rejects path
-        # traversal; only normalized visualization assets are exposed.
+        # StaticFiles resolves requests beneath each dedicated media directory
+        # and rejects path traversal. The library root/database are never exposed.
         app.mount(
             "/media",
             StaticFiles(directory=library.normalized_dir, check_dir=True),
             name="media",
+        )
+        # Auto media preparation can keep browser-compatible downloads as the
+        # canonical ready media. Expose only the originals directory, not the
+        # whole library root, so timeline playback remains narrowly scoped.
+        app.mount(
+            "/originals",
+            StaticFiles(directory=library.originals_dir, check_dir=True),
+            name="originals",
         )
         transforms_dir = library.root / "transforms"
         transforms_dir.mkdir(parents=True, exist_ok=True)

@@ -1,3 +1,27 @@
+# 0.32.0 — Conditional media preparation and accelerated compatibility proxies
+
+- Removed unconditional full-video normalization from the default ingest path. `--media-prep auto` now probes downloaded media and directly reuses common browser/native-safe H.264/MP4, VP8/VP9/WebM, and AV1 MP4/WebM sources.
+- Added `--media-prep source` for native-oriented workflows that never want an ingest transcode, and `--media-prep normalize` to explicitly retain homogeneous H.264 proxy behavior when desired.
+- Changed compatibility-proxy width, height, and FPS defaults to `0`, which preserves downloaded source geometry and frame rate. A 1080p acquisition is no longer automatically reduced to 720p before later rendering.
+- Added `--normalize-encoder auto|nvenc|x264`. Auto mode performs a live one-frame `h264_nvenc` capability test, prefers NVENC when it is actually usable, and falls back to libx264 if an auto-selected NVENC transcode fails at runtime.
+- Added machine-readable FFmpeg `-progress` handling for required compatibility proxies. Studio now receives periodic elapsed/total/percentage output rather than appearing stalled throughout a long encode.
+- Existing compatibility proxies are reused unless `--force` is supplied.
+- Scene detection, thumbnails, visual-feature indexing, OpenCLIP classification/embeddings, AI descriptions, transforms, FFglitch processing, browser playback, and native rendering now accept ready media stored directly under `originals/` as well as legacy/proxied media under `normalized/`.
+- Added a constrained `/originals` visualizer mount and explicit timeline `/originals/...` URLs; the complete library root is not exposed.
+- Updated transform, codec-glitch, native-render, and browser fallback media resolution so direct-source timelines remain valid across preview, materialization, and final rendering.
+- Preserved the existing SQLite schema for upgrade compatibility: the historical `normalized_path`/`normalized_sha256` columns now represent the canonical ready-media path/hash and may point at either `originals/` or `normalized/`.
+- Fixed `library delete --keep-original` for direct-source clips so a shared ready-media/original path is never accidentally removed.
+- Added Studio controls for media-preparation policy and proxy encoder. Manual ingest now labels proxy dimensions/FPS explicitly and defaults them to source-preserving zero values.
+- Updated README architecture and ingest documentation to describe conditional preparation, source reuse, NVENC fallback, direct original-media serving, and the new CLI controls.
+- Added regression tests for direct H.264/VP9/AV1 compatibility decisions, incompatible-media proxying, NVENC selection/fallback, direct-source native resolution, browser serving, and keep-original deletion semantics.
+
+# 0.31.2 — Unified OpenAI credentials and scrollable live logs
+
+- Make the OpenAI API key saved in Studio AI Settings the default credential for every Tubeviz request sent to `api.openai.com`, including storyboard/clip understanding, acquisition planning/query expansion, and whole-song AI directing.
+- Keep explicit `TUBEVIZ_LLM_API_KEY` / CLI credentials as overrides for custom OpenAI-compatible endpoints while preventing the saved OpenAI key from being forwarded automatically to arbitrary third-party/local URLs.
+- Keep AI-director secrets out of Studio child-process argv and job history; credentials are resolved at request time instead.
+- Preserve the user's live-log scroll position while a job is running. Auto-follow now resumes only when the log is already at (or returned to) the bottom, and Studio retains the full 4,000-line in-memory job tail while polling.
+
 # 0.31.1 — Visible AI library intelligence
 
 - Show an AI-generated visual summary plus semantic and mood tags directly on each enhanced Library card.

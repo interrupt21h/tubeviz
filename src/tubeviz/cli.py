@@ -278,6 +278,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             normalize_width=args.width,
             normalize_height=args.height,
             normalize_fps=args.fps,
+            media_prep=args.media_prep,
+            normalize_encoder=args.normalize_encoder,
             scene_threshold=args.scene_threshold,
             min_scene_seconds=args.min_scene_seconds,
             keep_audio=args.keep_audio,
@@ -355,7 +357,8 @@ def _cmd_ingest_url(args: argparse.Namespace) -> None:
         hard_max_duration=args.hard_max_duration, min_width=args.min_width,
         min_source_height=args.min_source_height, max_source_height=args.max_source_height,
         normalize_width=args.width,
-        normalize_height=args.height, normalize_fps=args.fps, scene_threshold=args.scene_threshold,
+        normalize_height=args.height, normalize_fps=args.fps, media_prep=args.media_prep,
+        normalize_encoder=args.normalize_encoder, scene_threshold=args.scene_threshold,
         min_scene_seconds=args.min_scene_seconds, keep_audio=args.keep_audio, detect_scenes=not args.no_scenes,
         force=args.force, visual_index_scenes=not args.no_visual_index,
         manual_semantic_index=not args.no_semantic_index, manual_semantic_device=args.semantic_device,
@@ -431,7 +434,7 @@ def _cmd_library_show(args: argparse.Namespace) -> None:
     print(f"dimensions: {details['width'] or '-'}x{details['height'] or '-'}")
     print(f"scenes: {details['scene_count']}  embedded: {details['embedded_scene_count']}")
     print(f"original: {details['original_path'] or '-'}")
-    print(f"normalized: {details['normalized_path'] or '-'}")
+    print(f"ready media: {details['normalized_path'] or '-'}")
     print(f"info-json: {details['info_json_path'] or '-'}")
     print(f"error/reason: {details['error'] or '-'}")
     if details["terms"]:
@@ -1000,14 +1003,16 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--min-width", type=int, default=0, help="Reject videos narrower than this; 0 disables")
     ingest.add_argument("--min-source-height", type=int, default=1080, help="Minimum source-video height; default 1080")
     ingest.add_argument("--max-source-height", type=int, default=1080, help="Maximum downloaded source format height; default 1080; 0 disables")
-    ingest.add_argument("--width", type=int, default=1280, help="Normalized frame width")
-    ingest.add_argument("--height", type=int, default=720, help="Normalized frame height")
-    ingest.add_argument("--fps", type=int, default=30, help="Normalized frame rate")
+    ingest.add_argument("--media-prep", choices=("auto", "source", "normalize"), default="auto", help="Media preparation policy: auto reuses browser-compatible downloads directly, source never transcodes, normalize always creates an H.264 compatibility proxy")
+    ingest.add_argument("--normalize-encoder", choices=("auto", "nvenc", "x264"), default="auto", help="Compatibility-proxy encoder; auto prefers usable NVIDIA NVENC and falls back to libx264")
+    ingest.add_argument("--width", type=int, default=0, help="Compatibility-proxy width; 0 preserves source geometry")
+    ingest.add_argument("--height", type=int, default=0, help="Compatibility-proxy height; 0 preserves source geometry")
+    ingest.add_argument("--fps", type=int, default=0, help="Compatibility-proxy frame rate; 0 preserves source frame rate")
     ingest.add_argument("--scene-threshold", type=float, default=0.40, help="FFmpeg scene score threshold")
     ingest.add_argument("--min-scene-seconds", type=float, default=1.5)
-    ingest.add_argument("--keep-audio", action="store_true", help="Keep AAC audio in normalized clips")
+    ingest.add_argument("--keep-audio", action="store_true", help="Keep AAC audio when a compatibility proxy is created; direct source media is never rewritten just to remove audio")
     ingest.add_argument("--no-scenes", action="store_true", help="Skip scene detection and thumbnails")
-    ingest.add_argument("--force", action="store_true", help="Redownload/renormalize already-ready clips")
+    ingest.add_argument("--force", action="store_true", help="Redownload/reprocess already-ready clips and rebuild any required compatibility proxy")
     ingest.add_argument(
         "--cookies-from-browser",
         metavar="BROWSER",
@@ -1110,9 +1115,11 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_url.add_argument("--min-width", type=int, default=0)
     ingest_url.add_argument("--min-source-height", type=int, default=1080, help="Minimum source-video height; default 1080")
     ingest_url.add_argument("--max-source-height", type=int, default=1080, help="Maximum downloaded source format height; default 1080; 0 disables")
-    ingest_url.add_argument("--width", type=int, default=1280)
-    ingest_url.add_argument("--height", type=int, default=720)
-    ingest_url.add_argument("--fps", type=int, default=30)
+    ingest_url.add_argument("--media-prep", choices=("auto", "source", "normalize"), default="auto", help="Media preparation policy")
+    ingest_url.add_argument("--normalize-encoder", choices=("auto", "nvenc", "x264"), default="auto", help="Compatibility-proxy encoder")
+    ingest_url.add_argument("--width", type=int, default=0, help="Compatibility-proxy width; 0 preserves source geometry")
+    ingest_url.add_argument("--height", type=int, default=0, help="Compatibility-proxy height; 0 preserves source geometry")
+    ingest_url.add_argument("--fps", type=int, default=0, help="Compatibility-proxy FPS; 0 preserves source rate")
     ingest_url.add_argument("--scene-threshold", type=float, default=0.40)
     ingest_url.add_argument("--min-scene-seconds", type=float, default=1.5)
     ingest_url.add_argument("--keep-audio", action="store_true")
@@ -1329,7 +1336,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--ai-director", action=argparse.BooleanOptionalAction, default=False, help="Refine CLAP section directions with a whole-song OpenAI-compatible LLM plan")
     analyze.add_argument("--ai-director-base-url", help="OpenAI-compatible base URL, e.g. http://localhost:8000/v1")
     analyze.add_argument("--ai-director-model")
-    analyze.add_argument("--ai-director-api-key")
+    analyze.add_argument(
+        "--ai-director-api-key",
+        help="Optional bearer token override; saved AI Settings key is used automatically for api.openai.com",
+    )
     analyze.add_argument("--ai-director-timeout", type=float, default=90.0)
     analyze.add_argument("--ai-director-cache-dir")
     analyze.add_argument("--ai-director-force", action="store_true")
@@ -1557,7 +1567,6 @@ def main() -> None:
     settings = load_settings()
     if settings.effective_openai_key():
         os.environ["OPENAI_API_KEY"] = settings.effective_openai_key()
-        os.environ.setdefault("TUBEVIZ_LLM_API_KEY", settings.effective_openai_key())
     if settings.effective_hf_token():
         os.environ["HF_TOKEN"] = settings.effective_hf_token()
         os.environ["HUGGING_FACE_HUB_TOKEN"] = settings.effective_hf_token()

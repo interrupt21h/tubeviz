@@ -96,6 +96,8 @@ def test_gui_manual_url_ingest_exposes_complete_specialized_workflow():
             "min_width": 640,
             "min_source_height": 720,
             "max_source_height": 1080,
+            "media_prep": "normalize",
+            "normalize_encoder": "nvenc",
             "width": 1920,
             "height": 1080,
             "fps": 30,
@@ -118,7 +120,7 @@ def test_gui_manual_url_ingest_exposes_complete_specialized_workflow():
     for expected in [
         "--term hand-picked", "--min-duration 1.25", "--hard-max-duration 900",
         "--min-width 640", "--min-source-height 720", "--max-source-height 1080",
-        "--width 1920", "--height 1080", "--fps 30",
+        "--media-prep normalize", "--normalize-encoder nvenc", "--width 1920", "--height 1080", "--fps 30",
         "--scene-threshold 0.35", "--min-scene-seconds 1.0", "--keep-audio",
         "--no-visual-index", "--force", "--cookies-from-browser chrome",
         "--download-socket-timeout 25", "--concurrent-fragments 8",

@@ -210,9 +210,11 @@ def _safe_media(library_root: Path, media_file: str, media_url: str | None = Non
             candidates.append(library_root / "codec-glitch" / url.removeprefix("/codec-glitch/"))
         elif url.startswith("/media/"):
             candidates.append(library_root / "normalized" / url.removeprefix("/media/"))
-    if raw.parts and raw.parts[0] in {"normalized", "transforms", "codec-glitch"}:
+        elif url.startswith("/originals/"):
+            candidates.append(library_root / "originals" / url.removeprefix("/originals/"))
+    if raw.parts and raw.parts[0] in {"normalized", "originals", "transforms", "codec-glitch"}:
         candidates.append(library_root / raw)
-    candidates += [library_root / "normalized" / raw, library_root / "transforms" / raw, library_root / raw]
+    candidates += [library_root / "normalized" / raw, library_root / "originals" / raw, library_root / "transforms" / raw, library_root / raw]
     for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()

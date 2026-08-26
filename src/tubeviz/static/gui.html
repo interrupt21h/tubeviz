@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.31.1">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.31.1">
+<link rel="stylesheet" href="/static/gui.css?v=0.32.0">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.32.0">
 </head>
 <body>
 <header>
@@ -129,6 +129,12 @@
         <label>Max clip / segment <input id="hardMaxDuration" type="number" value="600"></label>
         <label>Minimum source height <input id="minSourceHeight" type="number" min="0" step="1" value="1080"></label>
         <label>Maximum source height <input id="maxSourceHeight" type="number" min="0" step="1" value="1080"></label>
+        <label>Media preparation
+          <select id="mediaPrep"><option value="auto">auto · reuse compatible source</option><option value="source">source · never transcode</option><option value="normalize">normalize · always proxy</option></select>
+        </label>
+        <label>Proxy encoder
+          <select id="normalizeEncoder"><option value="auto">auto · NVENC if usable</option><option value="nvenc">NVIDIA NVENC</option><option value="x264">libx264 CPU</option></select>
+        </label>
         <label>AI device <input id="aiDevice" value="auto"></label>
         <label>Candidate pool <input id="aiCandidates" type="number" value="100"></label>
         <label>Queries / seed <input id="aiQueries" type="number" value="8"></label>
@@ -161,7 +167,7 @@
             <input id="aiLlmApiKey" type="hidden">
             <button id="toggleAiLlmKey" type="button" class="secret-toggle" aria-pressed="false">Show typed key</button>
           </div>
-          <p class="card-note">If URL/model are blank, Tubeviz uses its deterministic short-query planner. API keys are passed via <code>TUBEVIZ_LLM_API_KEY</code>, never in argv/job history.</p>
+          <p class="card-note">If URL/model are blank, Tubeviz uses its deterministic short-query planner. The saved AI Settings key is used automatically for <code>api.openai.com</code>; custom compatible endpoints can use <code>TUBEVIZ_LLM_API_KEY</code>. Secrets never enter argv/job history.</p>
         </div>
       </details>
       <button class="primary" id="ingestBtn">Ingest Clips</button>
@@ -170,7 +176,7 @@
 
     <article class="card workflow-card manual-card">
       <div class="card-kicker">01B · CURATE</div>
-      <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Paste hand-picked YouTube URLs. By default Tubeviz normalizes them, detects scene cuts, creates thumbnails, measures temporal visual features, embeds every scene with OpenCLIP, and assigns semantic scene labels automatically.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
+      <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Paste hand-picked YouTube URLs. By default Tubeviz reuses browser-compatible source media directly, creates a compatibility proxy only when needed, then detects scene cuts, creates thumbnails, measures temporal visual features, embeds every scene with OpenCLIP, and assigns semantic scene labels automatically.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
       <div class="url-editor">
         <label class="field-label" for="manualUrls">YouTube URLs</label>
         <textarea id="manualUrls" rows="7" spellcheck="false" placeholder="Paste one YouTube URL per line
@@ -192,9 +198,11 @@ https://youtu.be/..."></textarea>
             <label>Min width <input id="manualMinWidth" type="number" value="0"></label>
             <label>Minimum source height <input id="manualMinSourceHeight" type="number" min="0" value="1080"></label>
             <label>Maximum source height <input id="manualMaxSourceHeight" type="number" min="0" value="1080"></label>
-            <label>Normalize width <input id="manualWidth" type="number" value="1280"></label>
-            <label>Normalize height <input id="manualHeight" type="number" value="720"></label>
-            <label>FPS <input id="manualFps" type="number" value="30"></label>
+            <label>Media preparation <select id="manualMediaPrep"><option value="auto">auto · reuse compatible source</option><option value="source">source · never transcode</option><option value="normalize">normalize · always proxy</option></select></label>
+            <label>Proxy encoder <select id="manualNormalizeEncoder"><option value="auto">auto · NVENC if usable</option><option value="nvenc">NVIDIA NVENC</option><option value="x264">libx264 CPU</option></select></label>
+            <label>Proxy width (0 = source) <input id="manualWidth" type="number" min="0" value="0"></label>
+            <label>Proxy height (0 = source) <input id="manualHeight" type="number" min="0" value="0"></label>
+            <label>Proxy FPS (0 = source) <input id="manualFps" type="number" min="0" value="0"></label>
             <label>Scene threshold <input id="manualSceneThreshold" type="number" step=".01" value="0.40"></label>
             <label>Min scene seconds <input id="manualMinScene" type="number" step=".1" value="1.5"></label>
             <label>Semantic device <input id="manualSemanticDevice" value="auto"></label>
@@ -234,7 +242,7 @@ https://youtu.be/..."></textarea>
 <section id="ai" class="panel">
   <article class="card ai-settings-card">
     <div class="card-kicker">CENTRAL CONFIGURATION</div><h2>AI Settings</h2>
-    <p class="card-note">These settings apply to ingest, library enhancement, analysis, and final scene selection. They persist in your user home directory; the server-side <code>HF_TOKEN</code> value is never sent to the browser, and neither is the saved OpenAI key.</p>
+    <p class="card-note">These settings apply to ingest, OpenAI clip understanding, library enhancement, analysis, and OpenAI-backed planning/directing. They persist in your user home directory; the server-side <code>HF_TOKEN</code> value is never sent to the browser, and neither is the saved OpenAI key.</p>
     <label class="check master-toggle"><input id="masterAiEnabled" type="checkbox" checked> Enable AI features throughout Tubeviz</label>
     <label class="check"><input id="visionAiEnabled" type="checkbox"> Describe video storyboards with OpenAI during ingest</label>
     <div class="grid two">
@@ -378,6 +386,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.31.1"></script>
+<script src="/static/gui.js?v=0.32.0"></script>
 </body>
 </html>

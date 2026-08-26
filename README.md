@@ -426,7 +426,7 @@ A read token is sufficient for downloading models.
 Vision description is opt-in, because image inputs consume API tokens. When enabled,
 each completed ingest is enhanced automatically, and the **Enhance Existing Library**
 action backfills every ready clip already in the library without downloading or
-normalizing it again. Cache keys include the normalized-media checksum, model, detail
+transcoding it again. Cache keys include the ready-media checksum, model, detail
 level, prompt version, and sampled scene indexes, so unchanged clips are free to skip.
 Enable **Re-analyze cached clips** only when changing the desired interpretation or
 deliberately refreshing model output.
@@ -491,7 +491,7 @@ Open **Library**, choose **Play / Trim**, then use the visual editor:
 
 ```mermaid
 flowchart LR
-    FULL["Full normalized video"] --> EDIT["Studio Play / Trim"]
+    FULL["Full ready media (source or proxy)"] --> EDIT["Studio Play / Trim"]
     EDIT --> IN["Set In"]
     EDIT --> OUT["Set Out"]
     IN --> KEEP["Highlighted usable range"]
@@ -512,7 +512,7 @@ The editor provides:
 - **Save In / Out** and **Clear Trim**;
 - a visible trim badge on library cards.
 
-Trimming is non-destructive: tubeviz does not rewrite or re-encode the normalized video.
+Trimming is non-destructive: tubeviz does not rewrite or re-encode the ready media.
 The saved bounds only define which source times are eligible for future scene plans. A
 90-second clip with a 7.5-second intro stays physically unchanged while Studio stores:
 
@@ -588,24 +588,50 @@ flowchart TD
     P --> Q{"Motion, text, face,\ndiversity, aesthetics"}
     Q -->|reject| R1
     Q -->|pass| DL["Download chosen range"]
-    DL --> N["FFmpeg normalization"]
-    N --> SC["Scene detection and thumbnails"]
+    DL --> PREP{"Direct-play compatible?"}
+    PREP -->|yes| SRC["Use downloaded source directly"]
+    PREP -->|no| N["H.264 compatibility proxy<br/>NVENC when usable"]
+    SRC --> SC["Scene detection and thumbnails"]
+    N --> SC
     SC --> VF["Temporal visual features"]
     SC --> OC["OpenCLIP embeddings and labels"]
     VF --> DB[("SQLite metadata")]
     OC --> DB
-    N --> MEDIA["Original and normalized media"]
+    SRC --> MEDIA["Canonical source media"]
+    N --> MEDIA["Optional compatibility proxy"]
     DB --> CURATE["Trim, reject, restore, inspect"]
 ```
 
 Automatic discovery uses progressively more expensive gates: cheap metadata screening
 comes first, then partial media probes, and full download and indexing is reserved for
 footage that survives the quality checks. Explicit `ingest-url` sources skip search
-ranking but run the same downstream normalization, scene, feature, and semantic-indexing
+ranking but run the same downstream media-preparation, scene, feature, and semantic-indexing
 pipeline.
 
 Active, upcoming, and post-live streams are rejected. Archived finite VODs remain usable
 when yt-dlp exposes suitable media.
+
+### Conditional media preparation
+
+Ingest no longer performs an unconditional full-video re-encode. After download, tubeviz
+uses `ffprobe` to inspect the first video stream and container. In the default
+`--media-prep auto` mode, common browser/native-safe YouTube combinations such as
+H.264/MP4, VP8/VP9/WebM, and AV1 in MP4/WebM are marked ready **using the downloaded
+source itself**. Scene detection, thumbnails, OpenCLIP, visual indexing, transforms, and
+the native renderer all consume that canonical source path directly.
+
+A compatibility proxy is created only when the source codec/container is not a direct-play
+target, or when `--media-prep normalize` is explicitly requested. Proxy creation preserves
+the source dimensions and frame rate by default (`--width 0 --height 0 --fps 0`) instead
+of downscaling 1080p acquisition to 720p. If FFmpeg can actually encode a one-frame NVENC
+probe, `--normalize-encoder auto` uses `h264_nvenc`; otherwise it uses `libx264`. If an
+auto-selected NVENC encode fails at runtime, tubeviz retries with libx264. Existing proxy
+files are reused unless `--force` is requested.
+
+During a required proxy encode, FFmpeg's machine-readable progress stream is converted to
+periodic elapsed/total/percentage lines in the Studio job log, so this stage no longer
+appears to hang. The browser preview server exposes `originals/` and `normalized/` through
+separate constrained mounts; the whole library root is never served.
 
 ### Theme-first acquisition with a visual brief
 
@@ -660,7 +686,7 @@ measures useful motion, motion variation, complexity, entropy, and cut activity.
 these form a music-video fitness score, and low-fitness candidates are rejected before
 the expensive ingest path.
 
-Once accepted footage is normalized and scene-indexed, `--auto-trim` moves the saved
+Once accepted footage is prepared and scene-indexed, `--auto-trim` moves the saved
 usable In/Out points past low-fitness edge scene runs, suppressing common title and logo
 lead-ins and static credit or outro material. The Studio trim editor remains available
 for correction or override.
@@ -745,10 +771,12 @@ Important ingest controls:
 | `--min-width PX` | Reject narrow video; `0` disables |
 | `--min-source-height PX` | Reject sources below this height; default `1080` |
 | `--max-source-height PX` | Cap the downloaded source representation; default `1080`, `0` disables |
-| `--width/--height/--fps` | Normalized media format |
+| `--media-prep auto\|source\|normalize` | `auto` reuses direct-play source media, `source` forbids transcoding, `normalize` always creates a proxy |
+| `--normalize-encoder auto\|nvenc\|x264` | Proxy encoder; `auto` performs a live NVENC probe and falls back to libx264 |
+| `--width/--height/--fps` | Compatibility-proxy geometry/rate; each defaults to `0` to preserve the source |
 | `--scene-threshold` | FFmpeg scene-change sensitivity |
 | `--min-scene-seconds` | Minimum indexed scene duration |
-| `--keep-audio` | Retain AAC audio in normalized clips |
+| `--keep-audio` | Retain AAC audio when a compatibility proxy is created; direct source media is not rewritten just to strip audio |
 | `--no-scenes` | Skip scene detection/thumbnails |
 | `--force` | Reprocess already-ready clips |
 | `--cookies-from-browser BROWSER` | Use browser cookies through yt-dlp |
@@ -785,7 +813,7 @@ tubeviz ingest-url URL1 URL2 URL3 --library ./library --term hand-picked
 ```
 
 Manual URL ingestion runs the full scene-understanding pipeline by default: yt-dlp
-metadata extraction, duplicate detection, download, FFmpeg normalization, scene
+metadata extraction, duplicate detection, download, conditional media preparation, scene
 detection, thumbnails, decoded temporal visual-feature indexing, OpenCLIP scene
 embeddings, and zero-shot semantic classification. Scene labels cover concepts such as
 crowd, dancing, nightlife, city, tunnel, transport, industrial, architecture, abstract,
@@ -810,7 +838,7 @@ clip.
 
 In Studio, the Create panel includes **Manual YouTube URL Ingest**: a multi-line editor
 taking one URL per line, plus an optional provenance term such as `hand-picked`,
-`head-at-curated`, or `industrial-favorites`. Uncommon network and normalization
+`head-at-curated`, or `industrial-favorites`. Uncommon network and compatibility-proxy
 settings sit under **Advanced ingest settings**. The visual form exposes the complete
 `ingest-url` workflow:
 
@@ -818,7 +846,8 @@ settings sit under **Advanced ingest settings**. The visual form exposes the com
 provenance term
 minimum / hard maximum duration
 minimum source width
-normalization width / height / FPS
+media preparation policy and proxy encoder
+proxy width / height / FPS (`0` preserves source)
 scene-change threshold
 minimum scene duration
 browser cookies
@@ -835,7 +864,7 @@ verbose yt-dlp
 ```
 
 The resulting clips enter the same persistent library pipeline as searched clips:
-metadata, duplicate checks, download, normalization, scene indexing, thumbnails, visual
+metadata, duplicate checks, download, conditional media preparation, scene indexing, thumbnails, visual
 fingerprints, trimming, semantic embeddings, and later selection are all shared.
 
 ## Curating the library
@@ -2187,7 +2216,7 @@ library/
 └── transforms/          # created when materialization is used
 ```
 
-SQLite tracks discovery provenance, terms, status, source metadata, normalized media,
+SQLite tracks discovery provenance, terms, status, source metadata, canonical ready media,
 scenes, duplicate relationships, AI scores, and scene embeddings.
 
 ```mermaid
@@ -2247,8 +2276,10 @@ consider only marked ready clips. **Clear pool** returns immediately to the full
 library. Marking changes neither clip status nor media, and rejecting a marked clip
 removes it from the active pool without discarding its tags.
 
-Studio playback resolves normalized media first, then canonical duplicate media,
-downloaded originals, and compatibility paths for older libraries.
+Studio playback resolves the canonical ready-media path first, then canonical duplicate media,
+downloaded originals, and compatibility paths for older libraries. The legacy SQLite
+`normalized_path` column is retained for schema compatibility but may now point to either
+`originals/` direct source media or `normalized/` compatibility proxies.
 
 ## Recommended four-minute EDM workflow
 
@@ -2417,7 +2448,7 @@ Top-level commands:
 
 | Command | Purpose |
 |---|---|
-| `tubeviz ingest` | Search, download, normalize, scene-index and optionally AI-rank footage |
+| `tubeviz ingest` | Search, download, conditionally prepare media, scene-index and optionally AI-rank footage |
 | `tubeviz ingest-url` | Import explicit YouTube URLs through the complete scene-understanding pipeline |
 | `tubeviz library` | Inspect, curate, delete, report on and embed the persistent library |
 | `tubeviz analyze` | Analyze music and produce the directed timeline |

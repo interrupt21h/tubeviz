@@ -15,7 +15,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--output",
-        default="screenshot.png",
+        default=None,
+        help="Output path; defaults to screenshots/screenshot-<tab>.png",
     )
     parser.add_argument(
         "--tab",
@@ -25,7 +26,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=1920)
     args = parser.parse_args()
 
-    output = Path(args.output).expanduser().resolve()
+    output = Path(args.output or f"screenshots/screenshot-{args.tab}.png").expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with sync_playwright() as playwright:

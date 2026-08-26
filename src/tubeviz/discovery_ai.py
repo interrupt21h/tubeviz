@@ -12,6 +12,7 @@ from typing import Callable, Iterable
 import numpy as np
 
 from .semantic import OpenClipEmbedder, SemanticConfig, cosine_similarity
+from .settings import resolve_llm_api_key
 from .youtube import SearchResult, YouTubeSource
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -132,8 +133,9 @@ def _llm_queries(seed: str, cfg: DiscoveryAIConfig) -> list[str]:
         ],
     }).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    if cfg.llm_api_key:
-        headers["Authorization"] = f"Bearer {cfg.llm_api_key}"
+    api_key = resolve_llm_api_key(cfg.llm_base_url, cfg.llm_api_key)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(endpoint, data=payload, headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=cfg.llm_timeout) as response:
         raw = json.loads(response.read().decode("utf-8"))
