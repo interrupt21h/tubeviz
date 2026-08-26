@@ -256,6 +256,7 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
         min_height=args.min_source_height,
         max_height=args.max_source_height,
         keep_audio=args.keep_audio,
+        progress=lambda message: print(message, flush=True),
     )
     summary = ingest_terms(
         terms,
@@ -342,7 +343,7 @@ def _cmd_ingest_url(args: argparse.Namespace) -> None:
         socket_timeout=args.download_socket_timeout, concurrent_fragments=args.concurrent_fragments,
         retries=args.download_retries, fragment_retries=args.fragment_retries,
         min_height=args.min_source_height, max_height=args.max_source_height,
-        keep_audio=args.keep_audio)
+        keep_audio=args.keep_audio, progress=lambda message: print(message, flush=True))
     summary = ingest_urls(args.urls, library, term=args.term, source=source, config=IngestConfig(
         results_per_term=1, min_duration=args.min_duration, preferred_max_duration=0,
         hard_max_duration=args.hard_max_duration, min_width=args.min_width,

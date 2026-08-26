@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+import time
+from typing import Any, Callable
 
 
 def _yt_dlp():
@@ -81,6 +82,7 @@ class YouTubeSource:
         min_height: int = 1080,
         max_height: int = 1080,
         keep_audio: bool = False,
+        progress: Callable[[str], None] | None = None,
     ):
         self.quiet = quiet
         self.cookies_from_browser = cookies_from_browser
@@ -89,11 +91,54 @@ class YouTubeSource:
         if self.min_height and self.max_height and self.min_height > self.max_height:
             raise ValueError("minimum source height cannot exceed maximum source height")
         self.keep_audio = bool(keep_audio)
+        self.progress = progress
+        self._last_progress_at = 0.0
         self.format_attempts = format_attempts or self._format_attempts()
         self.socket_timeout = max(1.0, float(socket_timeout))
         self.concurrent_fragments = max(1, int(concurrent_fragments))
         self.retries = max(0, int(retries))
         self.fragment_retries = max(0, int(fragment_retries))
+
+    @staticmethod
+    def _human_bytes(value: float | int | None) -> str:
+        amount = float(value or 0.0)
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if amount < 1024.0 or unit == "TiB":
+                return f"{amount:.1f} {unit}"
+            amount /= 1024.0
+        return f"{amount:.1f} TiB"
+
+    def _download_progress(self, data: dict[str, Any]) -> None:
+        if self.progress is None:
+            return
+        status = str(data.get("status") or "")
+        now = time.monotonic()
+        if status == "downloading" and now - self._last_progress_at < 0.5:
+            return
+        downloaded = int(data.get("downloaded_bytes") or 0)
+        total_raw = data.get("total_bytes") or data.get("total_bytes_estimate")
+        total = int(total_raw) if total_raw else 0
+        speed = float(data.get("speed") or 0.0)
+        eta = data.get("eta")
+        if status == "downloading":
+            self._last_progress_at = now
+            if total > 0:
+                percent = min(100.0, 100.0 * downloaded / total)
+                message = f"  download bytes {downloaded}/{total} ({percent:.1f}%)"
+            else:
+                message = f"  download bytes {self._human_bytes(downloaded)}"
+            if speed > 0:
+                message += f" {self._human_bytes(speed)}/s"
+            if eta is not None:
+                message += f" ETA {max(0, int(float(eta)))}s"
+            self.progress(message)
+        elif status == "finished":
+            self._last_progress_at = 0.0
+            size = total or downloaded
+            self.progress(f"  download complete {self._human_bytes(size)}; finalizing media")
+        elif status == "error":
+            self._last_progress_at = 0.0
+            self.progress("  download error reported by yt-dlp")
 
     def _height_filter(self) -> str:
         pieces: list[str] = []
@@ -134,6 +179,8 @@ class YouTubeSource:
             # Never opt into downloading a live stream from its beginning.
             "live_from_start": False,
         }
+        if self.progress is not None:
+            options["progress_hooks"] = [self._download_progress]
         if self.quiet:
             options["logger"] = QuietLogger()
         if self.cookies_from_browser:

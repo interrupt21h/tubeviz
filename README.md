@@ -432,7 +432,7 @@ print("gui:", tubeviz.gui.__file__)
 PY
 ```
 
-For this release, the header and `tubeviz.__version__` should report **0.30.2**.
+For this release, the header and `tubeviz.__version__` should report **0.30.3**.
 
 ```mermaid
 flowchart LR
@@ -467,7 +467,7 @@ The GUI runs the same CLI workflows described below; it is not a separate render
 
 Long-running Studio jobs report their current stage, elapsed time, and live log.
 Operations with a known unit count—rendered frames, indexed scenes, CLAP
-windows, input URLs, search terms, or codec shots—also show a percentage,
+windows, input URLs, search terms, codec shots, or downloaded bytes—also show a percentage,
 completed/total count, and ETA when the underlying process supplies one. Work
 such as initial model loading or DSP analysis uses an indeterminate progress bar
 until a measurable stage begins. Studio launches Python workers unbuffered, so

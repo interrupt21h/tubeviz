@@ -1,3 +1,10 @@
+# 0.30.3 — Structured download progress
+
+- Connect yt-dlp's Python `progress_hooks` API to Tubeviz ingest progress.
+- Report downloaded and total/estimated bytes, percentage, transfer rate, ETA, completion, and download errors in both CLI and Studio.
+- Feed byte counters into Studio's existing determinate progress model instead of leaving downloads indefinitely animated.
+- Throttle hook messages to two updates per second to keep logs responsive and readable.
+
 # 0.30.2 — Bounded source resolution
 
 - Default both minimum accepted source height and maximum downloaded source height to 1080p for search and manual URL ingestion.

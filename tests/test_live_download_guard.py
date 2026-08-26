@@ -105,3 +105,17 @@ def test_base_options_bound_network_and_parallelize_fragments():
     assert opts["concurrent_fragment_downloads"] == 6
     assert opts["retries"] == 1
     assert opts["fragment_retries"] == 2
+
+
+def test_download_progress_hook_reports_bytes_speed_and_eta(monkeypatch):
+    messages = []
+    source = YouTubeSource(progress=messages.append)
+    monkeypatch.setattr("tubeviz.youtube.time.monotonic", lambda: 10.0)
+    source._download_progress({
+        "status": "downloading", "downloaded_bytes": 50,
+        "total_bytes": 100, "speed": 10, "eta": 5,
+    })
+    assert messages == ["  download bytes 50/100 (50.0%) 10.0 B/s ETA 5s"]
+    source._download_progress({"status": "finished", "total_bytes": 100})
+    assert messages[-1] == "  download complete 100.0 B; finalizing media"
+    assert source._base_options()["progress_hooks"] == [source._download_progress]
