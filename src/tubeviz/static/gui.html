@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.32.0">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.32.0">
+<link rel="stylesheet" href="/static/gui.css?v=0.32.1">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.32.1">
 </head>
 <body>
 <header>
@@ -74,15 +74,13 @@
         <label class="slider-field">Audio↔visual weight <span class="slider-value" data-for="audioVisualWeight"></span><input id="audioVisualWeight" type="range" min="0" max="2" step=".05" value="1.10"><span class="slider-scale"><span>ignore 0</span><b>recommended .8–1.3</b><span>dominant 2</span></span></label>
         <label>CLAP window <input id="audioAiWindow" type="number" step="1" value="8"></label>
         <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
-        <label>AI director URL <input id="aiDirectorUrl" placeholder="http://localhost:8000/v1"></label>
-        <label>AI director model <input id="aiDirectorModel" placeholder="local model name"></label>
-        <input id="aiDirectorApiKey" type="hidden">
         <label class="slider-field">AI director strength <span class="slider-value" data-for="aiDirectorStrength"></span><input id="aiDirectorStrength" type="range" min="0" max="1" step=".05" value=".75"><span class="slider-scale"><span>off 0</span><b>recommended .55–.85</b><span>full 1</span></span></label>
       </div>
       <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
       <label class="check"><input id="audioAi" type="checkbox" checked> CLAP audio-semantic director</label>
       <label class="check"><input id="musicAi" type="checkbox"> MERT music-structure embeddings (optional)</label>
       <label class="check"><input id="aiDirector" type="checkbox"> Whole-song LLM visual director</label>
+      <p class="card-note ai-inherit-note">Whole-song directing uses the OpenAI base URL, model, and API key saved in <b>AI Settings</b>. CLI flags remain available as one-off overrides.</p>
       <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
       <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
       <label class="check"><input id="choreography" type="checkbox" checked> Build/drop trajectory choreography and multi-shot lookahead</label>
@@ -157,19 +155,7 @@
       <label class="check"><input id="previewGate" type="checkbox" checked> Preview candidates before full download</label>
       <label class="check"><input id="sampleLongVideos" type="checkbox" checked> Sample long videos and download only the strongest bounded segment</label>
       <label class="check"><input id="autoTrim" type="checkbox" checked> AI auto-trim weak intro/outro scene runs</label>
-      <details class="settings-group">
-        <summary>Acquisition planner LLM</summary>
-        <div class="settings-body">
-          <label>OpenAI-compatible base URL <input id="aiLlmBaseUrl" placeholder="http://localhost:8000/v1"></label>
-          <label>Model <input id="aiLlmModel" placeholder="your-model-name"></label>
-          <label class="field-label" for="aiLlmApiKey" hidden>API key (configured in AI Settings)</label>
-          <div class="secret-input-row">
-            <input id="aiLlmApiKey" type="hidden">
-            <button id="toggleAiLlmKey" type="button" class="secret-toggle" aria-pressed="false">Show typed key</button>
-          </div>
-          <p class="card-note">If URL/model are blank, Tubeviz uses its deterministic short-query planner. The saved AI Settings key is used automatically for <code>api.openai.com</code>; custom compatible endpoints can use <code>TUBEVIZ_LLM_API_KEY</code>. Secrets never enter argv/job history.</p>
-        </div>
-      </details>
+      <p class="card-note ai-inherit-note">AI acquisition planning uses the OpenAI base URL, model, and API key saved in <b>AI Settings</b>. If AI is disabled or no usable endpoint/model is configured, Tubeviz falls back to its deterministic short-query planner.</p>
       <button class="primary" id="ingestBtn">Ingest Clips</button>
       <p class="card-note">This streamlined panel exposes common ingest settings. Every ingest option is available in Command Center.</p>
     </article>
@@ -249,7 +235,7 @@ https://youtu.be/..."></textarea>
       <label>OpenAI API key <input id="openaiApiKey" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
       <label>Hugging Face token <input id="persistentHfToken" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
       <label>OpenAI base URL <input id="openaiBaseUrl" value="https://api.openai.com/v1"></label>
-      <label>Vision model <input id="openaiVisionModel" value="gpt-5.1"></label>
+      <label>OpenAI model <input id="openaiModel" value="gpt-5.1"></label>
       <label>Image detail <select id="visionDetail"><option value="low">low (faster/cheaper)</option><option value="high">high</option><option value="auto">auto</option></select></label>
       <label>Storyboard frames per clip <input id="visionMaxFrames" type="number" min="2" max="50" value="12"></label>
       <label>Request timeout (seconds) <input id="visionTimeout" type="number" min="10" max="900" value="180"></label>
@@ -386,6 +372,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.32.0"></script>
+<script src="/static/gui.js?v=0.32.1"></script>
 </body>
 </html>

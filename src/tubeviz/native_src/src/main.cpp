@@ -34,13 +34,13 @@ Args parse_args(int argc, char** argv) {
         else if (key == "--threads") args.threads = std::stoi(value());
         else if (key == "--version") {
 #ifdef TUBEVIZ_HAVE_PLACEBO
-            std::cout << "tubeviz-native-render 0.32.0 ffmpeg+libplacebo";
+            std::cout << "tubeviz-native-render 0.32.1 ffmpeg+libplacebo";
 #ifdef TUBEVIZ_HAVE_OPENMP
             std::cout << "+openmp";
 #endif
             std::cout << "\n";
 #else
-            std::cout << "tubeviz-native-render 0.32.0 ffmpeg";
+            std::cout << "tubeviz-native-render 0.32.1 ffmpeg";
 #ifdef TUBEVIZ_HAVE_OPENMP
             std::cout << "+openmp";
 #endif

@@ -68,7 +68,7 @@ def _request_analysis(details: dict[str, Any], samples: list[tuple[dict[str, Any
         content.append({"type": "input_text", "text": f"Scene {scene['index']} at {float(scene['start']):.2f}s:"})
         content.append({"type": "input_image", "image_url": _data_url(path), "detail": settings.vision_detail})
     body = {
-        "model": settings.openai_vision_model,
+        "model": settings.openai_model,
         "input": [{"role": "user", "content": content}],
         "text": {"format": {"type": "json_object"}},
         "max_output_tokens": 5000,
@@ -114,7 +114,7 @@ def enhance_library(
             progress(f"AI describe [{ordinal}/{len(clips)}] skipped {clip['source_id']}: no scene thumbnails")
             counts["failed"] += 1
             continue
-        fingerprint = hashlib.sha256((str(clip.get("normalized_sha256") or "") + cfg.openai_vision_model + cfg.vision_detail + PROMPT_VERSION + ",".join(str(s[0]["index"]) for s in samples)).encode()).hexdigest()
+        fingerprint = hashlib.sha256((str(clip.get("normalized_sha256") or "") + cfg.openai_model + cfg.vision_detail + PROMPT_VERSION + ",".join(str(s[0]["index"]) for s in samples)).encode()).hexdigest()
         if not force and library.clip_ai_cache_key(int(clip["id"])) == fingerprint:
             progress(f"AI describe [{ordinal}/{len(clips)}] cached {clip['source_id']}")
             counts["cached"] += 1
@@ -122,7 +122,7 @@ def enhance_library(
         progress(f"AI describe [{ordinal}/{len(clips)}] sending {len(samples)} frames for {clip['source_id']}")
         try:
             result = _request_analysis(details, samples, cfg)
-            library.store_clip_ai_description(int(clip["id"]), result, provider="openai", model=cfg.openai_vision_model, prompt_version=PROMPT_VERSION, cache_key=fingerprint)
+            library.store_clip_ai_description(int(clip["id"]), result, provider="openai", model=cfg.openai_model, prompt_version=PROMPT_VERSION, cache_key=fingerprint)
             counts["enhanced"] += 1
             progress(f"AI describe [{ordinal}/{len(clips)}] stored {clip['source_id']}")
         except Exception as exc:

@@ -1,3 +1,13 @@
+# 0.32.1 — Single-source OpenAI configuration
+
+- Made the **AI Settings** tab the single source of truth for the OpenAI base URL, model, and API key used by Studio workflows.
+- Removed duplicate AI-director endpoint/model fields and the Acquisition Planner LLM credential/model block from the Create tab.
+- Renamed the persisted model setting from the vision-specific `openai_vision_model` concept to shared `openai_model`; existing v0.31/v0.32 config files migrate transparently on load.
+- OpenAI storyboard descriptions, acquisition/query planning, and whole-song AI directing now inherit the same saved model automatically.
+- `tubeviz ingest --visual-brief` and `tubeviz analyze --ai-director` inherit the saved AI Settings endpoint/model when their CLI override flags are omitted.
+- Retained `--ai-llm-*` and `--ai-director-*` flags as explicit one-off CLI overrides for custom/local OpenAI-compatible endpoints.
+- Kept OpenAI credentials out of process argv and job history; saved secrets continue to be resolved from the protected user configuration/environment at request time.
+
 # 0.32.0 — Conditional media preparation and accelerated compatibility proxies
 
 - Removed unconditional full-video normalization from the default ingest path. `--media-prep auto` now probes downloaded media and directly reuses common browser/native-safe H.264/MP4, VP8/VP9/WebM, and AV1 MP4/WebM sources.

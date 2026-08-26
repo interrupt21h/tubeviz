@@ -28,7 +28,7 @@ class UserSettings:
     vision_enabled: bool = False
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_vision_model: str = "gpt-5.1"
+    openai_model: str = "gpt-5.1"
     vision_detail: str = "low"
     vision_max_frames: int = 12
     vision_timeout_seconds: int = 180
@@ -58,6 +58,12 @@ def load_settings() -> UserSettings:
         return UserSettings()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
+        # v0.31/v0.32 stored the shared OpenAI model under the more narrow
+        # ``openai_vision_model`` name. Migrate it transparently so existing
+        # user configuration remains authoritative after the setting becomes
+        # the common model for vision, acquisition planning, and AI directing.
+        if "openai_model" not in raw and raw.get("openai_vision_model"):
+            raw["openai_model"] = raw["openai_vision_model"]
         allowed = {field.name for field in fields(UserSettings)}
         return UserSettings(**{key: value for key, value in raw.items() if key in allowed})
     except (OSError, ValueError, TypeError):
@@ -103,6 +109,11 @@ def resolve_llm_api_key(
 
 
 def save_settings(changes: dict[str, Any], *, clear_openai: bool = False, clear_hf: bool = False) -> UserSettings:
+    # Accept the legacy API/GUI field during upgrades, but persist only the new
+    # shared model setting.
+    changes = dict(changes)
+    if "openai_model" not in changes and changes.get("openai_vision_model"):
+        changes["openai_model"] = changes["openai_vision_model"]
     current = asdict(load_settings())
     allowed = set(current)
     for key, value in changes.items():

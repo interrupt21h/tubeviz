@@ -81,10 +81,13 @@ def _cmd_choreography_inspect(args: argparse.Namespace) -> None:
 
 
 def _cmd_analyze(args: argparse.Namespace) -> None:
+    user_settings = load_settings()
+    ai_director_base_url = (args.ai_director_base_url or user_settings.openai_base_url or "").strip()
+    ai_director_model = (args.ai_director_model or user_settings.openai_model or "").strip()
     if getattr(args, "ai_director", False) and not getattr(args, "audio_ai", False):
         raise SystemExit("--ai-director requires --audio-ai so the whole-song plan is grounded in CLAP audio semantics")
-    if getattr(args, "ai_director", False) and (not args.ai_director_base_url or not args.ai_director_model):
-        raise SystemExit("--ai-director requires --ai-director-base-url and --ai-director-model")
+    if getattr(args, "ai_director", False) and (not ai_director_base_url or not ai_director_model):
+        raise SystemExit("--ai-director requires an OpenAI base URL/model in AI Settings or explicit CLI overrides")
     print(f"Analyze: decoding and measuring {args.audio}", flush=True)
     analysis = analyze_track(
         args.audio,
@@ -149,8 +152,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
                 analysis,
                 config=AIDirectorConfig(
                     enabled=True,
-                    base_url=args.ai_director_base_url,
-                    model=args.ai_director_model,
+                    base_url=ai_director_base_url,
+                    model=ai_director_model,
                     api_key=args.ai_director_api_key,
                     timeout=args.ai_director_timeout,
                     cache_dir=args.ai_director_cache_dir,
@@ -225,14 +228,18 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
 
 def _cmd_ingest(args: argparse.Namespace) -> None:
     user_settings = load_settings()
+    # AI Settings are the application-wide defaults. Explicit CLI flags remain
+    # supported for one-off custom/local OpenAI-compatible endpoints.
+    ai_llm_base_url = (args.ai_llm_base_url or (user_settings.openai_base_url if user_settings.ai_enabled else None))
+    ai_llm_model = (args.ai_llm_model or (user_settings.openai_model if user_settings.ai_enabled else None))
     plan = None
     if args.visual_brief:
         _planning_library = ClipLibrary(args.library); _planning_library.initialize()
         _coverage = summarize_library_coverage(_planning_library)
         plan = plan_acquisition(AcquisitionConfig(
             visual_brief=args.visual_brief, audio=args.audio, target_clips=args.target_clips,
-            query_count=args.acquisition_query_count, llm_base_url=args.ai_llm_base_url,
-            llm_model=args.ai_llm_model, llm_api_key=args.ai_llm_api_key,
+            query_count=args.acquisition_query_count, llm_base_url=ai_llm_base_url,
+            llm_model=ai_llm_model, llm_api_key=args.ai_llm_api_key,
             negative_concepts=tuple(x.strip() for x in args.ai_negative_concepts.split(",") if x.strip()),
             library_summary=_coverage,
         ))
@@ -301,8 +308,8 @@ def _cmd_ingest(args: argparse.Namespace) -> None:
             ai_negative_concepts=tuple(
                 x.strip() for x in args.ai_negative_concepts.split(",") if x.strip()
             ),
-            ai_llm_base_url=args.ai_llm_base_url,
-            ai_llm_model=args.ai_llm_model,
+            ai_llm_base_url=ai_llm_base_url,
+            ai_llm_model=ai_llm_model,
             ai_llm_api_key=args.ai_llm_api_key,
             ai_index_scenes=args.ai_index_scenes,
             visual_index_scenes=args.visual_index_scenes,
@@ -1086,11 +1093,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest.add_argument(
         "--ai-llm-base-url",
-        help="Optional OpenAI-compatible base URL, e.g. http://localhost:8000/v1",
+        help="One-off OpenAI-compatible base URL override; defaults to AI Settings",
     )
-    ingest.add_argument("--ai-llm-model", help="Optional model name for AI query expansion")
+    ingest.add_argument("--ai-llm-model", help="One-off acquisition/query-planner model override; defaults to AI Settings")
     ingest.add_argument("--ai-llm-api-key", default=os.environ.get("TUBEVIZ_LLM_API_KEY"),
-                        help="Optional bearer token for the LLM endpoint; defaults to TUBEVIZ_LLM_API_KEY")
+                        help="One-off bearer token override; saved OpenAI key is used automatically for api.openai.com")
     ingest.add_argument(
         "--ai-index-scenes",
         action=argparse.BooleanOptionalAction,
@@ -1334,8 +1341,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--preference-learning", action=argparse.BooleanOptionalAction, default=True, help="Use manually rejected clips as soft negative visual-preference examples")
     analyze.add_argument("--preference-weight", type=float, default=0.35, help="Strength of learned manual-rejection preference signal")
     analyze.add_argument("--ai-director", action=argparse.BooleanOptionalAction, default=False, help="Refine CLAP section directions with a whole-song OpenAI-compatible LLM plan")
-    analyze.add_argument("--ai-director-base-url", help="OpenAI-compatible base URL, e.g. http://localhost:8000/v1")
-    analyze.add_argument("--ai-director-model")
+    analyze.add_argument("--ai-director-base-url", help="One-off OpenAI-compatible base URL override; defaults to AI Settings")
+    analyze.add_argument("--ai-director-model", help="One-off whole-song director model override; defaults to AI Settings")
     analyze.add_argument(
         "--ai-director-api-key",
         help="Optional bearer token override; saved AI Settings key is used automatically for api.openai.com",

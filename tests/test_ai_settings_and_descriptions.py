@@ -60,13 +60,37 @@ def test_gui_ai_settings_are_centralized(monkeypatch, tmp_path: Path):
     client = TestClient(create_gui_app(default_library=tmp_path / "library", project_root=tmp_path))
     response = client.post("/api/gui/ai-settings", json={
         "ai_enabled": True, "vision_enabled": True, "openai_api_key": "secret",
-        "openai_base_url": "https://api.openai.com/v1", "openai_vision_model": "vision-test",
+        "openai_base_url": "https://api.openai.com/v1", "openai_model": "shared-test",
         "vision_detail": "low", "vision_max_frames": 8, "vision_timeout_seconds": 60,
     })
     assert response.status_code == 200
     assert response.json()["openai_key_configured"] is True
     assert "secret" not in response.text
-    assert client.get("/api/gui/ai-settings").json()["openai_vision_model"] == "vision-test"
+    assert client.get("/api/gui/ai-settings").json()["openai_model"] == "shared-test"
+
+
+def test_legacy_vision_model_setting_migrates_to_shared_openai_model(monkeypatch, tmp_path: Path):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("TUBEVIZ_CONFIG", str(path))
+    path.write_text('{"openai_vision_model":"legacy-vision-model","openai_base_url":"https://api.openai.com/v1"}')
+    settings = load_settings()
+    assert settings.openai_model == "legacy-vision-model"
+    assert "openai_vision_model" not in settings.public_dict()
+
+
+def test_create_ui_inherits_openai_configuration_from_ai_settings():
+    root = Path(__file__).parents[1] / "src" / "tubeviz" / "static"
+    html = (root / "gui.html").read_text()
+    js = (root / "gui.js").read_text()
+    assert 'id="openaiModel"' in html
+    assert 'id="aiDirectorUrl"' not in html
+    assert 'id="aiDirectorModel"' not in html
+    assert 'id="aiLlmBaseUrl"' not in html
+    assert 'id="aiLlmModel"' not in html
+    assert 'id="aiLlmApiKey"' not in html
+    assert 'ai_director_base_url:value(' not in js
+    assert 'ai_llm_base_url:value(' not in js
+    assert 'openai_model:value("openaiModel")' in js
 
 
 def test_saved_openai_key_is_reused_for_first_party_llm_calls_only(monkeypatch, tmp_path: Path):

@@ -390,7 +390,7 @@ The **AI Settings** tab is the single control surface for learned features. The 
 **Enable AI features throughout Tubeviz** switch gates AI-assisted acquisition and final
 analysis jobs; a separate storyboard switch controls paid OpenAI video-description
 requests. The same screen configures the OpenAI API key, Hugging Face token,
-OpenAI-compatible base URL, vision model, image detail, frame budget, and timeout.
+OpenAI-compatible base URL, shared OpenAI model, image detail, frame budget, and timeout. The saved base URL/model/key are inherited automatically by storyboard analysis, acquisition planning, and whole-song AI directing; the Create tab does not maintain duplicate credentials or model fields.
 Saved secret values are never sent back to the browser.
 
 ![tubeviz Studio — AI Settings](screenshots/screenshot-ai.png)
@@ -399,18 +399,19 @@ Settings persist outside the repository at `~/.config/tubeviz/config.json` (or
 `$XDG_CONFIG_HOME/tubeviz/config.json`). Set `TUBEVIZ_CONFIG` to use another path.
 Tubeviz creates the file with user-only `0600` permissions. Saved credentials are
 injected only into child-process environments and are excluded from job commands, logs,
-and API responses. `OPENAI_API_KEY`, `HF_TOKEN`, and `HUGGING_FACE_HUB_TOKEN` act as
-fallbacks when the corresponding saved field is empty.
+and API responses. The saved OpenAI model is likewise the application-wide default for
+vision, acquisition planning, and whole-song directing. `OPENAI_API_KEY`, `HF_TOKEN`, and
+`HUGGING_FACE_HUB_TOKEN` act as fallbacks when the corresponding saved secret is empty.
 
 #### Hugging Face authentication
 
 OpenCLIP and CLAP model downloads work without authentication for public models, but a
 Hugging Face token helps with authenticated, gated, or rate-limited Hub access. The
 preferred environment variable is `HF_TOKEN`. Studio reports whether a token is already
-available from its environment; if not, expand **Project → AI credentials** and enter
-one there. The Studio token is deliberately ephemeral — it is passed only to tubeviz
-child processes as `HF_TOKEN` and never appears in command-line arguments, job metadata,
-or job logs. Leaving the field blank inherits the Studio server environment.
+available from its environment; otherwise save one in **AI Settings**. Saved Hugging Face
+credentials are passed only to tubeviz child processes as `HF_TOKEN` and never appear in
+command-line arguments, job metadata, or job logs. Leaving the saved field blank inherits
+the Studio server environment.
 
 For a persistent shell setup:
 
@@ -664,8 +665,6 @@ tubeviz ingest \
   --library ./library \
   --target-clips 40 \
   --acquisition-query-count 24 \
-  --ai-llm-base-url http://localhost:8000/v1 \
-  --ai-llm-model YOUR_MODEL \
   --preview-gate \
   --preview-samples 4 \
   --preview-seconds 4 \
@@ -675,8 +674,10 @@ tubeviz ingest \
 
 `--visual-brief` enables AI discovery and the preview gate automatically. The acquisition
 planner distributes the overall target across its generated searches rather than treating
-each query as an independent large quota. Without a configured LLM, tubeviz falls back to
-a deterministic cinematography-oriented planner.
+each query as an independent large quota. By default the planner inherits the saved
+**AI Settings** base URL/model/key. Without a usable configured LLM, tubeviz falls back to
+a deterministic cinematography-oriented planner. `--ai-llm-base-url`, `--ai-llm-model`,
+and `--ai-llm-api-key` remain available as explicit CLI-only overrides.
 
 The preview gate samples strategic points across each hydrated candidate before
 committing to a full download. OpenCLIP evaluates the preview against positive visual
@@ -792,7 +793,7 @@ Important ingest controls:
 | `--ai-metadata-weight` | Metadata contribution to ranking |
 | `--ai-min-score` | Reject AI candidates below score |
 | `--ai-negative-concepts` | Comma-separated concepts to penalize |
-| `--ai-llm-base-url/--ai-llm-model` | Optional OpenAI-compatible query-expansion model |
+| `--ai-llm-base-url/--ai-llm-model` | Optional one-off override for the AI Settings endpoint/model |
 | `--ai-index-scenes` | Embed detected scenes while the AI model is loaded |
 | `--verbose-ytdlp` | Expose detailed yt-dlp diagnostics |
 
@@ -1243,7 +1244,8 @@ Edit density is quantized back onto musical beat counts, so AI can ask for a mor
 or more spacious montage but cannot move cuts off the beat grid.
 
 Studio exposes CLAP enable/device/window/hop settings, the audio-to-visual match weight,
-optional whole-song director URL/model/strength, and an **Audio AI Doctor** action.
+whole-song director enable/strength controls, and an **Audio AI Doctor** action. The
+director inherits its OpenAI endpoint, model, and key from **AI Settings**.
 
 ### Optional whole-song LLM director
 
@@ -1257,17 +1259,14 @@ tubeviz analyze audio/connected.mp3 \
   --semantic \
   --audio-ai \
   --ai-director \
-  --ai-director-base-url http://localhost:8000/v1 \
-  --ai-director-model my-local-model \
   --ai-director-strength .70 \
   --output timelines/connected-ai-directed.json
 ```
 
-If authentication is required:
-
-```bash
---ai-director-api-key "$OPENAI_API_KEY"
-```
+The director uses the saved **AI Settings** base URL, model, and OpenAI credential by
+default. `--ai-director-base-url`, `--ai-director-model`, and
+`--ai-director-api-key` remain available for one-off CLI overrides, including local or
+third-party OpenAI-compatible endpoints.
 
 The returned JSON is schema-validated and unknown fields are discarded. The LLM plan is
 blended with the deterministic CLAP baseline, and low CLAP confidence reduces how

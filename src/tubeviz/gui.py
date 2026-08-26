@@ -74,7 +74,7 @@ class AISettingsAction(BaseModel):
     vision_enabled: bool = False
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
-    openai_vision_model: str = "gpt-5.1"
+    openai_model: str = "gpt-5.1"
     vision_detail: str = "low"
     vision_max_frames: int = 12
     vision_timeout_seconds: int = 180
