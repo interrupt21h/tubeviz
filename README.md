@@ -1,4 +1,4 @@
-![tubeviz screenshot](screenshot.png)
+![tubeviz Studio — Create](screenshots/screenshot-create.png)
 
 # tubeviz
 
@@ -325,6 +325,8 @@ hand-maintained option list, so any option available on commands such as `analyz
 `render`, `serve`, `codec materialize`, `library embed`, or `ingest` appears in Studio.
 Commands launch as argument vectors, without shell interpolation.
 
+![tubeviz Studio — Command Center](screenshots/screenshot-command.png)
+
 Generated command coverage:
 
 ```text
@@ -380,6 +382,8 @@ loading or DSP analysis uses an indeterminate progress bar until a measurable st
 begins. Python workers run unbuffered, so messages appear as they happen rather than
 sitting in stdout buffers.
 
+![tubeviz Studio — Jobs](screenshots/screenshot-jobs.png)
+
 ### AI Settings
 
 The **AI Settings** tab is the single control surface for learned features. The master
@@ -388,6 +392,8 @@ analysis jobs; a separate storyboard switch controls paid OpenAI video-descripti
 requests. The same screen configures the OpenAI API key, Hugging Face token,
 OpenAI-compatible base URL, vision model, image detail, frame budget, and timeout.
 Saved secret values are never sent back to the browser.
+
+![tubeviz Studio — AI Settings](screenshots/screenshot-ai.png)
 
 Settings persist outside the repository at `~/.config/tubeviz/config.json` (or
 `$XDG_CONFIG_HOME/tubeviz/config.json`). Set `TUBEVIZ_CONFIG` to use another path.
@@ -833,6 +839,8 @@ metadata, duplicate checks, download, normalization, scene indexing, thumbnails,
 fingerprints, trimming, semantic embeddings, and later selection are all shared.
 
 ## Curating the library
+
+![tubeviz Studio — Library](screenshots/screenshot-library.png)
 
 ```bash
 tubeviz library stats --library ./library
