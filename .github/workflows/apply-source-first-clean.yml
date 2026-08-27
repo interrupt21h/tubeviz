@@ -1,5 +1,6 @@
 name: Apply source-first migration
 
+# Retry after updating legacy transform assertions for sparse accents.
 "on":
   push:
     branches:
