@@ -29,6 +29,7 @@ self.onmessage=async event=>{
     }
     if(!renderer)throw new Error('WebGPU worker not initialized');
     if(m.type==='resize'){renderer.resize(m.width,m.height);return;}
+    if(m.type==='reset-history'){renderer.resetHistory();return;}
     if(m.type==='render'){
       const ok=renderer.render(m.effect,m.source,m.params||{});
       m.effect?.close();m.source?.close();

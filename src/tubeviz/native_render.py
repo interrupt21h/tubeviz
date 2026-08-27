@@ -63,6 +63,31 @@ def _transform_fields(transform: VideoTransform) -> list[str]:
         f"{transform.motion_trails:.9g}",
         f"{transform.frame_echo:.9g}",
         f"{transform.hue_degrees:.9g}",
+        # v0.40 append-only native parity fields. The first 17 fields remain
+        # byte-for-byte compatible with older native manifests.
+        f"{transform.zoom:.9g}",
+        f"{transform.pan_x:.9g}",
+        f"{transform.pan_y:.9g}",
+        f"{transform.rotation_degrees:.9g}",
+        f"{transform.blur_px:.9g}",
+        f"{transform.feedback:.9g}",
+        f"{transform.glitch:.9g}",
+        f"{transform.kaleidoscope:.9g}",
+        f"{transform.tiles:.9g}",
+        f"{transform.tunnel:.9g}",
+        f"{transform.posterize:.9g}",
+        f"{transform.edge:.9g}",
+        f"{transform.strobe:.9g}",
+        f"{transform.shutter:.9g}",
+        f"{transform.slit_scan:.9g}",
+        f"{transform.mirror_corridor:.9g}",
+        f"{transform.mask_wipe:.9g}",
+        f"{transform.solarize:.9g}",
+        f"{transform.datamosh:.9g}",
+        f"{transform.block_displace:.9g}",
+        f"{transform.chroma_delay:.9g}",
+        f"{transform.vhs_tracking:.9g}",
+        f"{transform.slice_recursion:.9g}",
     ]
 
 
@@ -178,6 +203,12 @@ def _cue_fields(cue) -> tuple[float, str, float, float, float, float, int, int, 
         "video_edit_ripple",
         "video_edit_chroma_delay",
         "video_edit_vortex",
+        "video_edit_tempo_warp", "tempo_shift", "video_edit_punch",
+        "video_edit_strobe", "video_edit_tunnel", "video_edit_kaleidoscope",
+        "video_edit_edge", "video_edit_slitscan", "video_edit_echo",
+        "video_edit_corridor", "video_edit_mask", "video_edit_solarize",
+        "video_edit_datamosh", "video_edit_motion_trails", "video_edit_slice_recursion",
+        "video_edit_slice", "video_edit_freeze", "video_edit_switch",
         "energy_bloom",
         "harmonic_warp",
     }
@@ -361,6 +392,7 @@ def _creative_fields(scene) -> list[str]:
         f"{color.contrast_scale:.9g}",
         f"{color.brightness_scale:.9g}",
         str(int(c.style_version)),
+        f"{c.history_inherit:.9g}",
     ])
     return fields
 
@@ -414,6 +446,7 @@ def write_native_manifest(
             f"{scene.end:.9f}",
             f"{scene.opacity:.9f}",
             *_transform_fields(scene.transform),
+            scene.composition_mode,
         ]
         lines.append("\t".join(fields))
 

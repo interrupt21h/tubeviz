@@ -18,8 +18,11 @@ def test_repository_has_apache_license_metadata():
     assert Path("NOTICE").is_file()
 
 
-# def test_readme_screenshot_stays_first():
-#    assert Path("README.md").read_text().startswith("![tubeviz Studio — Create](screenshots/screenshot-create.png)\n")
+def test_readme_uses_render_output_as_hero():
+    text = Path("README.md").read_text()
+    assert text.startswith("# tubeviz\n")
+    assert "![tubeviz demo — Dream](dream.webp)" in text.split("## Sample videos", 1)[0]
+    assert "![tubeviz Studio — Create](screenshots/screenshot-create.png)" in text
 
 
 def test_readme_tab_screenshots_live_in_screenshots_directory():

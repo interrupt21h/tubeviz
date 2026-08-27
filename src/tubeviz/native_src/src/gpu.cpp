@@ -576,7 +576,11 @@ bool GpuPostProcessor::apply_spatial(
     }
     pl_tex_transfer_params upload{};
     upload.tex = impl_->input; upload.ptr = upload_ptr; upload.row_pitch = upload_pitch;
+#if defined(PL_API_VER) && PL_API_VER >= 360
     upload.no_import = impl_->gpu->limits.host_ptr_slow;
+#elif defined(PL_API_VER) && PL_API_VER >= 349
+    upload.no_import = false;
+#endif
     auto disable_gpu = [&](const char* stage) {
         std::cerr << "WARN\tGPU post-processing failed at " << stage
                   << "; disabling Vulkan/libplacebo for the remainder of this render\n";
@@ -621,7 +625,11 @@ bool GpuPostProcessor::apply_spatial(
     }
     pl_tex_transfer_params download{};
     download.tex = impl_->output; download.ptr = download_ptr; download.row_pitch = download_pitch;
+#if defined(PL_API_VER) && PL_API_VER >= 360
     download.no_import = impl_->gpu->limits.host_ptr_slow;
+#elif defined(PL_API_VER) && PL_API_VER >= 349
+    download.no_import = false;
+#endif
     if (!pl_tex_download(impl_->gpu, &download)) return disable_gpu("texture download");
     if (impl_->components == 4) {
         for (std::size_t i = 0, p = 0; i < rgb.size(); i += 3, p += 4) {

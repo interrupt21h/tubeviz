@@ -30,6 +30,22 @@ struct ReactiveState {
     double vortex{0.0};
     double bloom{0.0};
     double harmonic{0.0};
+    double tempo_warp{0.0};
+    double punch{0.0};
+    double strobe{0.0};
+    double tunnel{0.0};
+    double kaleidoscope{0.0};
+    double edge{0.0};
+    double slit_scan{0.0};
+    double echo{0.0};
+    double corridor{0.0};
+    double mask{0.0};
+    double solarize{0.0};
+    double datamosh{0.0};
+    double motion_trails{0.0};
+    double slice_recursion{0.0};
+    double freeze{0.0};
+    double switcher{0.0};
 
     void decay(double fps);
     void apply(const Cue& cue);
@@ -51,6 +67,32 @@ void apply_reactive_effects(
     int width,
     int height,
     const ReactiveState& state,
+    double phase
+);
+
+// Legacy/video-first transform effects that WebGPU applies after composition.
+// Native output intentionally owns an equivalent implementation so enabling the
+// native backend does not silently drop stylization, temporal or glitch effects.
+void apply_post_transform_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const Transform& transform,
+    double progress,
+    double phase
+);
+
+// Multi-source composition grammar shared conceptually with browser preview.
+void compose_layers(
+    std::vector<std::uint8_t>& destination,
+    const std::vector<std::vector<std::uint8_t>>& companions,
+    const std::vector<double>& opacities,
+    const std::vector<std::string>& blend_modes,
+    const std::string& composition_mode,
+    int width,
+    int height,
+    double progress,
     double phase
 );
 

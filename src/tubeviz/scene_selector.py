@@ -16,7 +16,7 @@ from .ai_edit_consultant import AIEditConsultantConfig, consult_section, prefere
 from .audio_ai import CONCEPT_KEYS, CONCEPT_PROMPTS, scene_audio_concept_alignment, top_audio_concepts
 from .models import CompositeLayer, DirectedTimeline, SceneIntent, SceneSelection, VisualCue
 from .transforms import TransformConfig, attach_transform_plan
-from .creative_effects import promote_hero_effects
+from .creative_effects import apply_temporal_persistence, promote_hero_effects
 from .editing import EditConfig, attach_edit_plan
 from .visual_features import index_scene_visual_features
 from .choreography import (
@@ -52,8 +52,15 @@ class SceneSelectorConfig:
     transform_intensity: float = 1.0
     creative_effects: bool = True
     creative_intensity: float = 1.0
+    # Intensity controls amplitude; density controls how often punctuation is
+    # scheduled.  The latter deliberately restores dynamic range without making
+    # every active effect stronger.
+    effect_density: float = 1.0
+    temporal_persistence: float = 1.0
+    hero_frequency: float = 1.0
     max_video_layers: int = 3
     composition_intensity: float = 1.0
+    composition_diversity: float = 1.0
     selection_seed: int = 0
     selection_variation: float = 0.30
     # Novelty-aware editing. target_unique_clips=0 means auto.
@@ -459,19 +466,55 @@ def _composition_mode(
     section_index: int,
     layers: int,
     vibe: str = "neutral",
+    *,
+    diversity: float = 1.0,
+    preferred: str | None = None,
 ) -> str:
-    """Use full-frame/organic composites; avoid boxed PiP/mosaic layouts."""
+    """Choose a musical multi-source grammar, including dynamic full-frame modes.
+
+    ``composition_intensity`` still controls how many companions are present.
+    ``diversity`` instead controls how readily the editor departs from the safe
+    flow/luma/strips vocabulary.  At 1.0 historical scheduling is preserved;
+    values above ~1.1 admit animated split, mosaic-flow and source-swap modes.
+    """
     if layers <= 1:
         return "single"
-    if label in {"ambient", "breakdown"} or vibe in {"ambient", "hypnotic", "dark"}:
+    preferred = str(preferred or "").replace(" ", "_").lower()
+    aliases = {
+        "flow_blend": "flow", "luma_blend": "luma", "organic_strips": "strips",
+        "split_reveal": "split", "flowing_mosaic": "mosaic", "source_swap": "swap",
+    }
+    preferred = aliases.get(preferred, preferred)
+    if preferred in {"flow", "luma", "strips", "split", "mosaic", "swap"}:
+        return preferred
+
+    diversity = max(0.0, min(2.5, float(diversity)))
+    if diversity <= 1.10:
+        if label in {"ambient", "breakdown"} or vibe in {"ambient", "hypnotic", "dark"}:
+            return "flow"
+        if label == "drive":
+            return "luma" if section_index % 2 == 0 else "flow"
+        if label == "build":
+            return "flow" if section_index % 2 == 0 else "strips"
+        if label == "peak":
+            return ("luma", "strips", "flow")[section_index % 3]
         return "flow"
-    if label == "drive":
-        return "luma" if section_index % 2 == 0 else "flow"
-    if label == "build":
-        return "flow" if section_index % 2 == 0 else "strips"
-    if label == "peak":
-        return ("luma", "strips", "flow")[section_index % 3]
-    return "flow"
+
+    # Dynamic modes are deterministic and phrase-sensitive rather than random.
+    if label in {"ambient", "breakdown"}:
+        choices = ("flow", "luma", "mosaic") if diversity >= 1.45 else ("flow", "luma")
+    elif label == "build":
+        choices = ("strips", "split", "flow", "swap")
+    elif label == "peak":
+        choices = ("split", "mosaic", "swap", "strips", "luma", "flow")
+    elif label == "drive":
+        choices = ("swap", "strips", "luma", "split", "flow")
+    else:
+        choices = ("flow", "luma", "strips", "split")
+    if diversity < 1.45:
+        choices = tuple(mode for mode in choices if mode not in {"mosaic", "swap"}) or ("flow",)
+    index = int(section_index + round(energy * 7.0) + round(diversity * 3.0)) % len(choices)
+    return choices[index]
 
 
 def _choose_companions(
@@ -956,6 +999,12 @@ def build_scene_plan(
                 )
                 aligned_rate, rhythm_score = 1.0, 0.0
 
+            advice = consultant_advice.get(local_shot_index) or {}
+            ai_density = section.ai_direction.effect_density if section.ai_direction is not None else 1.0
+            advice_bias = max(0.25, min(1.75, float(advice.get("effect_bias", 1.0) or 1.0)))
+            effective_density = max(0.0, min(2.5, cfg.effect_density * ai_density * advice_bias))
+            preferred_effects = list(section.ai_direction.preferred_effects if section.ai_direction is not None else [])
+            preferred_effects.extend(str(v) for v in advice.get("preferred_effects", []) if str(v))
             direction = build_visual_direction(
                 selected,
                 section,
@@ -967,16 +1016,17 @@ def build_scene_plan(
                 shot_progress=((shot_start + shot_end) * .5 - section.start) / max(.05, section.end-section.start),
                 creative_enabled=cfg.transforms and cfg.creative_effects,
                 creative_intensity=max(0.0, cfg.creative_intensity),
+                effect_density=effective_density,
+                preferred_effects=preferred_effects,
                 vector_enabled=cfg.vector_effects,
                 vector_intensity=cfg.vector_intensity,
                 codec_glitch_mode=cfg.codec_glitch_mode,
                 codec_glitch_intensity=cfg.codec_glitch_intensity,
                 effect_family_override=(consultant_advice.get(local_shot_index) or {}).get("effect_family"),
             )
-            advice = consultant_advice.get(local_shot_index) or {}
             requested_family = advice.get("effect_family")
             requested_hero = advice.get("hero_kind")
-            if requested_hero and not consultant_hero_used and direction.creative.hero_amount <= 0.01:
+            if requested_hero and cfg.hero_frequency > 0.0 and not consultant_hero_used and direction.creative.hero_amount <= 0.01:
                 hero_name = str(requested_hero).replace(" ", "_")
                 # The consultant may request a hero, but at most one consultant hero is
                 # admitted per musical section. Renderer semantics stay deterministic.
@@ -988,9 +1038,13 @@ def build_scene_plan(
 
             layer_budget = max(1, min(4, int(cfg.max_video_layers)))
             comp_strength = max(0.0, min(2.0, cfg.composition_intensity))
+            comp_diversity = max(0.0, min(2.5, cfg.composition_diversity))
             if section.ai_direction is not None:
                 comp_strength *= .68 + .48*section.ai_direction.desired_complexity + .14*(1-section.ai_direction.continuity)
+                comp_diversity *= section.ai_direction.composition_diversity
                 comp_strength = max(0.0, min(2.0, comp_strength))
+                comp_diversity = max(0.0, min(2.5, comp_diversity))
+            comp_diversity = max(0.0, min(2.5, comp_diversity * advice_bias))
             if section.energy < 0.30 or comp_strength <= 0.0:
                 desired_layers = 1
             elif section.energy < 0.58:
@@ -1060,6 +1114,8 @@ def build_scene_plan(
                 shot_ordinal,
                 desired_layers,
                 section.vibe,
+                diversity=comp_diversity,
+                preferred=(advice.get("composition_mode") or (section.ai_direction.preferred_composition if section.ai_direction is not None else None)),
             )
             selections.append(
                 SceneSelection(
@@ -1097,6 +1153,10 @@ def build_scene_plan(
                         "preferred_scene_ids": list((advice or {}).get("preferred_scene_ids") or []),
                         "selected_was_preferred": selected.scene_id in set((advice or {}).get("preferred_scene_ids") or []),
                         "effect_family": (advice or {}).get("effect_family"),
+                        "preferred_effects": list((advice or {}).get("preferred_effects") or []),
+                        "effect_bias": float((advice or {}).get("effect_bias", 1.0) or 1.0),
+                        "composition_mode": (advice or {}).get("composition_mode"),
+                        "history_mode": (advice or {}).get("history_mode", "auto"),
                         "hero_kind": (advice or {}).get("hero_kind"),
                         "reason": (advice or {}).get("reason", ""),
                     } if advice else {},
@@ -1116,10 +1176,17 @@ def attach_scene_plan(
 ) -> DirectedTimeline:
     cfg = config or SceneSelectorConfig()
     plan = build_scene_plan(timeline, library, cfg, progress=progress)
+    section_map = {section.index: section for section in timeline.track.sections}
     plan = promote_hero_effects(
         plan,
-        {section.index: section for section in timeline.track.sections},
+        section_map,
         track_duration=timeline.track.duration,
+        frequency=max(0.0, cfg.hero_frequency),
+    )
+    plan = apply_temporal_persistence(
+        plan,
+        section_map,
+        persistence=max(0.0, cfg.temporal_persistence),
     )
     non_scene_cues = [
         cue for cue in timeline.cues
@@ -1263,7 +1330,7 @@ def attach_scene_plan(
     )
     result = attach_transform_plan(
         result,
-        TransformConfig(enabled=cfg.transforms, intensity=cfg.transform_intensity),
+        TransformConfig(enabled=cfg.transforms, intensity=cfg.transform_intensity, density=cfg.effect_density),
     )
     return attach_edit_plan(
         result,

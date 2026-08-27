@@ -248,6 +248,7 @@ export class BrowserGpuRendererCore{
       this.device.queue.submit([encoder.finish()]);this.historyReady=true;return true;
     }catch(error){this.failed=true;this.failureReason=String(error?.message||error);console.warn('tubeviz WebGPU compositor failed',error);return false;}
   }
+  resetHistory(){this.historyReady=false;}
   async sync(){try{await this.device.queue.onSubmittedWorkDone();return !this.failed;}catch(error){this.failed=true;this.failureReason=String(error?.message||error);return false;}}
 }
 

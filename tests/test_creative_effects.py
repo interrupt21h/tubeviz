@@ -123,7 +123,7 @@ def test_creative_effects_can_be_disabled_without_losing_semantic_metadata():
     assert c.feedback == 0
     assert c.palette_strength == 0
     assert c.source_fidelity == 1.0
-    assert c.style_version == 2
+    assert c.style_version == 3
     assert c.hero_kind is None
     assert c.semantic.person > 0
 

@@ -646,8 +646,12 @@ def _selector_config(args: argparse.Namespace, *, ai_base_url: str | None = None
         transform_intensity=getattr(args, "transform_intensity", 1.0),
         creative_effects=getattr(args, "creative_effects", True),
         creative_intensity=max(0.0, getattr(args, "creative_intensity", 1.0)),
+        effect_density=max(0.0, getattr(args, "effect_density", 1.0)),
+        temporal_persistence=max(0.0, getattr(args, "temporal_persistence", 1.0)),
+        hero_frequency=max(0.0, getattr(args, "hero_frequency", 1.0)),
         max_video_layers=getattr(args, "max_video_layers", 3),
         composition_intensity=getattr(args, "composition_intensity", 1.0),
+        composition_diversity=max(0.0, getattr(args, "composition_diversity", 1.0)),
         selection_seed=seed,
         selection_variation=max(0.0, getattr(args, "selection_variation", 0.30)),
         target_unique_clips=max(0, getattr(args, "target_unique_clips", 0)),
@@ -1408,9 +1412,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--no-transforms", action="store_true", help="Disable per-scene video transform planning")
     analyze.add_argument("--transform-intensity", type=float, default=1.0, help="Legacy transform strength; 0 disables, 1 normal, up to 2 aggressive")
     analyze.add_argument("--creative-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable semantic/temporal creative rendering: optical flow, virtual camera, depth, feedback, palette, and hero effects")
-    analyze.add_argument("--creative-intensity", type=float, default=1.0, help="Global creative-effect strength; 0 disables, 1 balanced, up to 2 aggressive")
+    analyze.add_argument("--creative-intensity", type=float, default=1.0, help="Global creative-effect strength; amplitude only, 0 disables, 1 balanced, up to 2 aggressive")
+    analyze.add_argument("--effect-density", type=float, default=1.0, help="How often strong/special effects are scheduled; 1 historical density, >1 more frequent punctuation, up to ~2.5")
+    analyze.add_argument("--temporal-persistence", type=float, default=1.0, help="Cross-shot temporal inheritance budget; 0 always resets history, >1 more related cuts inherit trails/feedback")
+    analyze.add_argument("--hero-frequency", type=float, default=1.0, help="Frequency multiplier for sparse hero treatments; 1 ~one per 48 seconds, 2 ~twice as often")
     analyze.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")
     analyze.add_argument("--composition-intensity", type=float, default=1.0, help="Multi-source compositing strength; 0 disables companions")
+    analyze.add_argument("--composition-diversity", type=float, default=1.0, help="Variety of multi-source grammars; >1 admits animated split, mosaic-flow and source-swap modes")
     analyze.add_argument("--selection-seed", type=int, default=0, help="Reproducible alternate scene-selection seed; 0 preserves the canonical cut")
     analyze.add_argument("--selection-variation", type=float, default=0.30, help="Seeded candidate variation strength; 0 changes term mapping/ties only")
     analyze.add_argument("--reshuffle", action="store_true", help="Generate and print a fresh scene-selection seed")
@@ -1601,9 +1609,13 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--no-transforms", action="store_true", help="Disable transforms when replanning scenes")
     serve.add_argument("--transform-intensity", type=float, default=1.0, help="Transform strength when replanning")
     serve.add_argument("--creative-effects", action=argparse.BooleanOptionalAction, default=True, help="Enable semantic/temporal creative effects when replanning")
-    serve.add_argument("--creative-intensity", type=float, default=1.0, help="Creative-effect strength when replanning")
+    serve.add_argument("--creative-intensity", type=float, default=1.0, help="Creative-effect amplitude when replanning")
+    serve.add_argument("--effect-density", type=float, default=1.0, help="Strong/special effect scheduling density when replanning")
+    serve.add_argument("--temporal-persistence", type=float, default=1.0, help="Cross-shot temporal-history inheritance when replanning")
+    serve.add_argument("--hero-frequency", type=float, default=1.0, help="Hero-treatment frequency multiplier when replanning")
     serve.add_argument("--max-video-layers", type=int, default=3, help="Maximum simultaneous source videos per section (1..4)")
     serve.add_argument("--composition-intensity", type=float, default=1.0, help="Multi-source compositing strength when replanning")
+    serve.add_argument("--composition-diversity", type=float, default=1.0, help="Multi-source composition grammar diversity when replanning")
     serve.add_argument("--selection-seed", type=int, default=0, help="Reproducible alternate scene-selection seed; use with --replan-scenes")
     serve.add_argument("--selection-variation", type=float, default=0.30, help="Seeded candidate variation strength")
     serve.add_argument("--reshuffle", action="store_true", help="Generate and print a fresh scene-selection seed; use with --replan-scenes")

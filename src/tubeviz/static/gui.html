@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.39.0">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.39.0">
+<link rel="stylesheet" href="/static/gui.css?v=0.40.0">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.40.0">
 </head>
 <body>
 <header>
@@ -67,7 +67,11 @@
         <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
         <label class="slider-field">Transform <span class="slider-value" data-for="transformIntensity"></span><input id="transformIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>subtle 0</span><b>balanced 0.8–1.3</b><span>extreme 2</span></span></label>
         <label class="slider-field">Creative FX <span class="slider-value" data-for="creativeIntensity"></span><input id="creativeIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>restrained 0</span><b>cinematic .7–1.2</b><span>surreal 2</span></span></label>
+        <label class="slider-field">Effect density <span class="slider-value" data-for="effectDensity"></span><input id="effectDensity" type="range" min="0" max="2.5" step=".05" value="1.25"><span class="slider-scale"><span>sparse 0</span><b>dynamic 1.1–1.7</b><span>relentless 2.5</span></span></label>
+        <label class="slider-field">Temporal persistence <span class="slider-value" data-for="temporalPersistence"></span><input id="temporalPersistence" type="range" min="0" max="2.5" step=".05" value="1.15"><span class="slider-scale"><span>reset 0</span><b>musical .9–1.5</b><span>long memory 2.5</span></span></label>
+        <label class="slider-field">Hero frequency <span class="slider-value" data-for="heroFrequency"></span><input id="heroFrequency" type="range" min="0" max="2.5" step=".05" value="1.15"><span class="slider-scale"><span>none 0</span><b>punctuation .8–1.5</b><span>frequent 2.5</span></span></label>
         <label class="slider-field">Composition <span class="slider-value" data-for="compositionIntensity"></span><input id="compositionIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>single-source 0</span><b>balanced 0.7–1.3</b><span>layered 2</span></span></label>
+        <label class="slider-field">Composition diversity <span class="slider-value" data-for="compositionDiversity"></span><input id="compositionDiversity" type="range" min="0" max="2.5" step=".05" value="1.15"><span class="slider-scale"><span>consistent 0</span><b>varied 1.1–1.6</b><span>restless 2.5</span></span></label>
         <label>Target unique <input id="targetUnique" type="number" value="0"></label>
         <label class="slider-field">Novelty <span class="slider-value" data-for="noveltyWeight"></span><input id="noveltyWeight" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>coherent 0</span><b>recommended .45–.80</b><span>varied 1.5</span></span></label>
         <label class="slider-field">Visual match <span class="slider-value" data-for="visualMatchWeight"></span><input id="visualMatchWeight" type="range" min="0" max="2" step=".05" value="1.25"><span class="slider-scale"><span>loose 0</span><b>recommended 1.0–1.5</b><span>strict 2</span></span></label>
@@ -411,6 +415,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.39.0"></script>
+<script src="/static/gui.js?v=0.40.0"></script>
 </body>
 </html>

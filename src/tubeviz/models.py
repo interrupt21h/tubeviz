@@ -49,6 +49,15 @@ class SectionAIDirection(BaseModel):
     target_hue: float | None = Field(default=None, ge=0.0, lt=360.0)
     vector_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
     codec_intensity: float = Field(default=1.0, ge=0.0, le=2.0)
+    # Choreography controls are multiplicative section-level recommendations.
+    # The user's global settings remain the hard creative ceiling; AI may shape
+    # where the available effect/composition budget is spent.
+    effect_density: float = Field(default=1.0, ge=0.0, le=2.5)
+    temporal_persistence: float = Field(default=1.0, ge=0.0, le=2.5)
+    composition_diversity: float = Field(default=1.0, ge=0.0, le=2.5)
+    hero_frequency: float = Field(default=1.0, ge=0.0, le=2.5)
+    preferred_effects: list[str] = Field(default_factory=list)
+    preferred_composition: str | None = None
     # Optional whole-section creative trajectories from the LLM director. Each
     # value is [start, end] in normalized 0..1 intensity; the deterministic
     # creative planner blends these with measured audio/scene features.
@@ -421,6 +430,9 @@ class CreativeEffectPlan(BaseModel):
     hero_amount: float = Field(default=0.0, ge=0.0, le=1.0)
     hero_start: float = Field(default=0.0, ge=0.0, le=1.0)
     hero_end: float = Field(default=1.0, ge=0.0, le=1.0)
+    # Amount of previous-shot temporal history intentionally admitted at the cut.
+    # Zero is a clean reset; one preserves the full available delay/feedback state.
+    history_inherit: float = Field(default=0.0, ge=0.0, le=1.0)
     semantic: SemanticVisualProfile = Field(default_factory=SemanticVisualProfile)
     automation: dict[str, list[tuple[float, float]]] = Field(default_factory=dict)
 

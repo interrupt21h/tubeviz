@@ -22,6 +22,22 @@ def _curve(*points: tuple[float, float]) -> list[tuple[float, float]]:
     return [(float(x), float(y)) for x, y in points]
 
 
+def _effect_key(value: str) -> str:
+    return " ".join(str(value).strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _density_gate(seed: float, probability: float, density: float, *, preferred: bool = False) -> bool:
+    """Deterministic occurrence gate whose probability, not amplitude, scales.
+
+    A density of 1 preserves the v0.33.6-era probability. Higher density makes
+    the same effect vocabulary appear more often without making every active
+    instance stronger. AI preference is a modest probability nudge, never a
+    command to force a destructive effect on every shot.
+    """
+    p = max(0.0, min(0.94, float(probability) * max(0.0, float(density)) * (1.55 if preferred else 1.0)))
+    return seed >= 1.0 - p
+
+
 _SEMANTIC_WORDS: dict[str, tuple[str, ...]] = {
     "person": ("person", "people", "human", "man", "woman", "girl", "boy", "dancer", "crowd", "performer", "portrait"),
     "face": ("face", "facial", "portrait", "close-up", "closeup", "headshot"),
@@ -120,6 +136,8 @@ def build_creative_effect_plan(
     shot_index: int,
     shot_progress: float,
     intensity: float = 1.0,
+    density: float = 1.0,
+    preferred_effects: Iterable[str] = (),
 ) -> CreativeEffectPlan:
     """Create a coherent shot treatment from music, motion, palette and semantics.
 
@@ -131,8 +149,10 @@ def build_creative_effect_plan(
     f = candidate.visual_features or {}
     sem = semantic_visual_profile(candidate)
     intensity = _clamp(intensity, 0.0, 2.0)
+    effect_density = max(0.0, min(2.5, float(density)))
+    preferred = {_effect_key(v) for v in preferred_effects if str(v).strip()}
     if intensity <= 1e-6:
-        return CreativeEffectPlan(style_version=2, semantic=sem, source_fidelity=1.0)
+        return CreativeEffectPlan(style_version=3, semantic=sem, source_fidelity=1.0)
     energy = _clamp(section.energy)
     density = _clamp(section.onset_density / 0.70)
     bass = _clamp(section.bass_weight)
@@ -222,7 +242,8 @@ def build_creative_effect_plan(
     # Symmetry is a rare accent.  Earlier versions always left a non-zero symmetry
     # floor, which made circular/portal-looking masks appear on a large fraction of
     # shots.  Only a small deterministic subset can schedule it now.
-    if symmetry_gate > 0.92:
+    symmetry_preferred = any(v in preferred for v in {"local symmetry", "kaleidoscope", "recursive portal"})
+    if _density_gate(symmetry_gate, 0.08, effect_density, preferred=symmetry_preferred):
         local_symmetry = _clamp(
             (0.05 + 0.18 * tonal + 0.18 * sem.abstract + 0.08 * mutation + 0.10 * payoff)
             * (1.0 - 0.78 * subject_weight)
@@ -234,11 +255,46 @@ def build_creative_effect_plan(
     texture_bloom = _clamp(0.04 + 0.32 * section.brightness + 0.20 * energy + 0.12 * sem.night)
     texture_streaks = _clamp(0.02 + 0.30 * motion + 0.20 * sem.night + 0.12 * sem.architecture + 0.10 * payoff)
     palette_gate = _stable_unit(f"creative:{candidate.scene_id}:{section.index}:{shot_index}:palette")
+    palette_probability = 0.36 if payoff >= 0.5 else 0.28
+    palette_preferred = any(v in preferred for v in {"palette propagation", "source preserving color grade", "source-preserving color grade"})
     palette_strength = (
         _clamp(0.04 + 0.18 * contrast_target + 0.12 * energy + 0.08 * (1.0 - entropy))
-        if palette_gate > (0.72 if payoff < 0.5 else 0.64)
+        if _density_gate(palette_gate, palette_probability, effect_density, preferred=palette_preferred)
         else 0.0
     )
+
+    # The AI director/consultant can recommend specific members of the known
+    # effect arsenal. Recommendations alter the deterministic planner's emphasis
+    # but remain bounded by semantic subject protection and user intensity.
+    def wants(*names: str) -> bool:
+        keys = {_effect_key(name) for name in names}
+        return bool(preferred.intersection(keys))
+
+    def emphasize(value: float, floor: float = 0.12, gain: float = 1.28) -> float:
+        return _clamp(max(value * gain, floor))
+
+    if wants("optical-flow warp", "optical flow warp", "flow warp"):
+        flow_warp = emphasize(flow_warp, .16)
+    if wants("motion trails", "flow trails"):
+        flow_trails = emphasize(flow_trails, .16)
+    if wants("rgb displacement", "motion-following rgb", "flow rgb"):
+        flow_rgb = emphasize(flow_rgb, .12)
+    if wants("temporal echo", "frame echo"):
+        temporal_echo = emphasize(temporal_echo, .16)
+    if wants("temporal rgb displacement", "temporal rgb", "chroma delay"):
+        temporal_rgb = emphasize(temporal_rgb, .14)
+    if wants("temporal smear", "slit scan"):
+        temporal_smear = emphasize(temporal_smear, .14)
+    if wants("depth parallax", "depth burst"):
+        depth_parallax = emphasize(depth_parallax, .16)
+    if wants("background warp"):
+        background_warp = emphasize(background_warp, .14)
+    if wants("recursive feedback", "feedback"):
+        feedback = emphasize(feedback, .14)
+    if wants("source-derived bloom", "bloom"):
+        texture_bloom = emphasize(texture_bloom, .16)
+    if wants("source-derived light streaks", "light streaks"):
+        texture_streaks = emphasize(texture_streaks, .14)
 
     # Shot-progress curves.  Effects ramp and release rather than living at a
     # constant strength. Builds escalate, payoffs front-load impact, and withholding
@@ -320,7 +376,7 @@ def build_creative_effect_plan(
     }
 
     return CreativeEffectPlan(
-        style_version=2,
+        style_version=3,
         flow_warp=flow_warp,
         flow_trails=flow_trails,
         flow_rgb=flow_rgb,
@@ -360,9 +416,11 @@ def _hero_score(selection: SceneSelection, section: Section) -> float:
         c.semantic.person, c.semantic.water, c.semantic.architecture,
         c.semantic.nature, c.semantic.abstract, c.semantic.night,
     )
+    ai_hero = section.ai_direction.hero_frequency if section.ai_direction is not None else 1.0
     return _clamp(
         0.31 * role_score + 0.25 * section_score + 0.20 * section.energy
         + 0.13 * c.abstraction + 0.11 * semantic_interest
+        + 0.08 * (max(0.0, min(2.5, ai_hero)) - 1.0)
     )
 
 
@@ -387,16 +445,28 @@ def promote_hero_effects(
     sections: dict[int, Section],
     *,
     track_duration: float,
+    frequency: float = 1.0,
 ) -> list[SceneSelection]:
-    """Promote a small number of shots to rare high-impact hero treatments.
+    """Promote musically spaced high-impact hero treatments.
 
-    The target is roughly one hero per 40–55 seconds (3..8 for normal songs), with
-    temporal spacing so expensive moments remain punctuation rather than wallpaper.
+    Frequency is independent of hero amplitude. At 1.0 the target remains about
+    one event per 48 seconds; higher settings create more punctuation while still
+    enforcing temporal spacing and deterministic eligibility.
     """
     if not plan:
         return plan
-    target = max(3, min(8, int(round(track_duration / 48.0))))
-    target = min(target, max(1, len(plan) // 8)) if len(plan) >= 8 else min(1, len(plan))
+    frequency = max(0.0, min(2.5, float(frequency)))
+    if frequency <= 1e-6:
+        return plan
+    ai_values = [
+        section.ai_direction.hero_frequency
+        for section in sections.values()
+        if section.ai_direction is not None
+    ]
+    ai_scale = sum(ai_values) / len(ai_values) if ai_values else 1.0
+    effective_frequency = max(0.0, min(3.5, frequency * ai_scale))
+    target = max(1, min(14, int(round(track_duration * effective_frequency / 48.0))))
+    target = min(target, max(1, len(plan) // 5)) if len(plan) >= 5 else min(1, len(plan))
     candidates: list[tuple[float, int]] = []
     for index, selection in enumerate(plan):
         section = sections.get(selection.section_index)
@@ -418,9 +488,10 @@ def promote_hero_effects(
     candidates.sort(reverse=True)
 
     chosen: list[int] = []
+    min_spacing = max(4.0, 10.0 / max(0.75, effective_frequency ** 0.55))
     for _, idx in candidates:
         t = plan[idx].time
-        if any(abs(t - plan[other].time) < 10.0 for other in chosen):
+        if any(abs(t - plan[other].time) < min_spacing for other in chosen):
             continue
         chosen.append(idx)
         if len(chosen) >= target:
@@ -449,3 +520,68 @@ def promote_hero_effects(
         direction = selection.direction.model_copy(update={"creative": creative})
         updated[idx] = selection.model_copy(update={"direction": direction})
     return updated
+
+
+def apply_temporal_persistence(
+    plan: list[SceneSelection],
+    sections: dict[int, Section],
+    *,
+    persistence: float = 1.0,
+) -> list[SceneSelection]:
+    """Annotate cuts that may intentionally inherit previous-frame history.
+
+    v0.33.5 reset feedback/delay state at every ordinary cut. This restores
+    controlled continuity without bringing back uncontrolled smear: related motifs,
+    compatible effect families, high-continuity sections and explicit AI requests
+    can carry history across a cut, while unrelated scenes still reset cleanly.
+    """
+    if not plan:
+        return plan
+    global_persistence = max(0.0, min(2.5, float(persistence)))
+    out = list(plan)
+    first = out[0]
+    first_creative = first.direction.creative.model_copy(update={"history_inherit": 0.0})
+    out[0] = first.model_copy(update={"direction": first.direction.model_copy(update={"creative": first_creative})})
+
+    temporal_heroes = {"flow_melt", "subject_echo", "time_prism", "recursive_portal"}
+    for index in range(1, len(out)):
+        current = out[index]
+        previous = out[index - 1]
+        section = sections.get(current.section_index)
+        if section is None:
+            continue
+        ai_scale = section.ai_direction.temporal_persistence if section.ai_direction is not None else 1.0
+        local = max(0.0, min(3.0, global_persistence * ai_scale))
+        advice = current.ai_consultant or {}
+        history_mode = str(advice.get("history_mode") or "auto").lower()
+        if history_mode == "reset" or local <= 1e-6:
+            inherit = 0.0
+        else:
+            c = current.direction.creative
+            temporal_energy = max(c.temporal_echo, c.temporal_rgb, c.temporal_smear, c.flow_trails, c.feedback)
+            relation = 0.08
+            if current.section_index == previous.section_index:
+                relation += 0.24
+            if current.motif_id and current.motif_id == previous.motif_id:
+                relation += 0.28
+            if current.direction.effect_family == previous.direction.effect_family:
+                relation += 0.20
+            if current.direction.narrative_role in {"mutate", "payoff"}:
+                relation += 0.09
+            if section.ai_direction is not None:
+                relation += 0.16 * section.ai_direction.continuity
+            if c.hero_kind in temporal_heroes:
+                relation += 0.38
+            relation = _clamp(relation)
+            if history_mode == "inherit":
+                inherit = _clamp(0.42 + 0.18 * min(2.0, local) + 0.24 * temporal_energy + 0.12 * relation)
+            else:
+                probability = _clamp((0.10 + 0.42 * relation + 0.18 * temporal_energy) * min(2.25, local))
+                gate = _stable_unit(f"history:{current.scene_id}:{current.time:.3f}:{previous.scene_id}")
+                inherit = (
+                    _clamp(0.18 + 0.34 * relation + 0.22 * temporal_energy + 0.10 * max(0.0, local - 1.0))
+                    if gate < probability else 0.0
+                )
+        creative = current.direction.creative.model_copy(update={"history_inherit": inherit})
+        out[index] = current.model_copy(update={"direction": current.direction.model_copy(update={"creative": creative})})
+    return out

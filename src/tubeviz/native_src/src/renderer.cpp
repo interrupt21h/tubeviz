@@ -129,14 +129,28 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
 
     std::vector<std::uint8_t> portal_companion;
     bool have_portal_companion = false;
+    std::vector<std::vector<std::uint8_t>> companion_frames;
+    std::vector<double> companion_opacities;
+    std::vector<std::string> companion_modes;
+    companion_frames.reserve(shot.companions.size());
     for (const auto& layer : shot.companions) {
         auto companion = render_layer(layer, shot.time, now, legacy_style);
         if (!have_portal_companion) {
             portal_companion = companion;
             have_portal_companion = true;
         }
-        blend_layer(output, companion, layer.opacity, layer.blend_mode);
+        companion_opacities.push_back(layer.opacity);
+        companion_modes.push_back(layer.blend_mode);
+        companion_frames.push_back(std::move(companion));
     }
+    const double composition_progress = std::clamp(
+        (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time), 0.0, 1.0
+    );
+    const std::string effective_composition = reactive_.switcher > 0.08 ? "swap" : shot.composition_mode;
+    compose_layers(
+        output, companion_frames, companion_opacities, companion_modes,
+        effective_composition, width_, height_, composition_progress, now * 0.24
+    );
 
     // Canonical pre-FX color reference. Keep it as renderer state so the final
     // chroma guard can run after every post-processing path.
@@ -163,6 +177,30 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
             output, previous, width_, height_, shot.creative, progress, now * 0.24
         );
     }
+
+    // WebGPU parity layer: native always applies the timeline's video-first
+    // post-composite Transform effects, regardless of whether the creative
+    // spatial pass ran on Vulkan or CPU.
+    auto post_transform = shot.primary.transform;
+    // Merge timed browser/editorial cue accents into the same post-composite
+    // vocabulary used by static transform planning.
+    post_transform.ripple = std::max(post_transform.ripple, reactive_.tempo_warp * .75);
+    post_transform.tunnel = std::max({post_transform.tunnel, reactive_.tunnel, reactive_.punch * .65});
+    post_transform.kaleidoscope = std::max(post_transform.kaleidoscope, reactive_.kaleidoscope);
+    post_transform.edge = std::max(post_transform.edge, reactive_.edge);
+    post_transform.strobe = std::max(post_transform.strobe, reactive_.strobe);
+    post_transform.slit_scan = std::max(post_transform.slit_scan, reactive_.slit_scan);
+    post_transform.frame_echo = std::max(post_transform.frame_echo, reactive_.echo);
+    post_transform.mirror_corridor = std::max(post_transform.mirror_corridor, reactive_.corridor);
+    post_transform.mask_wipe = std::max(post_transform.mask_wipe, reactive_.mask);
+    post_transform.solarize = std::max(post_transform.solarize, reactive_.solarize);
+    post_transform.datamosh = std::max(post_transform.datamosh, reactive_.datamosh);
+    post_transform.motion_trails = std::max(post_transform.motion_trails, reactive_.motion_trails);
+    post_transform.slice_recursion = std::max(post_transform.slice_recursion, reactive_.slice_recursion);
+    post_transform.shutter = std::max(post_transform.shutter, reactive_.freeze);
+    apply_post_transform_effects(
+        output, previous, width_, height_, post_transform, progress, now * 0.24
+    );
 
     auto vector_effects = shot.vector_effects;
     if (legacy_style) {
@@ -222,7 +260,7 @@ int Renderer::run() {
         }
 
         const bool shot_changed = shot_index != previous_shot_index_;
-        const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative);
+        const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative) || shot->creative.history_inherit > 0.04;
         auto output = render_shot(*shot, now, allow_previous_effects);
         // GPU frames already received reactive treatment in the fused shader.
         if (!gpu_frame_used_) {

@@ -15,6 +15,7 @@ from .models import CompositeLayer, DirectedTimeline, SceneSelection, Section, V
 class TransformConfig:
     enabled: bool = True
     intensity: float = 1.0
+    density: float = 1.0
     allow_reverse: bool = True
     max_playback_rate: float = 1.65
     min_playback_rate: float = 0.65
@@ -41,6 +42,15 @@ def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
 
+def _effect_key(value: str) -> str:
+    return " ".join(str(value).strip().lower().replace("_", " ").replace("-", " ").split())
+
+
+def _density_gate(seed: float, probability: float, density: float, *, preferred: bool = False) -> bool:
+    p = _clamp(float(probability) * max(0.0, float(density)) * (1.55 if preferred else 1.0), 0.0, 0.94)
+    return seed >= 1.0 - p
+
+
 def plan_transform(
     section: Section,
     selection: SceneSelection,
@@ -51,7 +61,16 @@ def plan_transform(
         return VideoTransform()
 
     intensity = _clamp(cfg.intensity, 0.0, 2.0)
+    effect_density = _clamp(cfg.density, 0.0, 2.5)
+    preferred = {_effect_key(v) for v in (section.ai_direction.preferred_effects if section.ai_direction is not None else []) if str(v).strip()}
+    advice = selection.ai_consultant or {}
+    preferred.update(_effect_key(v) for v in advice.get("preferred_effects", []) if str(v).strip())
+    try:
+        advice_bias = _clamp(float(advice.get("effect_bias", 1.0) or 1.0), 0.25, 1.75)
+    except (TypeError, ValueError):
+        advice_bias = 1.0
     if section.ai_direction is not None:
+        effect_density = _clamp(effect_density * section.ai_direction.effect_density * advice_bias, 0.0, 2.5)
         # AI direction modulates a user's global effect ceiling rather than
         # replacing it. Spacious sections naturally back off; complex/payoff
         # sections can use more of the configured budget.
@@ -95,7 +114,8 @@ def plan_transform(
     # minority receive only a small offset so layer transforms cannot recreate an
     # always-on color cast underneath the post-composite director.
     hue_gate = _stable_unit(salt + ":hue")
-    hue = intensity * ((r2 - 0.5) * 10.0 + min(2.0, mutation * 1.0)) if hue_gate > .72 else 0.0
+    hue_preferred = any(v in preferred for v in {"source preserving color grade", "source-preserving color grade", "color grade"})
+    hue = intensity * ((r2 - 0.5) * 10.0 + min(2.0, mutation * 1.0)) if _density_gate(hue_gate, .28, effect_density, preferred=hue_preferred) else 0.0
     saturation_target = _clamp(0.82 + brightness * 0.65 + energy * 0.18, 0.45, 1.8)
     contrast_target = _clamp(0.92 + energy * 0.38 + mutation * 0.06, 0.7, 1.75)
     brightness_target = _clamp(0.78 + brightness * 0.50 + energy * 0.16, 0.6, 1.45)
@@ -127,8 +147,8 @@ def plan_transform(
     ripple = _clamp(intensity * (0.025 + 0.12 * density + 0.16 * bass + 0.06 * energy), 0.0, 0.42)
     kaleidoscope_gate = _stable_unit(salt + ":kaleidoscope")
     kaleidoscope = (
-        _clamp(intensity * (0.03 + max(0.0, tonal - 0.60) * 0.12 + mutation * 0.018), 0.0, 0.18)
-        if kaleidoscope_gate > .90 and vibe in {"ambient", "hypnotic", "euphoric"}
+        _clamp(intensity * (0.03 + max(0.0, tonal - 0.60) * 0.12 + mutation * 0.018), 0.0, 0.24)
+        if _density_gate(kaleidoscope_gate, .10, effect_density, preferred="kaleidoscope" in preferred) and vibe in {"ambient", "hypnotic", "euphoric", "fractured"}
         else 0.0
     )
     # Rectangular tiling is intentionally retired; organic flow/vortex
@@ -148,16 +168,16 @@ def plan_transform(
     mask_gate = _stable_unit(salt + ":mask")
     solarize_gate = _stable_unit(salt + ":solarize")
     mirror_corridor = (
-        _clamp(intensity * (0.04 + 0.06 * mutation + 0.08 * max(0.0, energy - 0.62)), 0.0, 0.24)
-        if corridor_gate > .84 else 0.0
+        _clamp(intensity * (0.04 + 0.06 * mutation + 0.08 * max(0.0, energy - 0.62)), 0.0, 0.30)
+        if _density_gate(corridor_gate, .16, effect_density, preferred="mirror corridor" in preferred) else 0.0
     )
     mask_wipe = (
-        _clamp(intensity * (0.05 + 0.06 * density + 0.03 * (1.0 - brightness)), 0.0, 0.18)
-        if mask_gate > .93 else 0.0
+        _clamp(intensity * (0.05 + 0.06 * density + 0.03 * (1.0 - brightness)), 0.0, 0.24)
+        if _density_gate(mask_gate, .07, effect_density, preferred="mask wipe" in preferred) else 0.0
     )
     solarize = (
-        _clamp(intensity * max(0.0, energy - 0.62) * (0.08 + 0.12 * density), 0.0, 0.18)
-        if solarize_gate > .90 and vibe in {"fractured", "dark", "heavy"}
+        _clamp(intensity * max(0.0, energy - 0.52) * (0.08 + 0.12 * density), 0.0, 0.26)
+        if _density_gate(solarize_gate, .10, effect_density, preferred="solarize" in preferred) and vibe in {"fractured", "dark", "heavy", "driving"}
         else 0.0
     )
 
@@ -167,11 +187,43 @@ def plan_transform(
     vhs_tracking = _clamp(intensity * (0.03 + 0.13 * (1.0 - brightness) + 0.10 * density), 0.0, 0.38)
     vortex_gate = _stable_unit(salt + ":vortex")
     vortex = (
-        _clamp(intensity * (0.03 + 0.04 * mutation + max(0.0, energy - 0.58) * 0.10 + tonal * 0.05), 0.0, 0.24)
-        if vortex_gate > .78 else 0.0
+        _clamp(intensity * (0.03 + 0.04 * mutation + max(0.0, energy - 0.58) * 0.10 + tonal * 0.05), 0.0, 0.30)
+        if _density_gate(vortex_gate, .22, effect_density, preferred="vortex" in preferred) else 0.0
     )
     motion_trails = _clamp(intensity * (0.02 + 0.12 * energy + 0.08 * density + 0.10 * tonal), 0.0, 0.48)
     slice_recursion = _clamp(intensity * max(0.0, density - 0.45) * (0.16 + 0.24 * energy), 0.0, 0.42)
+
+    # Density raises occurrence by promoting a rotating subset of already-known
+    # effects above their visual threshold. It never globally multiplies every
+    # treatment, so high-density edits remain varied instead of uniformly noisy.
+    def wants(*names: str) -> bool:
+        return bool(preferred.intersection({_effect_key(name) for name in names}))
+
+    def accent(name: str, value: float, probability: float, floor: float, *, aliases: tuple[str, ...] = ()) -> float:
+        is_preferred = wants(name, *aliases)
+        gate = _stable_unit(f"{salt}:density:{_effect_key(name)}")
+        if not _density_gate(gate, probability, effect_density, preferred=is_preferred):
+            return value
+        gain = 1.18 + 0.14 * max(0.0, effect_density - 1.0) + (0.18 if is_preferred else 0.0)
+        return _clamp(max(value * gain, floor * min(1.5, intensity)), 0.0, 1.0)
+
+    glitch = accent("horizontal glitch", glitch, .26, .10, aliases=("glitch",))
+    pixelate = accent("pixelation", pixelate, .18, .08)
+    rgb_split = accent("rgb displacement", rgb_split, .28, .08)
+    ripple = accent("ripple", ripple, .34, .09)
+    tunnel = accent("tunnel", tunnel, .14, .07)
+    posterize = accent("posterization", posterize, .22, .08)
+    edge = accent("edge extraction", edge, .18, .07, aliases=("edge",))
+    strobe = accent("strobe", strobe, .16, .08)
+    shutter = accent("shutter", shutter, .14, .07)
+    slit_scan = accent("slit scan", slit_scan, .26, .09)
+    frame_echo = accent("frame echo", frame_echo, .32, .10, aliases=("temporal echo",))
+    datamosh = accent("datamosh-like block displacement", datamosh, .24, .10, aliases=("datamosh",))
+    block_displace = accent("block displacement", block_displace, .28, .10)
+    chroma_delay = accent("chroma delay", chroma_delay, .28, .08, aliases=("temporal rgb displacement",))
+    vhs_tracking = accent("vhs tracking", vhs_tracking, .22, .08)
+    motion_trails = accent("motion trails", motion_trails, .32, .10)
+    slice_recursion = accent("slice recursion", slice_recursion, .18, .09)
 
     style_options = {
         "ambient": ("dream", "cinematic"),

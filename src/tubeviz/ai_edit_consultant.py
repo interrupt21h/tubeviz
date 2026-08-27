@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from .ai_resources import EFFECT_FAMILIES, HERO_EFFECTS, compact_candidate
+from .ai_resources import (
+    COMPOSITION_MODES, EFFECT_CATALOG, EFFECT_FAMILIES, HERO_EFFECTS,
+    compact_candidate, normalize_effect_name,
+)
 from .library import SceneCandidate
 from .models import Section
 from .settings import resolve_llm_api_key
@@ -84,22 +87,33 @@ def _prompt(section: Section, windows: list[tuple[float, float]], candidates: li
             for i, (a, b) in enumerate(windows)
         ],
         "bounded_candidates": [compact_candidate(c, score=s) for c, s in candidates],
-        "available_treatments": {"effect_families": EFFECT_FAMILIES, "hero_effects": HERO_EFFECTS},
+        "available_treatments": {
+            "effect_families": EFFECT_FAMILIES,
+            "hero_effects": HERO_EFFECTS,
+            "composition_modes": COMPOSITION_MODES,
+            "effect_catalog": EFFECT_CATALOG,
+        },
     }
     schema = {
         "shots": [{
             "shot_index": 0,
             "preferred_scene_ids": [123, 456, 789],
             "effect_family": "cinematic",
+            "preferred_effects": ["optical-flow warp", "motion trails"],
+            "effect_bias": 1.2,
+            "composition_mode": "flow",
+            "history_mode": "auto",
             "hero_kind": None,
-            "reason": "brief editorial reason grounded in the supplied candidates and song arc"
+            "reason": "brief editorial reason grounded in the supplied candidates, song arc and effect suitability"
         }]
     }
     return (
         "You are tubeviz's bounded AI edit consultant. The deterministic engine has already fixed the musical shot windows and supplied a small set of valid candidate scenes. "
         "You may ONLY rank scene_id values present in bounded_candidates. Never invent IDs, filenames, timestamps, clips, or effects. Prefer visual storytelling across the whole section: callbacks, contrast, human/abstract alternation, palette/motion progression, and payoff. "
         "Do not choose the same clip repeatedly unless repetition is narratively useful. Your choices are advisory soft preferences: tubeviz may reject them for hard trim, cooldown, duration, motif, or media constraints. "
-        "effect_family and hero_kind are optional; use hero effects rarely. Return strict JSON only.\n\n"
+        "For each shot, use the exact effect_catalog to judge which effects suit the supplied scene semantics, motion, complexity and the musical moment. preferred_effects must contain catalog names only. effect_bias controls occurrence density for this shot (0.5 restrained, 1 normal, 1.5 assertive), not raw amplitude. "
+        "composition_mode must be one of the supplied modes and should be used only when multiple sources improve the edit. history_mode may be auto, inherit or reset; inherit is useful for coherent temporal trails/feedback across related shots, while reset protects abrupt visual changes. "
+        "effect_family and hero_kind are optional; use hero effects as punctuation rather than wallpaper. Native render is the reference output, so prefer treatments marked native. Return strict JSON only.\n\n"
         f"Required schema:\n{json.dumps(schema, indent=2)}\n\n"
         f"Section edit context:\n{json.dumps(payload, indent=2)}"
     )
@@ -208,9 +222,34 @@ def consult_section(
         hero = str(hero).replace("_", " ") if hero else None
         if hero not in HERO_EFFECTS:
             hero = None
+        preferred_effects: list[str] = []
+        for value in item.get("preferred_effects", []):
+            name = normalize_effect_name(value)
+            if name and name not in preferred_effects:
+                preferred_effects.append(name)
+        try:
+            effect_bias = min(1.75, max(0.25, float(item.get("effect_bias", 1.0))))
+        except (TypeError, ValueError):
+            effect_bias = 1.0
+        composition = str(item.get("composition_mode") or "").strip().lower().replace("_", " ")
+        composition_aliases = {
+            "single source": "single", "flow blend": "flow", "luma blend": "luma",
+            "organic strips": "strips", "split reveal": "split", "flowing mosaic": "mosaic",
+            "source swap": "swap",
+        }
+        composition = composition_aliases.get(composition, composition)
+        if composition not in COMPOSITION_MODES:
+            composition = None
+        history_mode = str(item.get("history_mode") or "auto").strip().lower()
+        if history_mode not in {"auto", "inherit", "reset"}:
+            history_mode = "auto"
         result[index] = {
             "preferred_scene_ids": prefs,
             "effect_family": family,
+            "preferred_effects": preferred_effects[:8],
+            "effect_bias": effect_bias,
+            "composition_mode": composition,
+            "history_mode": history_mode,
             "hero_kind": hero,
             "reason": str(item.get("reason") or "")[:400],
         }

@@ -506,6 +506,10 @@ def _job_command(request: JobRequest) -> list[str]:
         if o.get("creative_effects", True) is False:
             command.append("--no-creative-effects")
         _flag(command, "--creative-intensity", o.get("creative_intensity", 1.0))
+        _flag(command, "--effect-density", o.get("effect_density", 1.0))
+        _flag(command, "--temporal-persistence", o.get("temporal_persistence", 1.0))
+        _flag(command, "--hero-frequency", o.get("hero_frequency", 1.0))
+        _flag(command, "--composition-diversity", o.get("composition_diversity", 1.0))
         _flag(command, "--target-unique-clips", o.get("target_unique_clips", 0))
         _flag(command, "--novelty-weight", o.get("novelty_weight", 0.65))
         _flag(command, "--visual-match-weight", o.get("visual_match_weight", 1.25))

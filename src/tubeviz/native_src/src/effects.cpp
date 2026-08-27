@@ -41,6 +41,12 @@ void ReactiveState::decay(double fps) {
     vortex *= decay_for(0.91, fps);
     bloom *= decay_for(0.92, fps);
     harmonic *= decay_for(0.94, fps);
+    tempo_warp *= decay_for(0.93, fps); punch *= decay_for(0.82, fps);
+    strobe *= decay_for(0.78, fps); tunnel *= decay_for(0.91, fps); kaleidoscope *= decay_for(0.90, fps);
+    edge *= decay_for(0.88, fps); slit_scan *= decay_for(0.90, fps); echo *= decay_for(0.91, fps);
+    corridor *= decay_for(0.91, fps); mask *= decay_for(0.90, fps); solarize *= decay_for(0.86, fps);
+    datamosh *= decay_for(0.89, fps); motion_trails *= decay_for(0.91, fps); slice_recursion *= decay_for(0.89, fps);
+    freeze *= decay_for(0.72, fps); switcher *= decay_for(0.70, fps);
 }
 
 void ReactiveState::apply(const Cue& cue) {
@@ -73,7 +79,23 @@ void ReactiveState::apply(const Cue& cue) {
         bloom = std::max(bloom, cue.amount);
     } else if (cue.action == "harmonic_warp") {
         harmonic = std::max(harmonic, cue.amount);
-    }
+    } else if (cue.action == "video_edit_tempo_warp" || cue.action == "tempo_shift") {
+        tempo_warp = std::max(tempo_warp, cue.amount);
+    } else if (cue.action == "video_edit_punch") punch = std::max(punch, cue.amount);
+    else if (cue.action == "video_edit_strobe") strobe = std::max(strobe, cue.amount);
+    else if (cue.action == "video_edit_tunnel") tunnel = std::max(tunnel, cue.amount);
+    else if (cue.action == "video_edit_kaleidoscope") kaleidoscope = std::max(kaleidoscope, cue.amount);
+    else if (cue.action == "video_edit_edge") edge = std::max(edge, cue.amount);
+    else if (cue.action == "video_edit_slitscan") slit_scan = std::max(slit_scan, cue.amount);
+    else if (cue.action == "video_edit_echo") echo = std::max(echo, cue.amount);
+    else if (cue.action == "video_edit_corridor") corridor = std::max(corridor, cue.amount);
+    else if (cue.action == "video_edit_mask") mask = std::max(mask, cue.amount);
+    else if (cue.action == "video_edit_solarize") solarize = std::max(solarize, cue.amount);
+    else if (cue.action == "video_edit_datamosh") datamosh = std::max(datamosh, cue.amount);
+    else if (cue.action == "video_edit_motion_trails") motion_trails = std::max(motion_trails, cue.amount);
+    else if (cue.action == "video_edit_slice_recursion" || cue.action == "video_edit_slice") slice_recursion = std::max(slice_recursion, cue.amount);
+    else if (cue.action == "video_edit_freeze") freeze = std::max(freeze, cue.amount > 0.0 ? cue.amount : 0.65);
+    else if (cue.action == "video_edit_switch") switcher = std::max(switcher, cue.amount > 0.0 ? cue.amount : 0.65);
 }
 
 double ReactiveState::beat_phase() const {
@@ -175,6 +197,54 @@ void apply_transform(
                 rgb[i + 1] = clamp8(g * gain);
                 rgb[i + 2] = clamp8(b * gain);
             }
+        }
+    }
+
+    // Match browser shot-local geometry before mirror.  The old native path
+    // serialized none of these fields, so native output could look noticeably
+    // flatter even when the timeline contained push/pan/rotation choreography.
+    const bool geometry = std::abs(t.zoom - 1.0) > 1e-4 || std::abs(t.pan_x) > 1e-4 ||
+                          std::abs(t.pan_y) > 1e-4 || std::abs(t.rotation_degrees) > 1e-4;
+    if (geometry) {
+        const auto src = rgb;
+        const double zoom = std::max(0.25, t.zoom);
+        const double angle = -t.rotation_degrees * 3.14159265358979323846 / 180.0;
+        const double ca = std::cos(angle), sa = std::sin(angle);
+        const double cx = (width - 1) * 0.5, cy = (height - 1) * 0.5;
+        const double px = t.pan_x * width, py = t.pan_y * height;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < width; ++x) {
+                const double dx = (x - cx - px) / zoom;
+                const double dy = (y - cy - py) / zoom;
+                const int sx = std::clamp(static_cast<int>(std::lround(cx + dx * ca - dy * sa)), 0, width - 1);
+                const int sy = std::clamp(static_cast<int>(std::lround(cy + dx * sa + dy * ca)), 0, height - 1);
+                const auto di = static_cast<std::size_t>((y * width + x) * 3);
+                const auto si = static_cast<std::size_t>((sy * width + sx) * 3);
+                rgb[di] = src[si]; rgb[di+1] = src[si+1]; rgb[di+2] = src[si+2];
+            }
+        }
+    }
+
+    if (t.blur_px > 0.35) {
+        const auto src = rgb;
+        const int radius = std::clamp(static_cast<int>(std::lround(t.blur_px)), 1, 3);
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
+            int sum[3]{0,0,0}, count = 0;
+            for (int yy = std::max(0, y-radius); yy <= std::min(height-1, y+radius); ++yy)
+                for (int xx = std::max(0, x-radius); xx <= std::min(width-1, x+radius); ++xx) {
+                    const auto si = static_cast<std::size_t>((yy*width+xx)*3);
+                    sum[0]+=src[si]; sum[1]+=src[si+1]; sum[2]+=src[si+2]; ++count;
+                }
+            const auto di = static_cast<std::size_t>((y*width+x)*3);
+            rgb[di]=static_cast<std::uint8_t>(sum[0]/count);
+            rgb[di+1]=static_cast<std::uint8_t>(sum[1]/count);
+            rgb[di+2]=static_cast<std::uint8_t>(sum[2]/count);
         }
     }
 
@@ -332,6 +402,112 @@ void apply_reactive_effects(
             rgb[static_cast<std::size_t>(i)] =
                 clamp8(rgb[static_cast<std::size_t>(i)] * gain);
         }
+    }
+}
+
+
+void apply_post_transform_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const Transform& t,
+    double progress,
+    double phase
+) {
+    if (rgb.empty() || width <= 0 || height <= 0) return;
+    auto amount = [](double v) { return std::clamp(v, 0.0, 1.0); };
+    const double ripple = amount(t.ripple), vortex = amount(t.vortex), tunnel = amount(t.tunnel);
+    const double kaleido = amount(t.kaleidoscope), tiles = amount(t.tiles), corridor = amount(t.mirror_corridor);
+    const double glitch = amount(t.glitch), block = amount(t.block_displace), vhs = amount(t.vhs_tracking);
+    const double recursion = amount(t.slice_recursion), pix = amount(t.pixelate);
+    const double split = amount(std::max(t.rgb_split, t.chroma_delay));
+    const bool spatial = ripple>.01 || vortex>.01 || tunnel>.01 || kaleido>.01 || tiles>.01 || corridor>.01 ||
+                         glitch>.01 || block>.01 || vhs>.01 || recursion>.01 || pix>.01 || split>.01;
+    if (spatial) {
+        const auto src = rgb;
+        const double cx=(width-1)*.5, cy=(height-1)*.5;
+        const int block_h=std::max(8, height/18), block_w=std::max(12, width/16);
+        const int pxstep = pix>.01 ? std::max(1, static_cast<int>(1 + pix*24)) : 1;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(int y=0;y<height;++y) for(int x=0;x<width;++x){
+            double sx=x, sy=y;
+            double nx=(x-cx)/std::max(1.0,cx), ny=(y-cy)/std::max(1.0,cy);
+            double r=std::hypot(nx,ny), a=std::atan2(ny,nx);
+            if(vortex>.01){ const double q=vortex*.42*(1.0-std::min(1.0,r)); a-=q; sx=cx+std::cos(a)*r*cx; sy=cy+std::sin(a)*r*cy; }
+            if(tunnel>.01){ const double z=1.0 + tunnel*.16*std::sin(phase*2.1+r*12.0); sx=cx+(sx-cx)/z; sy=cy+(sy-cy)/z; }
+            if(ripple>.01){ sx += std::sin((sy/height)*26.0+phase*3.4)*width*.010*ripple; sy += std::cos((sx/width)*21.0-phase*2.9)*height*.007*ripple; }
+            if(kaleido>.01){
+                const int seg=3+static_cast<int>(kaleido*7.0); const double sector=6.28318530717958647692/seg;
+                double aa=std::fmod(a+6.28318530717958647692,sector); if(aa>sector*.5) aa=sector-aa;
+                const double rr=r*(.96+.04*std::sin(phase)); sx=cx+std::cos(aa)*rr*cx; sy=cy+std::sin(aa)*rr*cy;
+            }
+            if(tiles>.01){
+                // Legacy "tiles" are organic local lenses rather than boxed copies.
+                const double gx=std::fmod((sx/width)*3.0+3.0,1.0)-.5, gy=std::fmod((sy/height)*2.0+2.0,1.0)-.5;
+                const double rr=std::hypot(gx,gy), lens=std::max(0.0,1.0-rr*2.0)*tiles;
+                sx += gx*width*.075*lens; sy += gy*height*.075*lens;
+            }
+            if(corridor>.01){ const double span=std::max(24.0,width*(.28-.12*corridor)); double q=std::fmod(sx+phase*width*.03,span*2.0); if(q>span)q=2*span-q; sx=q/span*(width-1); }
+            if(glitch>.01){ const int band=y/block_h; if(((band*37+static_cast<int>(phase*19))%7)<3) sx += std::sin(band*4.7+phase*9.0)*width*.055*glitch; }
+            if(block>.01){ const int bx=x/block_w, by=y/block_h; const double h=hash_noise(static_cast<std::uint64_t>(bx*131+by*977+static_cast<int>(phase*17))); sx += h*width*.08*block; sy += hash_noise(static_cast<std::uint64_t>(bx*733+by*199+3))*height*.035*block; }
+            if(vhs>.01){ sx += std::sin(y*.047+phase*11.0)*width*.018*vhs; if(((y+static_cast<int>(phase*91))%97)<3) sx += width*.10*vhs; }
+            if(recursion>.01){ const int band=std::max(1,height/10); if(((y/band)+static_cast<int>(phase*4))%3==1) sx=cx+(sx-cx)*(.82+.10*(1.0-recursion)); }
+            int ix=std::clamp(static_cast<int>(std::lround(sx)),0,width-1), iy=std::clamp(static_cast<int>(std::lround(sy)),0,height-1);
+            if(pxstep>1){ ix=(ix/pxstep)*pxstep; iy=(iy/pxstep)*pxstep; }
+            const auto di=static_cast<std::size_t>((y*width+x)*3), si=static_cast<std::size_t>((iy*width+ix)*3);
+            rgb[di]=src[si]; rgb[di+1]=src[si+1]; rgb[di+2]=src[si+2];
+            if(split>.01){
+                const int off=std::max(1,static_cast<int>(width*.018*split));
+                const int xr=std::clamp(ix+off,0,width-1), xb=std::clamp(ix-off,0,width-1);
+                rgb[di]=src[static_cast<std::size_t>((iy*width+xr)*3)];
+                rgb[di+2]=src[static_cast<std::size_t>((iy*width+xb)*3+2)];
+            }
+        }
+    }
+
+    if(t.posterize>.01 || t.solarize>.01 || t.edge>.01){
+        const auto src=rgb; const double post=amount(t.posterize), sol=amount(t.solarize), edge=amount(t.edge);
+        const int levels=std::max(2,static_cast<int>(10-7*post)); const double step=255.0/(levels-1);
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(int y=0;y<height;++y) for(int x=0;x<width;++x){
+            const auto i=static_cast<std::size_t>((y*width+x)*3);
+            for(int c=0;c<3;++c){ double v=src[i+c]; if(post>.01)v=std::round(v/step)*step; if(sol>.01 && v>128.0-sol*36.0)v=v*(1.0-sol)+ (255.0-v)*sol; rgb[i+c]=clamp8(v); }
+            if(edge>.01){
+                const int xr=std::min(width-1,x+1), yd=std::min(height-1,y+1);
+                const auto ir=static_cast<std::size_t>((y*width+xr)*3), id=static_cast<std::size_t>((yd*width+x)*3);
+                const double e=std::min(255.0,std::abs(src[i]-src[ir])+std::abs(src[i]-src[id]) + std::abs(src[i+1]-src[ir+1])*.5);
+                for(int c=0;c<3;++c) rgb[i+c]=clamp8(rgb[i+c]*(1.0-edge*.62)+e*edge*.92);
+            }
+        }
+    }
+
+    if(previous && previous->size()==rgb.size()){
+        const auto current=rgb;
+        const double echo=amount(std::max({t.feedback,t.frame_echo,t.motion_trails}));
+        const double slit=amount(t.slit_scan), mosh=amount(t.datamosh), wipe=amount(t.mask_wipe);
+        const bool shutter=t.shutter>.01 && std::fmod(phase*12.0,1.0)<amount(t.shutter)*.42;
+#ifdef TUBEVIZ_HAVE_OPENMP
+#pragma omp parallel for schedule(static)
+#endif
+        for(int y=0;y<height;++y) for(int x=0;x<width;++x){
+            const auto i=static_cast<std::size_t>((y*width+x)*3); double hist=echo;
+            if(slit>.01 && ((y/std::max(4,height/22)+static_cast<int>(phase*5))%4==1)) hist=std::max(hist,.20+.55*slit);
+            if(mosh>.01 && (((x/std::max(8,width/14))+(y/std::max(8,height/10))+static_cast<int>(phase*7))%7)<2) hist=std::max(hist,.18+.60*mosh);
+            if(wipe>.01){ const double boundary=(.15+.85*progress)*width; if(x < boundary + std::sin(y*.018)*width*.08) hist=std::max(hist,.45*wipe); }
+            if(shutter) hist=std::max(hist,.78*amount(t.shutter));
+            hist=std::clamp(hist,0.0,.88);
+            if(hist>.001) for(int c=0;c<3;++c) rgb[i+c]=clamp8(current[i+c]*(1.0-hist)+(*previous)[i+c]*hist);
+        }
+    }
+
+    if(t.strobe>.01){
+        const double st=amount(t.strobe); const double pulse=std::max(0.0,std::sin(phase*31.4159265359)); const double gain=1.0+st*.85*pulse;
+        for(auto& v:rgb)v=clamp8(v*gain);
     }
 }
 
@@ -1090,6 +1266,69 @@ void apply_vector_effects(
         else if(e.kind=="motif_glyph") draw_native_glyph(rgb,width,height,e,amount,phase);
         else if(e.kind=="vector_displacement") apply_native_displacement(rgb,width,height,e,amount,phase);
     }
+}
+
+void compose_layers(
+    std::vector<std::uint8_t>& dst,
+    const std::vector<std::vector<std::uint8_t>>& companions,
+    const std::vector<double>& opacities,
+    const std::vector<std::string>& blend_modes,
+    const std::string& mode,
+    int width,
+    int height,
+    double progress,
+    double phase
+) {
+    if(companions.empty()) return;
+    if(mode=="single") return;
+    if(mode=="luma" || mode=="flow") {
+        for(std::size_t n=0;n<companions.size();++n){
+            if(companions[n].size()!=dst.size())continue;
+            const double a=n<opacities.size()?opacities[n]:.55;
+            if(mode=="luma") blend_layer(dst,companions[n],a*.72,(n&1)?"multiply":"screen");
+            else {
+                // Organic traveling mask; unlike old full-frame overlay this keeps
+                // source identity while allowing companion footage to flow through.
+                const auto base=dst; const auto& src=companions[n];
+                const double cx=width*(.5+.24*std::sin(phase*.73+n*2.1));
+                const double cy=height*(.5+.19*std::cos(phase*.57+n*1.7));
+                const double rx=width*(.32+.10*std::sin(phase*.31+n));
+                const double ry=height*(.28+.08*std::cos(phase*.43+n));
+                for(int y=0;y<height;++y)for(int x=0;x<width;++x){
+                    const double q=std::sqrt(((x-cx)*(x-cx))/(rx*rx)+((y-cy)*(y-cy))/(ry*ry));
+                    const double mask=std::clamp((1.18-q)*2.5,0.0,1.0)*a;
+                    if(mask<=.001)continue; const auto i=static_cast<std::size_t>((y*width+x)*3);
+                    for(int c=0;c<3;++c)dst[i+c]=clamp8(base[i+c]*(1-mask)+src[i+c]*mask);
+                }
+            }
+        }
+        return;
+    }
+    if(mode=="strips"){
+        const int count=10+static_cast<int>(companions.size())*2; const int sw=std::max(1,width/count);
+        for(int x=0;x<width;++x){
+            const int strip=(x/sw+static_cast<int>(phase*2.4))%count;
+            if(strip%3==0)continue; const std::size_t n=static_cast<std::size_t>(strip)%companions.size();
+            const auto& src=companions[n]; if(src.size()!=dst.size())continue; const double a=(n<opacities.size()?opacities[n]:.6)*.86;
+            for(int y=0;y<height;++y){const auto i=static_cast<std::size_t>((y*width+x)*3);for(int c=0;c<3;++c)dst[i+c]=clamp8(dst[i+c]*(1-a)+src[i+c]*a);}
+        }
+        return;
+    }
+    if(mode=="split"){
+        const auto& src=companions.front(); if(src.size()!=dst.size())return; const double a=opacities.empty()?.75:opacities.front();
+        const double boundary=width*(.18+.64*progress)+std::sin(phase*1.8)*width*.09;
+        for(int y=0;y<height;++y)for(int x=0;x<width;++x){const double b=boundary+(y-height*.5)*.22; if(x>b)continue; const auto i=static_cast<std::size_t>((y*width+x)*3);for(int c=0;c<3;++c)dst[i+c]=clamp8(dst[i+c]*(1-a)+src[i+c]*a);}
+        return;
+    }
+    if(mode=="mosaic"){
+        const int cols=3, rows=2; const int cw=std::max(1,width/cols), ch=std::max(1,height/rows);
+        for(int y=0;y<height;++y)for(int x=0;x<width;++x){const int cell=(x/cw)+(y/ch)*cols+static_cast<int>(phase*.8); if(cell%3==0)continue; const std::size_t n=static_cast<std::size_t>(cell)%companions.size(); const auto& src=companions[n]; if(src.size()!=dst.size())continue; const double a=(n<opacities.size()?opacities[n]:.68)*.90; const auto i=static_cast<std::size_t>((y*width+x)*3);for(int c=0;c<3;++c)dst[i+c]=clamp8(dst[i+c]*(1-a)+src[i+c]*a);}
+        return;
+    }
+    if(mode=="swap"){
+        const std::size_t n=static_cast<std::size_t>(std::floor((progress*4.0+phase*.25)))%companions.size(); const auto& src=companions[n]; if(src.size()!=dst.size())return; const double a=std::clamp(.72+(n<opacities.size()?opacities[n]:.6)*.25,0.0,.94); blend_layer(dst,src,a,"normal"); return;
+    }
+    for(std::size_t n=0;n<companions.size();++n) blend_layer(dst,companions[n],n<opacities.size()?opacities[n]:.6,n<blend_modes.size()?blend_modes[n]:"normal");
 }
 
 void blend_layer(

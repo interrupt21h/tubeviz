@@ -25,6 +25,30 @@ struct Transform {
     double motion_trails{0.0};
     double frame_echo{0.0};
     double hue_degrees{0.0};
+    // v0.40 append-only browser/WebGPU parity fields.
+    double zoom{1.0};
+    double pan_x{0.0};
+    double pan_y{0.0};
+    double rotation_degrees{0.0};
+    double blur_px{0.0};
+    double feedback{0.0};
+    double glitch{0.0};
+    double kaleidoscope{0.0};
+    double tiles{0.0};
+    double tunnel{0.0};
+    double posterize{0.0};
+    double edge{0.0};
+    double strobe{0.0};
+    double shutter{0.0};
+    double slit_scan{0.0};
+    double mirror_corridor{0.0};
+    double mask_wipe{0.0};
+    double solarize{0.0};
+    double datamosh{0.0};
+    double block_displace{0.0};
+    double chroma_delay{0.0};
+    double vhs_tracking{0.0};
+    double slice_recursion{0.0};
 };
 
 struct Layer {
@@ -54,6 +78,7 @@ struct VectorEffect {
 
 struct CreativeEffect {
     int style_version{0};
+    double history_inherit{0.0};
     double flow_warp{0.0};
     double flow_trails{0.0};
     double flow_rgb{0.0};
@@ -117,6 +142,7 @@ struct Shot {
     double time{0.0};
     double timeline_end{0.0};
     double crossfade{0.0};
+    std::string composition_mode{"single"};
     Layer primary{};
     std::vector<Layer> companions;
     std::vector<VectorEffect> vector_effects;

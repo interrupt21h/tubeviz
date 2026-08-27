@@ -62,6 +62,7 @@ class WorkerGpuFinalizer{
       this.worker.postMessage({type:'render',id,effect,source,params},[effect,source]);return true;
     }catch(error){this._markFailed(error?.message||error);return false;}
   }
+  resetHistory(){if(!this.failed)this.worker.postMessage({type:'reset-history'});}
   async sync(){if(!this.lastPromise)return !this.failed;try{return await this.lastPromise;}catch(_){return false;}}
   close(){try{this.worker.terminate();}catch(_){}this._failAll('WebGPU worker closed');}
 }

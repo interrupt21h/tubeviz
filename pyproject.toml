@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tubeviz"
-version = "0.39.0"
+version = "0.40.0"
 description = "AI-directed music visualizer with a searchable local video clip library"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
@@ -20,6 +20,12 @@ dependencies = [
   "yt-dlp[default]>=2026.7.4",
   "opencv-python-headless>=4.10,<5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/interrupt21h/tubeviz"
+Repository = "https://github.com/interrupt21h/tubeviz.git"
+Issues = "https://github.com/interrupt21h/tubeviz/issues"
+Changelog = "https://github.com/interrupt21h/tubeviz/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [

@@ -9,15 +9,47 @@ import shutil
 from .library import ClipLibrary, SceneCandidate
 
 
-RASTER_EFFECTS = [
-    "source-preserving color grade", "virtual camera push/pan", "optical-flow warp",
-    "motion trails", "temporal echo", "temporal RGB displacement", "temporal smear",
-    "depth parallax", "background warp", "recursive feedback", "source-derived bloom",
-    "source-derived light streaks", "RGB displacement", "slit scan", "frame echo",
-    "mirror corridor", "mask wipe", "solarize", "datamosh-like block displacement",
-    "chroma delay", "VHS tracking", "vortex", "slice recursion", "kaleidoscope",
-    "pixelation", "posterization", "scanlines", "vignette", "ripple",
+EFFECT_CATALOG: list[dict[str, Any]] = [
+    {"name": "virtual camera", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.10, "best_for": "motion, builds, cinematic push/pan"},
+    {"name": "optical-flow warp", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.45, "best_for": "moving footage, liquid motion, energetic phrases"},
+    {"name": "beat-local deformation", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "beats, drops, bass and spectral accents"},
+    {"name": "depth parallax", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.20, "best_for": "architecture, landscapes, people, cinematic depth"},
+    {"name": "background warp", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "subject-preserving deformation"},
+    {"name": "ripple", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.30, "best_for": "bass, fluid footage, rhythmic accents"},
+    {"name": "vortex", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.60, "best_for": "abstract footage and payoff moments"},
+    {"name": "kaleidoscope", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.70, "best_for": "abstract/hypnotic punctuation"},
+    {"name": "mirror corridor", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.65, "best_for": "recursive or psychedelic punctuation"},
+    {"name": "mask wipe", "category": "transition", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "section transitions and source reveals"},
+    {"name": "tunnel", "category": "spatial", "native": True, "webgpu": True, "destructive": 0.50, "best_for": "driving motion, builds and peaks"},
+    {"name": "motion trails", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "moving footage, sustained energy"},
+    {"name": "temporal echo", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.30, "best_for": "tonal/dreamy passages and motif callbacks"},
+    {"name": "frame echo", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "beats, callbacks and sustained motion"},
+    {"name": "slit scan", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.55, "best_for": "percussive motion and time-smear accents"},
+    {"name": "temporal smear", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.55, "best_for": "flow, builds and payoff motion"},
+    {"name": "recursive feedback", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.50, "best_for": "hypnotic, dream and recursive passages"},
+    {"name": "datamosh", "category": "temporal", "native": True, "webgpu": True, "destructive": 0.75, "best_for": "fractured/glitch peaks and transitions"},
+    {"name": "block displacement", "category": "glitch", "native": True, "webgpu": True, "destructive": 0.60, "best_for": "percussive/glitch accents"},
+    {"name": "horizontal glitch", "category": "glitch", "native": True, "webgpu": True, "destructive": 0.55, "best_for": "high-frequency and noisy accents"},
+    {"name": "VHS tracking", "category": "glitch", "native": True, "webgpu": True, "destructive": 0.40, "best_for": "analog/dark passages"},
+    {"name": "slice recursion", "category": "glitch", "native": True, "webgpu": True, "destructive": 0.65, "best_for": "dense or fractured rhythmic sections"},
+    {"name": "RGB displacement", "category": "color-motion", "native": True, "webgpu": True, "destructive": 0.30, "best_for": "treble, motion and energetic accents"},
+    {"name": "temporal RGB displacement", "category": "color-motion", "native": True, "webgpu": True, "destructive": 0.40, "best_for": "time-shifted chromatic motion"},
+    {"name": "chroma delay", "category": "color-motion", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "electronic and dream passages"},
+    {"name": "source-preserving color grade", "category": "color", "native": True, "webgpu": True, "destructive": 0.05, "best_for": "coherent section color direction"},
+    {"name": "source-derived bloom", "category": "texture", "native": True, "webgpu": True, "destructive": 0.10, "best_for": "bright peaks, night lights and payoff"},
+    {"name": "source-derived light streaks", "category": "texture", "native": True, "webgpu": True, "destructive": 0.15, "best_for": "night/city motion and energetic footage"},
+    {"name": "pixelation", "category": "stylize", "native": True, "webgpu": True, "destructive": 0.50, "best_for": "digital/glitch accents"},
+    {"name": "posterization", "category": "stylize", "native": True, "webgpu": True, "destructive": 0.45, "best_for": "graphic/high-energy punctuation"},
+    {"name": "solarize", "category": "stylize", "native": True, "webgpu": True, "destructive": 0.60, "best_for": "dark/fractured/payoff accents"},
+    {"name": "edge extraction", "category": "stylize", "native": True, "webgpu": True, "destructive": 0.45, "best_for": "complex/noisy footage and transitions"},
+    {"name": "scanlines", "category": "texture", "native": True, "webgpu": True, "destructive": 0.15, "best_for": "analog texture"},
+    {"name": "vignette", "category": "texture", "native": True, "webgpu": True, "destructive": 0.05, "best_for": "cinematic focus"},
+    {"name": "strobe", "category": "rhythmic", "native": True, "webgpu": True, "destructive": 0.50, "best_for": "high-energy peaks and strong beats"},
+    {"name": "shutter", "category": "rhythmic", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "dense percussion and rhythmic freezes"},
 ]
+
+RASTER_EFFECTS = [item["name"] for item in EFFECT_CATALOG]
+EFFECT_NAMES = frozenset(RASTER_EFFECTS)
 VECTOR_EFFECTS = [
     "contours", "semantic outline", "flow ribbons", "flow particles", "vector echo",
     "perspective grid", "Delaunay fracture", "Voronoi", "portal", "motif glyph",
@@ -28,8 +60,27 @@ CODEC_EFFECTS = [
     "motion-vector spiral", "motion-vector shear", "motion-vector radial wave",
 ]
 HERO_EFFECTS = ["subject echo", "flow melt", "depth burst", "time prism", "recursive portal"]
-COMPOSITION_MODES = ["single source", "flow blend", "luma blend", "organic strips"]
+COMPOSITION_MODES = ["single", "flow", "luma", "strips", "split", "mosaic", "swap"]
 EFFECT_FAMILIES = ["dream", "liquid", "analog", "fracture", "hyper", "prismatic", "cinematic"]
+
+
+def normalize_effect_name(value: Any) -> str | None:
+    raw = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    aliases = {
+        "flow warp": "optical-flow warp", "optical flow warp": "optical-flow warp",
+        "beat warp": "beat-local deformation", "beat deformation": "beat-local deformation",
+        "rgb split": "RGB displacement", "rgb displacement": "RGB displacement",
+        "temporal rgb": "temporal RGB displacement", "temporal rgb displacement": "temporal RGB displacement",
+        "vhs": "VHS tracking", "vhs tracking": "VHS tracking",
+        "posterize": "posterization", "edge": "edge extraction", "glitch": "horizontal glitch",
+        "feedback": "recursive feedback", "bloom": "source-derived bloom", "streaks": "source-derived light streaks",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    for name in RASTER_EFFECTS:
+        if name.lower() == raw:
+            return name
+    return None
 
 
 def _bucket_hue(hue: float) -> str:
@@ -167,6 +218,7 @@ def build_resource_manifest(library: ClipLibrary, selector_config: Any, *, repre
         },
         "renderer": {
             "effect_families": EFFECT_FAMILIES,
+            "effect_catalog": EFFECT_CATALOG if creative_enabled else [],
             "raster_creative": RASTER_EFFECTS if creative_enabled else [],
             "vector": VECTOR_EFFECTS if vector_enabled else [],
             "codec": {
@@ -181,7 +233,13 @@ def build_resource_manifest(library: ClipLibrary, selector_config: Any, *, repre
                 "creative_enabled": creative_enabled,
                 "vector_enabled": vector_enabled,
                 "max_video_layers": int(getattr(selector_config, "max_video_layers", 1)),
-                "source_fidelity_default": "high; source footage remains primary except sparse hero moments",
+                "source_fidelity_default": "high, but effect density can deliberately raise event frequency while preserving recognisable source imagery",
+                "effect_density": round(float(getattr(selector_config, "effect_density", 1.0)), 3),
+                "temporal_persistence": round(float(getattr(selector_config, "temporal_persistence", 1.0)), 3),
+                "composition_diversity": round(float(getattr(selector_config, "composition_diversity", 1.0)), 3),
+                "hero_frequency": round(float(getattr(selector_config, "hero_frequency", 1.0)), 3),
+                "native_reference_output": True,
+                "native_webgpu_effect_parity": "All listed raster effects are available to native output; GPU creative passes may be followed by native CPU post effects.",
             },
         },
         "planning_contract": {

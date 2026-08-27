@@ -54,6 +54,33 @@ Transform parse_transform(const std::vector<std::string>& f, std::size_t base) {
     t.motion_trails = as_double(f, base + 14, 0.0);
     t.frame_echo = as_double(f, base + 15, 0.0);
     t.hue_degrees = as_double(f, base + 16, 0.0);
+    // v0.40 appends 23 fields after the historical 17-field transform.
+    // Older manifests therefore retain their exact defaults.
+    if (f.size() >= base + 40) {
+        t.zoom = as_double(f, base + 17, 1.0);
+        t.pan_x = as_double(f, base + 18, 0.0);
+        t.pan_y = as_double(f, base + 19, 0.0);
+        t.rotation_degrees = as_double(f, base + 20, 0.0);
+        t.blur_px = as_double(f, base + 21, 0.0);
+        t.feedback = as_double(f, base + 22, 0.0);
+        t.glitch = as_double(f, base + 23, 0.0);
+        t.kaleidoscope = as_double(f, base + 24, 0.0);
+        t.tiles = as_double(f, base + 25, 0.0);
+        t.tunnel = as_double(f, base + 26, 0.0);
+        t.posterize = as_double(f, base + 27, 0.0);
+        t.edge = as_double(f, base + 28, 0.0);
+        t.strobe = as_double(f, base + 29, 0.0);
+        t.shutter = as_double(f, base + 30, 0.0);
+        t.slit_scan = as_double(f, base + 31, 0.0);
+        t.mirror_corridor = as_double(f, base + 32, 0.0);
+        t.mask_wipe = as_double(f, base + 33, 0.0);
+        t.solarize = as_double(f, base + 34, 0.0);
+        t.datamosh = as_double(f, base + 35, 0.0);
+        t.block_displace = as_double(f, base + 36, 0.0);
+        t.chroma_delay = as_double(f, base + 37, 0.0);
+        t.vhs_tracking = as_double(f, base + 38, 0.0);
+        t.slice_recursion = as_double(f, base + 39, 0.0);
+    }
     return t;
 }
 
@@ -109,6 +136,7 @@ Manifest load_manifest(const std::string& path) {
             shot.primary.opacity = as_double(f, 7, 1.0);
             shot.primary.blend_mode = "normal";
             shot.primary.transform = parse_transform(f, 8);
+            if (f.size() >= 49) shot.composition_mode = f[48];
             manifest.shots.push_back(std::move(shot));
             current = &manifest.shots.back();
         } else if (f[0] == "LAYER") {
@@ -213,6 +241,7 @@ Manifest load_manifest(const std::string& path) {
                 c.color_brightness = as_double(f, 97, 1.0);
             }
             if (f.size() >= 99) c.style_version = static_cast<int>(as_double(f, 98, 0.0));
+            if (f.size() >= 100) c.history_inherit = std::clamp(as_double(f, 99, 0.0), 0.0, 1.0);
         } else if (f[0] == "VEC") {
             if (!current) throw std::runtime_error("VEC before SHOT at line " + std::to_string(line_no));
             if (f.size() < 17) throw std::runtime_error("invalid VEC line " + std::to_string(line_no));

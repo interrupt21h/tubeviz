@@ -612,6 +612,8 @@ def build_visual_direction(
     shot_progress: float = 0.5,
     creative_enabled: bool = True,
     creative_intensity: float = 1.0,
+    effect_density: float = 1.0,
+    preferred_effects: list[str] | tuple[str, ...] = (),
     vector_enabled: bool = True,
     vector_intensity: float = 1.0,
     codec_glitch_mode: str = "off",
@@ -728,6 +730,8 @@ def build_visual_direction(
         shot_index=shot_index_in_section,
         shot_progress=shot_progress,
         intensity=(creative_intensity if creative_enabled else 0.0),
+        density=effect_density,
+        preferred_effects=preferred_effects,
     )
 
     return VisualDirection(

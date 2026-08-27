@@ -1,3 +1,26 @@
+# 0.40.0 — Dynamic effect choreography and native parity
+
+- Separate **effect density** from effect intensity. Density controls how often special effects become visibly active, so High Energy / EDM / Experimental treatments can use the renderer's full vocabulary more frequently without simply amplifying a few already-selected effects.
+- Add independent **temporal persistence**, **composition diversity**, and **hero frequency** controls. Related shots can intentionally inherit trails/feedback, multi-source edits can use animated split/mosaic/source-swap grammars, and hero-treatment spacing can scale with the requested style.
+- Extend every Studio analysis preset with curated values for the four choreography controls. Relaxed/Cinematic remain restrained; High Energy, EDM and Experimental explicitly increase event density and composition variety; Dreamy favors temporal continuity.
+- Make the CLAP semantic director and whole-song LLM director effect-aware. Section plans now carry effect density, temporal persistence, composition diversity, hero frequency, preferred effects, and preferred composition, with the exact renderer effect catalog and suitability/destructiveness metadata included in the LLM resource manifest.
+- Expand the bounded AI edit consultant from scene ranking plus broad effect-family selection to per-shot effect recommendations, density bias, composition mode, and temporal-history policy. Suggestions are validated against the actual effect catalog before entering deterministic planning.
+- Restore controlled cross-cut temporal continuity. Ordinary unrelated cuts still reset history, while motif callbacks, compatible effect families, high-continuity sections, temporal heroes, or explicit AI advice can preserve feedback/trails. WebGPU GPU-resident history now obeys the same reset/inherit policy as Canvas and native output.
+- Add dynamic full-frame `split`, `mosaic`, and `swap` composition grammars to browser and native renderers instead of silently remapping them to `flow`.
+- Close the major native/WebGPU transform gap. Native manifests now append zoom/pan/rotation/blur plus feedback, glitch, kaleidoscope/organic tiles, tunnel, posterize, edge, strobe/shutter, slit-scan, mirror corridor, mask wipe, solarize, datamosh, block displacement, chroma delay, VHS tracking, and slice recursion. Older manifests remain readable.
+- Add a native post-composite parity stage that executes those video-first effects after the optional Vulkan creative pass, so GPU creative rendering does not suppress browser-visible effects. Native remains the reference final-output backend even when an effect is implemented as a CPU post pass.
+- Serialize and interpret the browser's timed effect cues in native rendering, including tempo warp, punch, strobe, tunnel, kaleidoscope, edge, slit-scan, echo, corridor, mask, solarize, datamosh, trails, slice recursion, freeze-like shutter and source-switch accents.
+- Fix libplacebo API compatibility around `pl_gpu_limits.host_ptr_slow`: the optimization is used only on API 360+, avoiding the Ubuntu/libplacebo v6 build break while retaining newer-GPU behavior.
+- Add regression coverage for density-driven effect occurrence, temporal persistence, hero scaling, dynamic composition modes, AI effect awareness, append-only native manifests, and native/WebGPU parity plumbing.
+
+# 0.39.1 — GitHub CI and repository metadata
+
+- Replace the README installation placeholder with the canonical clone URL `https://github.com/interrupt21h/tubeviz.git` and publish the repository, issue tracker, and changelog URLs in Python package metadata.
+- Add GitHub Actions CI for pushes to `main`, pull requests, and manual runs. The Python test matrix covers CPython 3.11, 3.12, 3.13, and 3.14 with FFmpeg available so media-dependent regression tests can execute instead of being skipped solely because the runner lacks FFmpeg.
+- Add CI package validation that builds both sdist and wheel, runs `twine check`, installs the wheel into a clean virtual environment, validates package dependencies, checks Python bytecode compilation and browser JavaScript syntax, and archives the built distributions.
+- Add a portable native-renderer build job using Ubuntu FFmpeg development libraries, followed by native `--version` and `--help` smoke tests. Optional libplacebo/Vulkan integration is kept out of the baseline CI gate because supported distribution releases expose materially different libplacebo APIs.
+- Upload JUnit XML results from every Python matrix job even when a test job fails, use read-only repository permissions, cancel superseded runs on the same ref, and bound job runtimes with explicit timeouts.
+
 # 0.39.0 — Analysis presets
 
 - Add a centralized analysis-preset catalog with **Balanced**, **High Energy**, **EDM**, **Relaxed**, **Vibrant**, **Cinematic**, **Dreamy / Atmospheric**, and **Experimental / Glitch** treatments. Presets coordinate phrase size, shot duration, clip novelty, visual matching, transition continuity, build/drop trajectory, compositing, transforms, creative/vector effects, CLAP temporal resolution, and audio↔visual matching as one coherent editing style.

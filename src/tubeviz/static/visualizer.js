@@ -245,7 +245,8 @@ async function activateScene(scene,{immediate=false}={}){
     // Ordinary scene changes start with clean temporal/color history.  Only the
     // explicitly cross-shot hero treatments are allowed to inherit old frames.
     const temporalHero=['flow_melt','subject_echo','time_prism','recursive_portal'].includes(scene?.direction?.creative?.hero_kind??'');
-    resetTemporalFxState(temporalHero);
+    const inheritHistory=Number(scene?.direction?.creative?.history_inherit??0)>.04;
+    resetTemporalFxState(temporalHero||inheritHistory);
     activeScene={...scene};focusLayer=0;resetVectorMotionState();
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
@@ -313,13 +314,30 @@ function drawFlowLayer(state,index,alpha){
 }
 function drawBank(bankIndex,alpha){
   const states=bankState[bankIndex];if(!states.length)return;let mode=bankMode[bankIndex]??'single';
-  if(['pip','split','mosaic'].includes(mode))mode='flow';
+  if(mode==='pip')mode='flow';
   const order=states.map((_,i)=>(i+focusLayer)%states.length);
 
   if(mode==='flow'&&states.length>1){
     drawLayer(fx,states[order[0]],{x:0,y:0,w:width,h:height},alpha,'source-over');
     for(let oi=1;oi<order.length;oi++)drawFlowLayer(states[order[oi]],oi,alpha);
     return;
+  }
+
+  if(mode==='split'&&states.length>1){
+    drawLayer(fx,states[order[0]],{x:0,y:0,w:width,h:height},alpha,'source-over');
+    const state=states[order[1]],boundary=width*(.18+.64*directedProgress())+Math.sin(phase*.45)*width*.08;
+    fx.save();fx.beginPath();fx.moveTo(0,0);fx.lineTo(boundary-height*.11,0);fx.lineTo(boundary+height*.11,height);fx.lineTo(0,height);fx.closePath();fx.clip();
+    drawLayer(fx,state,{x:0,y:0,w:width,h:height},alpha*.82,state.layer.blend_mode||'source-over');fx.restore();return;
+  }
+  if(mode==='mosaic'&&states.length>1){
+    const cols=3,rows=2,cw=width/cols,ch=height/rows,shift=Math.floor(phase*.22);
+    for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
+      const cell=row*cols+col,idx=order[(cell+shift)%order.length]; if(cell%3===0)continue;
+      fx.save();fx.beginPath();fx.rect(col*cw,row*ch,cw+.5,ch+.5);fx.clip();drawLayer(fx,states[idx],{x:0,y:0,w:width,h:height},alpha*.86,states[idx].layer.blend_mode||'source-over');fx.restore();
+    }return;
+  }
+  if(mode==='swap'&&states.length>1){
+    const idx=order[Math.floor((directedProgress()*4+phase*.06))%order.length];drawLayer(fx,states[idx],{x:0,y:0,w:width,h:height},alpha,'source-over');return;
   }
 
   if(mode==='strips'&&states.length>1){
@@ -597,6 +615,7 @@ function resetTemporalFxState(preserve=false){
   delayWrite=0;delayCount=0;historyReady=false;
   for(let i=0;i<delayBuffers.length;i++){const c=delayCtx[i],b=delayBuffers[i];c.clearRect(0,0,b.width,b.height);}
   historyCtx.clearRect(0,0,width,height);
+  browserGpuFinalizer?.resetHistory?.();
 }
 function applySlitScan(amount){
   if(amount<=.025)return;
