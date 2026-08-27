@@ -52,10 +52,10 @@ workflow.
   },
   "flowchart": {
     "curve": "basis",
-    "htmlLabels": true,
+    "htmlLabels": false,
     "nodeSpacing": 48,
     "rankSpacing": 58,
-    "diagramPadding": 18
+    "diagramPadding": 20
   }
 }}%%
 
@@ -970,18 +970,70 @@ Tubeviz can use several independent acceleration paths. Availability of one does
 imply availability of the others.
 
 ```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "#ffffff",
+    "primaryTextColor": "#f8fafc",
+    "textColor": "#f8fafc",
+    "lineColor": "#64748b",
+    "edgeLabelBackground": "#1e293b",
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "fontSize": "16px"
+  },
+  "themeCSS": "
+    .edgeLabel {
+      background-color: #1e293b !important;
+      color: #f8fafc !important;
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .edgeLabel p {
+      color: #f8fafc !important;
+      background-color: #1e293b !important;
+    }
+    .label text,
+    .nodeLabel {
+      font-weight: 600;
+    }
+  ",
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 45,
+    "rankSpacing": 60
+  }
+}}%%
+
 flowchart LR
     SRC["Source video"] --> DECODE{"Source decode"}
-    DECODE -->|CUDA/NVDEC| CUDA["NVIDIA decode"]
-    DECODE -->|software| CPUDEC["CPU decode"]
+
+    DECODE -->|"CUDA / NVDEC"| CUDA["NVIDIA decode"]
+    DECODE -->|"Software"| CPUDEC["CPU decode"]
 
     CUDA --> FX{"Creative FX"}
     CPUDEC --> FX
-    FX -->|libplacebo/Vulkan| VK["GPU effects"]
-    FX -->|CPU| CPUFX["CPU effects"]
 
-    VK --> ENC["FFmpeg output encoder"]
+    FX -->|"libplacebo / Vulkan"| VK["GPU effects"]
+    FX -->|"CPU"| CPUFX["CPU effects"]
+
+    VK --> ENC["FFmpeg encoder"]
     CPUFX --> ENC
+
+    classDef source fill:#172033,stroke:#64748b,stroke-width:2px,color:#f8fafc
+    classDef decision fill:#4c1d5f,stroke:#a855f7,stroke-width:2px,color:#ffffff
+    classDef gpu fill:#06384a,stroke:#06b6d4,stroke-width:2.5px,color:#ecfeff
+    classDef cpu fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#f8fafc
+    classDef output fill:#641747,stroke:#ec4899,stroke-width:2.5px,color:#ffffff
+
+    class SRC source
+    class DECODE,FX decision
+    class CUDA,VK gpu
+    class CPUDEC,CPUFX cpu
+    class ENC output
+
+    linkStyle 0 stroke:#64748b,stroke-width:2px
+    linkStyle 1,3,5,7 stroke:#06b6d4,stroke-width:3px
+    linkStyle 2,4,6,8 stroke:#64748b,stroke-width:2px
 ```
 
 ### Native diagnostics
