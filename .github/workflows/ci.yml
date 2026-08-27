@@ -119,9 +119,13 @@ jobs:
           retention-days: 14
 
   native-build:
-    name: Native renderer
+    name: Native renderer (${{ matrix.placebo }})
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        placebo: [OFF, ON]
 
     steps:
       - name: Checkout
@@ -138,20 +142,22 @@ jobs:
             libavformat-dev \
             libavcodec-dev \
             libavutil-dev \
-            libswscale-dev
+            libswscale-dev \
+            libplacebo-dev \
+            libvulkan-dev
 
       - name: Configure native renderer
         run: |
           cmake \
             -S src/tubeviz/native_src \
-            -B build/native \
+            -B build/native-${{ matrix.placebo }} \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTUBEVIZ_WITH_PLACEBO=OFF
+            -DTUBEVIZ_WITH_PLACEBO=${{ matrix.placebo }}
 
       - name: Build native renderer
-        run: cmake --build build/native --parallel 2
+        run: cmake --build build/native-${{ matrix.placebo }} --parallel 2
 
       - name: Native smoke tests
         run: |
-          build/native/tubeviz-native-render --version
-          build/native/tubeviz-native-render --help
+          build/native-${{ matrix.placebo }}/tubeviz-native-render --version
+          build/native-${{ matrix.placebo }}/tubeviz-native-render --help
