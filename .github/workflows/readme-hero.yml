@@ -1,0 +1,53 @@
+name: Update README hero
+
+"on":
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use Dream preview as README hero
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('README.md')
+          s = p.read_text()
+
+          top_image = '![tubeviz Studio — Create](screenshots/screenshot-create.png)\n\n'
+          if s.startswith(top_image):
+              s = s[len(top_image):]
+
+          badge = '[![CI](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml)'
+          hero = '> AI-directed, beat-synchronized music video generation from a curated video library.\n\n![tubeviz demo — Dream](dream.webp)'
+
+          if hero not in s:
+              marker = badge + '\n\n'
+              if marker not in s:
+                  raise SystemExit('CI badge marker not found')
+              s = s.replace(marker, marker + hero + '\n\n', 1)
+
+          # Dream is the hero now; avoid a duplicate copy in Sample videos.
+          s = s.replace('\n![tubeviz sample video — Dream](dream.webp)\n', '\n', 1)
+
+          p.write_text(s)
+          PY
+
+          if git diff --quiet -- README.md; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md
+          git commit -m 'Use Dream animation as README hero'
+          git push
