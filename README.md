@@ -17,6 +17,8 @@ timeline format.
 
 Complete videos produced with tubeviz:
 
+![tubeviz sample video — Dream](dream.webp)
+
 - [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
 - [Tubeviz - Night Tapes - Drifting](https://youtu.be/Z5qFih1OKeo)
 - [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
