@@ -73,7 +73,7 @@ def test_ai_director_knows_density_persistence_composition_and_effect_catalog(tm
         assert key in prompt
     assert 'Native render is the reference output' in prompt
     direction=semantic_direction(_section(audio_semantics={'kinetic':.5,'explosive':.3,'bass_heavy':.2}))
-    assert direction.effect_density > 1.0
+    assert .55 <= direction.effect_density <= 1.35
 
 
 def test_native_webgpu_parity_contract_is_present_in_source():
@@ -87,3 +87,47 @@ def test_native_webgpu_parity_contract_is_present_in_source():
     assert 'compose_layers' in effects
     for mode in ('split','mosaic','swap'):
         assert f'mode=="{mode}"' in effects
+
+
+def test_source_first_defaults_keep_destructive_post_fx_sparse():
+    assert TransformConfig().density < 1.0
+    assert ANALYSIS_PRESETS['balanced']['parameters']['effect_density'] < 1.0
+    sec = _section(ai_direction=None)
+    names = (
+        'glitch', 'pixelate', 'tunnel', 'posterize', 'edge', 'strobe',
+        'shutter', 'slit_scan', 'datamosh', 'block_displace',
+        'vhs_tracking', 'slice_recursion',
+    )
+    active = total = 0
+    for i in range(64):
+        sel = _selection(i).model_copy(update={'scene_id': i + 100, 'source_id': f'default-{i}', 'motif_id': str(i)})
+        t = plan_transform(sec, sel, TransformConfig(intensity=1.2))
+        active += sum(getattr(t, name) > .01 for name in names)
+        total += len(names)
+    assert active < total * .30
+
+
+def test_hero_moment_promotes_compatible_accents_without_global_enablement():
+    sec = _section(ai_direction=None)
+    normal_total = hero_total = 0.0
+    names = ('rgb_split', 'chroma_delay', 'slit_scan')
+    for i in range(48):
+        sel = _selection(i).model_copy(update={'scene_id': i + 200, 'source_id': f'hero-{i}', 'motif_id': str(i)})
+        normal = plan_transform(sec, sel, TransformConfig(intensity=1.25, density=.55))
+        creative = sel.direction.creative.model_copy(update={'hero_kind': 'time_prism'})
+        hero_sel = sel.model_copy(update={'direction': sel.direction.model_copy(update={'creative': creative})})
+        hero = plan_transform(sec, hero_sel, TransformConfig(intensity=1.25, density=.55))
+        normal_total += sum(getattr(normal, name) for name in names)
+        hero_total += sum(getattr(hero, name) for name in names)
+    assert hero_total > normal_total
+
+
+def test_high_energy_and_experimental_raise_effect_budget_over_balanced():
+    balanced = ANALYSIS_PRESETS['balanced']['parameters']
+    high = ANALYSIS_PRESETS['high-energy']['parameters']
+    edm = ANALYSIS_PRESETS['edm']['parameters']
+    experimental = ANALYSIS_PRESETS['experimental']['parameters']
+    assert high['effect_density'] > edm['effect_density'] > balanced['effect_density']
+    assert high['hero_frequency'] > balanced['hero_frequency']
+    assert experimental['effect_density'] > high['effect_density']
+    assert experimental['hero_frequency'] > high['hero_frequency']

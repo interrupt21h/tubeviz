@@ -100,7 +100,7 @@ def _prompt(section: Section, windows: list[tuple[float, float]], candidates: li
             "preferred_scene_ids": [123, 456, 789],
             "effect_family": "cinematic",
             "preferred_effects": ["optical-flow warp", "motion trails"],
-            "effect_bias": 1.2,
+            "effect_bias": 0.75,
             "composition_mode": "flow",
             "history_mode": "auto",
             "hero_kind": None,
@@ -111,7 +111,7 @@ def _prompt(section: Section, windows: list[tuple[float, float]], candidates: li
         "You are tubeviz's bounded AI edit consultant. The deterministic engine has already fixed the musical shot windows and supplied a small set of valid candidate scenes. "
         "You may ONLY rank scene_id values present in bounded_candidates. Never invent IDs, filenames, timestamps, clips, or effects. Prefer visual storytelling across the whole section: callbacks, contrast, human/abstract alternation, palette/motion progression, and payoff. "
         "Do not choose the same clip repeatedly unless repetition is narratively useful. Your choices are advisory soft preferences: tubeviz may reject them for hard trim, cooldown, duration, motif, or media constraints. "
-        "For each shot, use the exact effect_catalog to judge which effects suit the supplied scene semantics, motion, complexity and the musical moment. preferred_effects must contain catalog names only. effect_bias controls occurrence density for this shot (0.5 restrained, 1 normal, 1.5 assertive), not raw amplitude. "
+        "For each shot, use the exact effect_catalog and its tier/default_policy to judge which effects suit the supplied scene semantics, motion, complexity and the musical moment. preferred_effects must contain catalog names only, and an empty list is often the correct source-first choice. effect_bias controls occurrence density for this shot (about 0.6–0.9 ordinary, 1 normal, above 1 only for a strong build/peak/hero), not raw amplitude. Core effects may remain subtle; accent effects should be absent on most shots; hero-tier effects should normally accompany an actual hero/payoff decision. "
         "composition_mode must be one of the supplied modes and should be used only when multiple sources improve the edit. history_mode may be auto, inherit or reset; inherit is useful for coherent temporal trails/feedback across related shots, while reset protects abrupt visual changes. "
         "effect_family and hero_kind are optional; use hero effects as punctuation rather than wallpaper. Native render is the reference output, so prefer treatments marked native. Return strict JSON only.\n\n"
         f"Required schema:\n{json.dumps(schema, indent=2)}\n\n"
@@ -228,9 +228,11 @@ def consult_section(
             if name and name not in preferred_effects:
                 preferred_effects.append(name)
         try:
-            effect_bias = min(1.75, max(0.25, float(item.get("effect_bias", 1.0))))
+            effect_bias = min(1.75, max(0.25, float(item.get("effect_bias", 0.75))))
         except (TypeError, ValueError):
-            effect_bias = 1.0
+            effect_bias = 0.75
+        if hero is None:
+            effect_bias = min(effect_bias, 1.25 if section.label in {"build", "peak"} else 1.0)
         composition = str(item.get("composition_mode") or "").strip().lower().replace("_", " ")
         composition_aliases = {
             "single source": "single", "flow blend": "flow", "luma blend": "luma",

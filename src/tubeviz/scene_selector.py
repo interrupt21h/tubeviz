@@ -55,12 +55,12 @@ class SceneSelectorConfig:
     # Intensity controls amplitude; density controls how often punctuation is
     # scheduled.  The latter deliberately restores dynamic range without making
     # every active effect stronger.
-    effect_density: float = 1.0
-    temporal_persistence: float = 1.0
-    hero_frequency: float = 1.0
+    effect_density: float = 0.65
+    temporal_persistence: float = 0.75
+    hero_frequency: float = 0.90
     max_video_layers: int = 3
     composition_intensity: float = 1.0
-    composition_diversity: float = 1.0
+    composition_diversity: float = 0.70
     selection_seed: int = 0
     selection_variation: float = 0.30
     # Novelty-aware editing. target_unique_clips=0 means auto.
@@ -1041,7 +1041,7 @@ def build_scene_plan(
             comp_diversity = max(0.0, min(2.5, cfg.composition_diversity))
             if section.ai_direction is not None:
                 comp_strength *= .68 + .48*section.ai_direction.desired_complexity + .14*(1-section.ai_direction.continuity)
-                comp_diversity *= section.ai_direction.composition_diversity
+                comp_diversity *= .60 + .40 * section.ai_direction.composition_diversity
                 comp_strength = max(0.0, min(2.0, comp_strength))
                 comp_diversity = max(0.0, min(2.5, comp_diversity))
             comp_diversity = max(0.0, min(2.5, comp_diversity * advice_bias))

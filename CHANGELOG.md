@@ -1,3 +1,13 @@
+# 0.40.1 — Source-first effect scheduling
+
+- Restore the pre-v0.40 source-first visual balance by making destructive/stylized `VideoTransform` effects true scheduled accents instead of non-zero treatments on nearly every shot. Native/WebGPU parity remains intact; ordinary shots now serialize near-zero/off values and selected accent/hero shots serialize the full effect values.
+- Keep low-impact camera/depth/source-fidelity treatment available continuously, while feedback, glitch, pixelation, RGB displacement, ripple, tunnel, posterization, edge extraction, strobe/shutter, slit-scan, datamosh, block displacement, chroma delay, VHS tracking, trails and slice recursion are occurrence-gated. A small residual is retained only for a few source-safe motion/temporal treatments.
+- Make promoted hero moments explicitly raise the occurrence budget and bias a compatible subset of effects (`subject_echo`, `flow_melt`, `depth_burst`, `time_prism`, `recursive_portal`) without enabling those effects globally.
+- Retune analysis presets around a restrained default: Balanced is source-first, Relaxed/Cinematic are quieter, Dreamy favors controlled temporal continuity, High Energy/EDM deliberately raise accent and hero frequency, and Experimental remains the intentionally aggressive treatment.
+- Retune deterministic CLAP directing and the bounded/whole-song AI prompts so effect availability is not treated as an instruction to use effects. The renderer catalog now labels effects as core, accent or hero; AI is told that empty effect recommendations are valid and that destructive effects belong mainly to builds, peaks, mutations and hero moments.
+- Reduce multiplicative AI amplification of global effect/composition density. User/preset values remain the primary creative budget and AI shapes where that budget is spent rather than silently turning a restrained preset into a dense one.
+- Add regression coverage for source-first defaults, sparse destructive post effects, hero-local effect promotion and the retained High Energy/Experimental escalation.
+
 # 0.40.0 — Dynamic effect choreography and native parity
 
 - Separate **effect density** from effect intensity. Density controls how often special effects become visibly active, so High Energy / EDM / Experimental treatments can use the renderer's full vocabulary more frequently without simply amplifying a few already-selected effects.

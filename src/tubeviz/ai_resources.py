@@ -48,6 +48,26 @@ EFFECT_CATALOG: list[dict[str, Any]] = [
     {"name": "shutter", "category": "rhythmic", "native": True, "webgpu": True, "destructive": 0.35, "best_for": "dense percussion and rhythmic freezes"},
 ]
 
+_CORE_EFFECTS = frozenset({
+    "virtual camera", "optical-flow warp", "beat-local deformation",
+    "depth parallax", "background warp", "source-preserving color grade",
+    "source-derived bloom", "source-derived light streaks", "vignette",
+})
+_HERO_TIER_EFFECTS = frozenset({
+    "vortex", "kaleidoscope", "mirror corridor", "solarize",
+    "datamosh", "slice recursion",
+})
+EFFECT_TIER_POLICY = {
+    "core": "May run continuously only at subtle/source-preserving strength.",
+    "accent": "Normally off. Schedule for a specific musical/visual accent, build, transition or peak.",
+    "hero": "Normally off. Reserve for deliberate hero/payoff moments or explicitly experimental treatment.",
+}
+for _effect in EFFECT_CATALOG:
+    _name = _effect["name"]
+    _tier = "core" if _name in _CORE_EFFECTS else ("hero" if _name in _HERO_TIER_EFFECTS else "accent")
+    _effect["tier"] = _tier
+    _effect["default_policy"] = EFFECT_TIER_POLICY[_tier]
+
 RASTER_EFFECTS = [item["name"] for item in EFFECT_CATALOG]
 EFFECT_NAMES = frozenset(RASTER_EFFECTS)
 VECTOR_EFFECTS = [

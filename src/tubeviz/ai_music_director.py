@@ -138,26 +138,28 @@ def semantic_direction(section: Section) -> SectionAIDirection:
     palette = top[0][0].replace("_", " ") if top else section.vibe
     aggressive = min(1.0, (scores.get("aggressive", 0.0) + scores.get("chaotic", 0.0) + scores.get("explosive", 0.0)) * 3.0)
     dreamy = min(1.0, (scores.get("dreamlike", 0.0) + scores.get("hypnotic", 0.0) + scores.get("serene", 0.0)) * 3.0)
-    effect_density = min(2.5, max(0.35, 0.65 + 0.85 * section.energy + 0.45 * edit_density + 0.45 * aggressive - 0.35 * dreamy))
-    temporal_persistence = min(2.5, max(0.25, 0.65 + 0.85 * continuity + 0.55 * dreamy + 0.20 * desired_motion - 0.30 * section.percussive_ratio))
-    composition_diversity = min(2.5, max(0.25, 0.60 + 0.75 * desired_complexity + 0.35 * edit_density + 0.30 * aggressive))
-    hero_frequency = min(2.5, max(0.20, 0.45 + 0.65 * section.energy + 0.55 * aggressive + 0.25 * desired_complexity))
+    effect_density = min(1.35, max(0.55, 0.58 + 0.25 * section.energy + 0.20 * edit_density + 0.20 * aggressive - 0.15 * dreamy))
+    temporal_persistence = min(1.45, max(0.45, 0.55 + 0.35 * continuity + 0.35 * dreamy + 0.10 * desired_motion - 0.20 * section.percussive_ratio))
+    composition_diversity = min(1.35, max(0.45, 0.50 + 0.30 * desired_complexity + 0.18 * edit_density + 0.18 * aggressive))
+    hero_frequency = min(1.45, max(0.55, 0.65 + 0.30 * section.energy + 0.35 * aggressive + 0.15 * desired_complexity))
     preferred_effects: list[str] = []
     if dreamy > 0.28:
         preferred_effects.extend(["temporal echo", "motion trails", "recursive feedback"])
-    if aggressive > 0.28 or section.vibe in {"fractured", "heavy"}:
+    if aggressive > 0.45 or section.vibe in {"fractured", "heavy"}:
         preferred_effects.extend(["block displacement", "horizontal glitch", "posterization"])
     if section.bass_weight > 0.58:
         preferred_effects.extend(["beat-local deformation", "ripple"])
     if section.percussive_ratio > 0.62:
-        preferred_effects.extend(["slit scan", "strobe"])
+        preferred_effects.append("slit scan")
+        if section.energy > 0.78 and section.label in {"build", "peak"}:
+            preferred_effects.append("strobe")
     if desired_motion > 0.60:
         preferred_effects.extend(["optical-flow warp", "RGB displacement"])
     preferred_effects = list(dict.fromkeys(preferred_effects))[:6]
     preferred_composition = (
-        "mosaic" if composition_diversity > 1.55 and desired_complexity > .62
-        else "split" if composition_diversity > 1.30 and edit_density > .58
-        else "flow" if dreamy > .35
+        "mosaic" if composition_diversity > 1.22 and desired_complexity > .72 and section.label in {"build", "peak"}
+        else "split" if composition_diversity > 1.08 and edit_density > .68 and section.label in {"build", "peak"}
+        else "flow" if dreamy > .45
         else None
     )
 
@@ -239,10 +241,10 @@ def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | N
             "target_hue": 210.0,
             "vector_intensity": 1.0,
             "codec_intensity": 0.5,
-            "effect_density": 1.4,
-            "temporal_persistence": 1.2,
-            "composition_diversity": 1.3,
-            "hero_frequency": 1.1,
+            "effect_density": 0.75,
+            "temporal_persistence": 0.80,
+            "composition_diversity": 0.70,
+            "hero_frequency": 0.90,
             "preferred_effects": ["optical-flow warp", "motion trails", "beat-local deformation"],
             "preferred_composition": "flow|luma|strips|split|mosaic|swap|null",
             "creative_trajectory": {
@@ -262,7 +264,7 @@ def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | N
         "Do NOT select filenames, clip IDs, scene IDs, or exact cut times in this first pass. A later bounded edit-consultant pass will choose only among valid retrieved scenes, and the deterministic optimizer owns hard timing. "
         "Explicitly exploit resources that exist and avoid relying on visual worlds/effects that the resource manifest says are absent or scarce. "
         "The renderer manifest contains an exact effect_catalog with native/WebGPU parity, destructiveness and best-use guidance. Choose preferred_effects only from that catalog and use them as a vocabulary for each section rather than relying only on broad effect_family labels. "
-        "Actively shape effect_density (how often effects become visible), temporal_persistence (whether trails/feedback can cross compatible cuts), composition_diversity (how often multi-source layouts evolve), and hero_frequency (rare large transformations). These are independent of amplitude/intensity. "
+        "Actively shape effect_density (how often effects become visible), temporal_persistence (whether trails/feedback can cross compatible cuts), composition_diversity (how often multi-source layouts evolve), and hero_frequency (rare large transformations). These are independent of amplitude/intensity. Treat source-first as the normal state: core-tier effects may remain subtle, accent-tier effects should be absent on most ordinary shots, and hero-tier effects should normally appear only for deliberate hero/payoff moments. Values around 0.55–0.90 are normal for effect density; use values above 1 primarily for genuinely high-energy drops/builds or intentionally experimental sections. It is valid to recommend no special effect for a shot/section. "
         "Prefer source-safe motion/depth/temporal treatments for faces or text, and reserve destructive glitch/symmetry/stylization for abstract footage, noisy peaks, mutations and payoffs. Native render is the reference output, so recommend only catalog capabilities marked native. "
         "Use callbacks and controlled evolution: avoid changing visual worlds arbitrarily every section. "
         "Use the supplied trajectory fields (build/drop/release probability, tension slope, anticipation, withholding) to create coherent escalation and payoff. Reserve the strongest contrast/effects for builds, drops, mutations and payoffs; keep pre-drop withholding when it creates useful contrast. Return JSON only.\n\n"

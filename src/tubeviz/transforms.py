@@ -15,7 +15,7 @@ from .models import CompositeLayer, DirectedTimeline, SceneSelection, Section, V
 class TransformConfig:
     enabled: bool = True
     intensity: float = 1.0
-    density: float = 1.0
+    density: float = 0.65
     allow_reverse: bool = True
     max_playback_rate: float = 1.65
     min_playback_rate: float = 0.65
@@ -65,17 +65,35 @@ def plan_transform(
     preferred = {_effect_key(v) for v in (section.ai_direction.preferred_effects if section.ai_direction is not None else []) if str(v).strip()}
     advice = selection.ai_consultant or {}
     preferred.update(_effect_key(v) for v in advice.get("preferred_effects", []) if str(v).strip())
+    creative = selection.direction.creative
+    hero_kind = str(getattr(creative, "hero_kind", "") or advice.get("hero_kind") or "").strip().lower().replace("_", " ")
+    hero_preferences = {
+        "subject echo": {"frame echo", "motion trails", "chroma delay"},
+        "flow melt": {"ripple", "motion trails", "vortex"},
+        "depth burst": {"tunnel", "ripple", "edge extraction"},
+        "time prism": {"rgb displacement", "chroma delay", "slit scan"},
+        "recursive portal": {"kaleidoscope", "mirror corridor", "tunnel", "recursive feedback"},
+    }
+    hero_moment = hero_kind in hero_preferences
+    if hero_moment:
+        preferred.update(hero_preferences[hero_kind])
     try:
         advice_bias = _clamp(float(advice.get("effect_bias", 1.0) or 1.0), 0.25, 1.75)
     except (TypeError, ValueError):
         advice_bias = 1.0
     if section.ai_direction is not None:
-        effect_density = _clamp(effect_density * section.ai_direction.effect_density * advice_bias, 0.0, 2.5)
+        # AI shapes where the user's/preset budget is spent; it does not replace
+        # a restrained global density with its own absolute density.
+        ai_density = _clamp(section.ai_direction.effect_density, 0.0, 2.5)
+        effect_density = _clamp(effect_density * (.55 + .45 * ai_density) * advice_bias, 0.0, 2.5)
         # AI direction modulates a user's global effect ceiling rather than
         # replacing it. Spacious sections naturally back off; complex/payoff
         # sections can use more of the configured budget.
         ai_scale = .62 + .50*section.ai_direction.desired_complexity + .20*section.ai_direction.edit_density
         intensity = _clamp(intensity * ai_scale, 0.0, 2.0)
+    # Hero promotion increases occurrence probability locally; it never turns a
+    # destructive effect into persistent wallpaper for the rest of the section.
+    event_density = _clamp(effect_density * (1.75 if hero_moment else 1.0), 0.0, 2.5)
     if intensity <= 0.0:
         return VideoTransform()
     energy = _clamp(section.energy, 0.0, 1.0)
@@ -148,7 +166,7 @@ def plan_transform(
     kaleidoscope_gate = _stable_unit(salt + ":kaleidoscope")
     kaleidoscope = (
         _clamp(intensity * (0.03 + max(0.0, tonal - 0.60) * 0.12 + mutation * 0.018), 0.0, 0.24)
-        if _density_gate(kaleidoscope_gate, .10, effect_density, preferred="kaleidoscope" in preferred) and vibe in {"ambient", "hypnotic", "euphoric", "fractured"}
+        if _density_gate(kaleidoscope_gate, .10, event_density, preferred="kaleidoscope" in preferred) and vibe in {"ambient", "hypnotic", "euphoric", "fractured"}
         else 0.0
     )
     # Rectangular tiling is intentionally retired; organic flow/vortex
@@ -169,15 +187,15 @@ def plan_transform(
     solarize_gate = _stable_unit(salt + ":solarize")
     mirror_corridor = (
         _clamp(intensity * (0.04 + 0.06 * mutation + 0.08 * max(0.0, energy - 0.62)), 0.0, 0.30)
-        if _density_gate(corridor_gate, .16, effect_density, preferred="mirror corridor" in preferred) else 0.0
+        if _density_gate(corridor_gate, .16, event_density, preferred="mirror corridor" in preferred) else 0.0
     )
     mask_wipe = (
         _clamp(intensity * (0.05 + 0.06 * density + 0.03 * (1.0 - brightness)), 0.0, 0.24)
-        if _density_gate(mask_gate, .07, effect_density, preferred="mask wipe" in preferred) else 0.0
+        if _density_gate(mask_gate, .07, event_density, preferred="mask wipe" in preferred) else 0.0
     )
     solarize = (
         _clamp(intensity * max(0.0, energy - 0.52) * (0.08 + 0.12 * density), 0.0, 0.26)
-        if _density_gate(solarize_gate, .10, effect_density, preferred="solarize" in preferred) and vibe in {"fractured", "dark", "heavy", "driving"}
+        if _density_gate(solarize_gate, .10, event_density, preferred="solarize" in preferred) and vibe in {"fractured", "dark", "heavy", "driving"}
         else 0.0
     )
 
@@ -188,7 +206,7 @@ def plan_transform(
     vortex_gate = _stable_unit(salt + ":vortex")
     vortex = (
         _clamp(intensity * (0.03 + 0.04 * mutation + max(0.0, energy - 0.58) * 0.10 + tonal * 0.05), 0.0, 0.30)
-        if _density_gate(vortex_gate, .22, effect_density, preferred="vortex" in preferred) else 0.0
+        if _density_gate(vortex_gate, .22, event_density, preferred="vortex" in preferred) else 0.0
     )
     motion_trails = _clamp(intensity * (0.02 + 0.12 * energy + 0.08 * density + 0.10 * tonal), 0.0, 0.48)
     slice_recursion = _clamp(intensity * max(0.0, density - 0.45) * (0.16 + 0.24 * energy), 0.0, 0.42)
@@ -199,30 +217,44 @@ def plan_transform(
     def wants(*names: str) -> bool:
         return bool(preferred.intersection({_effect_key(name) for name in names}))
 
-    def accent(name: str, value: float, probability: float, floor: float, *, aliases: tuple[str, ...] = ()) -> float:
+    def accent(
+        name: str, value: float, probability: float, floor: float, *,
+        aliases: tuple[str, ...] = (), retain: float = 0.0,
+    ) -> float:
         is_preferred = wants(name, *aliases)
         gate = _stable_unit(f"{salt}:density:{_effect_key(name)}")
-        if not _density_gate(gate, probability, effect_density, preferred=is_preferred):
-            return value
-        gain = 1.18 + 0.14 * max(0.0, effect_density - 1.0) + (0.18 if is_preferred else 0.0)
+        if not _density_gate(gate, probability, event_density, preferred=is_preferred):
+            # This is the key source-first rule: an accent that was not scheduled
+            # is OFF, except for an explicitly tiny residual on source-safe motion
+            # treatments. v0.40 native parity therefore no longer makes every
+            # historical non-zero transform visible continuously.
+            return _clamp(value * max(0.0, min(1.0, retain)), 0.0, 1.0)
+        gain = (
+            1.16 + 0.12 * max(0.0, event_density - 1.0)
+            + (0.18 if is_preferred else 0.0)
+            + (0.30 if hero_moment else 0.0)
+        )
         return _clamp(max(value * gain, floor * min(1.5, intensity)), 0.0, 1.0)
 
+    feedback = accent("recursive feedback", feedback, .18, .07, aliases=("feedback",), retain=.06)
+    scanlines = accent("scanlines", scanlines, .14, .05, retain=.06)
+    noise = _clamp(noise * (.35 if hero_moment else .15), 0.0, .15)
     glitch = accent("horizontal glitch", glitch, .26, .10, aliases=("glitch",))
     pixelate = accent("pixelation", pixelate, .18, .08)
-    rgb_split = accent("rgb displacement", rgb_split, .28, .08)
-    ripple = accent("ripple", ripple, .34, .09)
+    rgb_split = accent("rgb displacement", rgb_split, .28, .08, retain=.08)
+    ripple = accent("ripple", ripple, .34, .09, retain=.18)
     tunnel = accent("tunnel", tunnel, .14, .07)
     posterize = accent("posterization", posterize, .22, .08)
     edge = accent("edge extraction", edge, .18, .07, aliases=("edge",))
     strobe = accent("strobe", strobe, .16, .08)
     shutter = accent("shutter", shutter, .14, .07)
     slit_scan = accent("slit scan", slit_scan, .26, .09)
-    frame_echo = accent("frame echo", frame_echo, .32, .10, aliases=("temporal echo",))
+    frame_echo = accent("frame echo", frame_echo, .32, .10, aliases=("temporal echo",), retain=.10)
     datamosh = accent("datamosh-like block displacement", datamosh, .24, .10, aliases=("datamosh",))
     block_displace = accent("block displacement", block_displace, .28, .10)
-    chroma_delay = accent("chroma delay", chroma_delay, .28, .08, aliases=("temporal rgb displacement",))
+    chroma_delay = accent("chroma delay", chroma_delay, .28, .08, aliases=("temporal rgb displacement",), retain=.08)
     vhs_tracking = accent("vhs tracking", vhs_tracking, .22, .08)
-    motion_trails = accent("motion trails", motion_trails, .32, .10)
+    motion_trails = accent("motion trails", motion_trails, .32, .10, retain=.12)
     slice_recursion = accent("slice recursion", slice_recursion, .18, .09)
 
     style_options = {

@@ -40,12 +40,12 @@ def test_transform_planning_is_deterministic_and_energy_aware():
     assert a == b
     assert a.zoom > 1.0
     assert a.playback_rate >= 1.0
-    assert a.glitch > 0
-    assert a.ripple > 0
-    assert a.posterize > 0
-    assert a.edge > 0
-    assert a.strobe > 0
-    assert a.shutter > 0
+    # Source-first scheduling keeps subtle motion available while destructive
+    # accents are deliberately absent on many ordinary shots.
+    assert a.vignette > 0
+    assert 0.0 <= a.ripple <= 1.0
+    destructive = (a.glitch, a.posterize, a.edge, a.strobe, a.shutter)
+    assert not all(value > 0.0 for value in destructive)
     assert abs(a.hue_degrees) <= 10.0
 
 
