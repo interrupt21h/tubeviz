@@ -73,57 +73,75 @@ void apply_transform(
     std::uint64_t frame_index
 ) {
     if (rgb.empty()) return;
-    // New timelines emit only subtle shot-local hue, and older timelines are
-    // defensively clamped here so the pre-v0.33.5 absolute color steering cannot
-    // reappear when rendering an existing plan.
+    // Fuse shot-local color, noise, scanlines and vignette into one traversal.
+    // At 1080p this removes up to two additional ~6 MiB read/write passes per
+    // source layer compared with the original Phase-1 implementation.
     const double hue_degrees = std::clamp(t.hue_degrees, -6.0, 6.0);
     const bool color = std::abs(t.brightness - 1.0) > 1e-4 ||
                        std::abs(t.contrast - 1.0) > 1e-4 ||
                        std::abs(t.saturation - 1.0) > 1e-4 ||
                        std::abs(hue_degrees) > 1e-4 ||
                        t.grayscale > 1e-4 || t.noise > 1e-4;
-    if (color) {
+    const bool scanlines = t.scanlines > 1e-4;
+    const bool vignette = t.vignette > 1e-4;
+    if (color || scanlines || vignette) {
         const double gray = std::clamp(t.grayscale, 0.0, 1.0);
         const double noise_amount = 28.0 * std::clamp(t.noise, 0.0, 1.0);
         const double hue = hue_degrees * 3.14159265358979323846 / 180.0;
         const double hc = std::cos(hue), hs = std::sin(hue);
+        const double scan_gain = 1.0 - 0.32 * std::clamp(t.scanlines, 0.0, 1.0);
+        const double vignette_amount = std::clamp(t.vignette, 0.0, 1.0);
+        const double cx = (width - 1) * 0.5, cy = (height - 1) * 0.5;
+        const double inv_r2 = 1.0 / std::max(1.0, cx * cx + cy * cy);
 #ifdef TUBEVIZ_HAVE_OPENMP
 #pragma omp parallel for schedule(static)
 #endif
         for (int y = 0; y < height; ++y) {
             std::size_t i = static_cast<std::size_t>(y) * width * 3;
+            const double scan = scanlines && (y & 1) ? scan_gain : 1.0;
             for (int x = 0; x < width; ++x, i += 3) {
                 double r = rgb[i], g = rgb[i + 1], b = rgb[i + 2];
-                const double luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                r = luma + (r - luma) * t.saturation;
-                g = luma + (g - luma) * t.saturation;
-                b = luma + (b - luma) * t.saturation;
-                if (std::abs(hue_degrees) > 1e-4) {
-                    const double yiq_y = 0.299*r + 0.587*g + 0.114*b;
-                    const double ii = 0.596*r - 0.274*g - 0.322*b;
-                    const double qq = 0.211*r - 0.523*g + 0.312*b;
-                    const double ir = ii*hc - qq*hs;
-                    const double qr = ii*hs + qq*hc;
-                    r = yiq_y + 0.956*ir + 0.621*qr;
-                    g = yiq_y - 0.272*ir - 0.647*qr;
-                    b = yiq_y - 1.106*ir + 1.703*qr;
+                if (color) {
+                    const double luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                    r = luma + (r - luma) * t.saturation;
+                    g = luma + (g - luma) * t.saturation;
+                    b = luma + (b - luma) * t.saturation;
+                    if (std::abs(hue_degrees) > 1e-4) {
+                        const double yiq_y = 0.299*r + 0.587*g + 0.114*b;
+                        const double ii = 0.596*r - 0.274*g - 0.322*b;
+                        const double qq = 0.211*r - 0.523*g + 0.312*b;
+                        const double ir = ii*hc - qq*hs;
+                        const double qr = ii*hs + qq*hc;
+                        r = yiq_y + 0.956*ir + 0.621*qr;
+                        g = yiq_y - 0.272*ir - 0.647*qr;
+                        b = yiq_y - 1.106*ir + 1.703*qr;
+                    }
+                    r = r * (1.0 - gray) + luma * gray;
+                    g = g * (1.0 - gray) + luma * gray;
+                    b = b * (1.0 - gray) + luma * gray;
+                    r = (r - 127.5) * t.contrast + 127.5;
+                    g = (g - 127.5) * t.contrast + 127.5;
+                    b = (b - 127.5) * t.contrast + 127.5;
+                    r *= t.brightness; g *= t.brightness; b *= t.brightness;
+                    if (noise_amount > 1e-4) {
+                        const std::uint64_t key =
+                            frame_index * 0x9e3779b97f4a7c15ULL +
+                            static_cast<std::uint64_t>(y) * width +
+                            static_cast<std::uint64_t>(x);
+                        const double n = hash_noise(key) * noise_amount;
+                        r += n; g += n; b += n;
+                    }
                 }
-                r = r * (1.0 - gray) + luma * gray;
-                g = g * (1.0 - gray) + luma * gray;
-                b = b * (1.0 - gray) + luma * gray;
-                r = (r - 127.5) * t.contrast + 127.5;
-                g = (g - 127.5) * t.contrast + 127.5;
-                b = (b - 127.5) * t.contrast + 127.5;
-                r *= t.brightness; g *= t.brightness; b *= t.brightness;
-                if (noise_amount > 1e-4) {
-                    const std::uint64_t key =
-                        frame_index * 0x9e3779b97f4a7c15ULL +
-                        static_cast<std::uint64_t>(y) * width +
-                        static_cast<std::uint64_t>(x);
-                    const double n = hash_noise(key) * noise_amount;
-                    r += n; g += n; b += n;
+                double gain = scan;
+                if (vignette) {
+                    const double dx = x - cx, dy = y - cy;
+                    const double r2 = std::min(1.0, (dx * dx + dy * dy) * inv_r2);
+                    const double shaped = r2 * (0.68 + 0.32 * r2);
+                    gain *= 1.0 - vignette_amount * 0.58 * shaped;
                 }
-                rgb[i] = clamp8(r); rgb[i + 1] = clamp8(g); rgb[i + 2] = clamp8(b);
+                rgb[i] = clamp8(r * gain);
+                rgb[i + 1] = clamp8(g * gain);
+                rgb[i + 2] = clamp8(b * gain);
             }
         }
     }
@@ -141,44 +159,6 @@ void apply_transform(
                 std::swap(row[a], row[b]);
                 std::swap(row[a + 1], row[b + 1]);
                 std::swap(row[a + 2], row[b + 2]);
-            }
-        }
-    }
-
-    if (t.scanlines > 1e-4) {
-        const double gain = 1.0 - 0.32 * std::clamp(t.scanlines, 0.0, 1.0);
-#ifdef TUBEVIZ_HAVE_OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-        for (int y = 1; y < height; y += 2) {
-            auto i = static_cast<std::size_t>(y) * width * 3;
-            for (int x = 0; x < width; ++x, i += 3) {
-                rgb[i] = clamp8(rgb[i] * gain);
-                rgb[i + 1] = clamp8(rgb[i + 1] * gain);
-                rgb[i + 2] = clamp8(rgb[i + 2] * gain);
-            }
-        }
-    }
-
-    if (t.vignette > 1e-4) {
-        const double amount = std::clamp(t.vignette, 0.0, 1.0);
-        const double cx = (width - 1) * 0.5, cy = (height - 1) * 0.5;
-        const double inv_r2 = 1.0 / std::max(1.0, cx * cx + cy * cy);
-#ifdef TUBEVIZ_HAVE_OPENMP
-#pragma omp parallel for schedule(static)
-#endif
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                const double dx = x - cx, dy = y - cy;
-                const double r2 = std::min(1.0, (dx * dx + dy * dy) * inv_r2);
-                // Cheap smooth radial approximation; avoids millions of
-                // sqrt()/pow() calls per HD frame.
-                const double shaped = r2 * (0.68 + 0.32 * r2);
-                const double gain = 1.0 - amount * 0.58 * shaped;
-                const auto i = static_cast<std::size_t>((y * width + x) * 3);
-                rgb[i] = clamp8(rgb[i] * gain);
-                rgb[i + 1] = clamp8(rgb[i + 1] * gain);
-                rgb[i + 2] = clamp8(rgb[i + 2] * gain);
             }
         }
     }
@@ -704,7 +684,7 @@ void native_flow_warp(std::vector<std::uint8_t>& rgb, const std::vector<std::uin
 }
 
 void native_temporal(std::vector<std::uint8_t>& rgb, const std::vector<std::uint8_t>* previous,
-                     int width, int height, const CreativeEffect& c, double echo, double rgb_delay, double smear, double flow_trails) {
+                     int width, int height, [[maybe_unused]] const CreativeEffect& c, double echo, double rgb_delay, double smear, double flow_trails) {
     if (!previous || previous->size() != rgb.size()) return;
     if (echo > .015 || flow_trails > .015) {
         const double a = std::clamp(.06 + .20 * std::max(echo, flow_trails), 0.0, .28);
@@ -781,7 +761,7 @@ void native_local_symmetry(std::vector<std::uint8_t>& rgb, int width, int height
 }
 
 void native_source_texture(std::vector<std::uint8_t>& rgb, int width, int height,
-                           const CreativeEffect& c, double bloom, double streaks) {
+                           [[maybe_unused]] const CreativeEffect& c, double bloom, double streaks) {
     if (bloom <= .015 && streaks <= .015) return;
     const auto src = rgb;
     if (bloom > .015) {
@@ -899,6 +879,49 @@ void apply_creative_effects(
         }
     }
     restore_subject(rgb, original, width, height, c, std::max(common_env, hero));
+}
+
+
+void apply_creative_temporal_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const CreativeEffect& c,
+    double progress,
+    double phase
+) {
+    if (rgb.empty() || !previous || previous->size() != rgb.size()) return;
+    const double hero = hero_envelope(c, progress);
+    const double echo = c.temporal_echo * creative_envelope(c.temporal_echo_envelope, progress);
+    const double rgb_delay = std::max(
+        c.temporal_rgb * creative_envelope(c.temporal_rgb_envelope, progress),
+        c.flow_rgb * creative_envelope(c.flow_rgb_envelope, progress) * .65
+    );
+    const double smear = c.temporal_smear * creative_envelope(c.temporal_smear_envelope, progress);
+    const double trails = c.flow_trails * creative_envelope(c.flow_trails_envelope, progress);
+    const double feedback = c.feedback * creative_envelope(c.feedback_envelope, progress);
+
+    if (std::max({echo, rgb_delay, smear, trails}) > .045)
+        native_temporal(rgb, previous, width, height, c, echo, rgb_delay, smear, trails);
+    if (feedback > .045) native_feedback(rgb, previous, width, height, c, feedback);
+
+    // Spatial hero work is performed in the fused GPU shader. Keep only the
+    // previous-frame parts here.
+    if (hero > .015) {
+        if (c.hero_kind == "flow_melt") {
+            native_temporal(rgb, previous, width, height, c, .0, .28*hero, .55*hero, .35*hero);
+        } else if (c.hero_kind == "depth_burst") {
+            native_feedback(rgb, previous, width, height, c, .58*hero);
+        } else if (c.hero_kind == "recursive_portal") {
+            native_feedback(rgb, previous, width, height, c, .82*hero);
+        } else if (c.hero_kind == "subject_echo") {
+            native_temporal(rgb, previous, width, height, c, .55*hero, .36*hero, .42*hero, .40*hero);
+        } else if (c.hero_kind == "time_prism") {
+            native_temporal(rgb, previous, width, height, c, .28*hero, .62*hero, .44*hero, .20*hero);
+        }
+    }
+    (void)phase;
 }
 
 void apply_source_color_fidelity(

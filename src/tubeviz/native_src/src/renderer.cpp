@@ -29,14 +29,18 @@ Renderer::Renderer(
     int height,
     double fps,
     std::size_t decoder_cache_limit,
-    int threads
+    int threads,
+    std::string gpu_mode,
+    std::string hwdecode_mode
 )
     : manifest_(std::move(manifest)),
       width_(width),
       height_(height),
       fps_(fps),
       decoder_cache_limit_(std::max<std::size_t>(4, decoder_cache_limit)),
-      threads_(threads) {
+      threads_(threads),
+      gpu_mode_(std::move(gpu_mode)),
+      hwdecode_mode_(std::move(hwdecode_mode)) {
     previous_output_.resize(static_cast<std::size_t>(width_) * height_ * 3);
 #ifdef TUBEVIZ_HAVE_OPENMP
     if (threads_ > 0) {
@@ -44,6 +48,7 @@ Renderer::Renderer(
         omp_set_num_threads(threads_);
     }
 #endif
+    gpu_ = std::make_unique<GpuPostProcessor>(width_, height_, gpu_mode_);
 }
 
 Decoder& Renderer::decoder_for(const std::string& path) {
@@ -51,8 +56,10 @@ Decoder& Renderer::decoder_for(const std::string& path) {
     auto it = decoders_.find(path);
     if (it == decoders_.end()) {
         DecoderEntry entry;
-        entry.decoder = std::make_unique<Decoder>(path, width_, height_);
+        entry.decoder = std::make_unique<Decoder>(path, width_, height_, hwdecode_mode_);
         entry.last_used = decoder_use_clock_;
+        std::cerr << "INFO\tdecoder_open=" << path
+                  << "\thw=" << entry.decoder->hardware_backend() << '\n';
         it = decoders_.emplace(path, std::move(entry)).first;
     } else {
         it->second.last_used = decoder_use_clock_;
@@ -103,6 +110,8 @@ std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot
     if (layer.transform.reverse) target = layer.source_end - offset;
     target = std::clamp(target, layer.source_start, std::max(layer.source_start, layer.source_end - 0.001));
 
+    // Decoder owns its reusable frame buffer. Copy once because shot-local transforms
+    // intentionally mutate this layer before composition.
     auto frame = decoder_for(layer.path).frame_at(target);
     auto transform = layer.transform;
     if (legacy_style) transform.hue_degrees = 0.0;
@@ -111,6 +120,7 @@ std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot
 }
 
 std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bool allow_previous_effects) {
+    gpu_frame_used_ = false;
     const bool legacy_style = shot.creative.style_version < 2;
     auto output = render_layer(shot.primary, shot.time, now, legacy_style);
     if (shot.primary.opacity < 0.999) {
@@ -129,22 +139,31 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
     }
 
     // Canonical pre-FX color reference. Keep it as renderer state so the final
-    // chroma guard can run *after* reactive beat effects as well.
+    // chroma guard can run after every post-processing path.
     color_reference_ = output;
 
     const double progress = std::clamp(
         (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time),
         0.0, 1.0
     );
-    apply_creative_effects(
-        output,
-        (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr,
-        width_,
-        height_,
-        shot.creative,
-        progress,
-        now * 0.24
-    );
+    const auto* previous = (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr;
+
+    // Phase-2 hybrid GPU path: one libplacebo/Vulkan shader fuses the expensive
+    // spatial/color Creative FX and reactive beat treatment. History-dependent
+    // temporal operations remain CPU-side because they consume previous_output_.
+    if (gpu_ && gpu_->available()) {
+        gpu_frame_used_ = gpu_->apply_spatial(output, shot.creative, reactive_, progress, now * 0.24);
+    }
+    if (gpu_frame_used_) {
+        apply_creative_temporal_effects(
+            output, previous, width_, height_, shot.creative, progress, now * 0.24
+        );
+    } else {
+        apply_creative_effects(
+            output, previous, width_, height_, shot.creative, progress, now * 0.24
+        );
+    }
+
     auto vector_effects = shot.vector_effects;
     if (legacy_style) {
         vector_effects.erase(
@@ -157,7 +176,7 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
     apply_vector_effects(
         output,
         have_portal_companion ? &portal_companion : nullptr,
-        (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr,
+        previous,
         width_,
         height_,
         vector_effects,
@@ -173,7 +192,9 @@ int Renderer::run() {
     const auto frame_bytes = static_cast<std::size_t>(width_) * height_ * 3;
 
     std::cerr << "INFO\tdecoder_cache=" << decoder_cache_limit_
-              << "\tthreads=" << threads_;
+              << "\tthreads=" << threads_
+              << "\thwdecode=" << hwdecode_mode_
+              << "\tgpu=" << (gpu_ && gpu_->available() ? gpu_->backend() : "off");
 #ifdef TUBEVIZ_HAVE_OPENMP
     std::cerr << "\topenmp=" << omp_get_max_threads();
 #else
@@ -203,10 +224,13 @@ int Renderer::run() {
         const bool shot_changed = shot_index != previous_shot_index_;
         const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative);
         auto output = render_shot(*shot, now, allow_previous_effects);
-        apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
-        // Final native color contract runs after creative, vector *and reactive*
-        // effects. Earlier placement allowed beat chroma/radial processing to bypass
-        // source_fidelity and reintroduce a global cast after the guard had run.
+        // GPU frames already received reactive treatment in the fused shader.
+        if (!gpu_frame_used_) {
+            apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
+        }
+        // Keep the final color contract after CPU temporal/vector work. This is
+        // intentionally retained even on GPU frames so later history/vector
+        // passes cannot reintroduce a global cast.
         const double color_progress = std::clamp(
             (now - shot->time) / std::max(0.001, shot->timeline_end - shot->time),
             0.0, 1.0
@@ -216,8 +240,6 @@ int Renderer::run() {
         );
 
         if (shot_index != previous_shot_index_ && shot->crossfade > 0.0 && frame_index > 0 && !previous_output_.empty()) {
-            // Freeze-frame crossfade for Phase 1. Phase 2 keeps the outgoing
-            // decoder alive and performs GPU texture crossfades.
             const double progress = std::clamp((now - shot->time) / shot->crossfade, 0.0, 1.0);
             crossfade(output, previous_output_, progress);
         }
@@ -225,7 +247,9 @@ int Renderer::run() {
         if (std::fwrite(output.data(), 1, frame_bytes, stdout) != frame_bytes) {
             return 2;
         }
-        previous_output_ = output;
+        // Avoid a 6+ MiB full-frame copy at 1080p. stdout consumed the current
+        // vector synchronously, so swap it into temporal history instead.
+        previous_output_.swap(output);
         has_previous_output_ = true;
         previous_shot_index_ = shot_index;
 

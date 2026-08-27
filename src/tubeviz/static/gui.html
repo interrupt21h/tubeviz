@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.34.0">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.34.0">
+<link rel="stylesheet" href="/static/gui.css?v=0.38.1">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.38.1">
 </head>
 <body>
 <header>
@@ -34,6 +34,14 @@
       <label>Audio <input id="audioPath" placeholder="audio/connected.mp3"></label>
       <label>Timeline <input id="timelinePath" placeholder="timelines/connected.json"></label>
       <label>Output video <input id="outputPath" placeholder="connected-native.mp4"></label>
+      <div class="grid two tight">
+        <label>Preview quality
+          <select id="previewQuality"><option value="auto">auto · adaptive 540p–1080p</option><option value="540p">540p</option><option value="720p">720p</option><option value="1080p">1080p</option><option value="native">native display density</option></select>
+        </label>
+        <label>Preview GPU
+          <select id="previewGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">prefer WebGPU · safe fallback</option><option value="off">Canvas2D only</option></select>
+        </label>
+      </div>
       <div class="actions">
         <button id="refreshLibrary">Refresh library</button>
         <button id="previewBtn">Start Preview</button>
@@ -112,6 +120,22 @@
         <label>Native preset <select id="nativePreset"><option>veryfast</option><option>fast</option><option>medium</option><option>slow</option></select></label>
         <label>Decoder cache <input id="decoderCache" type="number" value="16"></label>
         <label>Threads <input id="nativeThreads" type="number" value="0"></label>
+        <label>Native GPU
+          <select id="nativeGpu"><option value="auto">auto</option><option value="vulkan">Vulkan / libplacebo</option><option value="off">off</option></select>
+        </label>
+        <label>Hardware decode
+          <select id="nativeHwdecode"><option value="auto">auto</option><option value="cuda">CUDA / NVDEC</option><option value="off">off</option></select>
+        </label>
+        <label>Browser transport
+          <select id="browserTransport"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">WebCodecs H.264</option><option value="raw">raw RGBA fallback</option></select>
+        </label>
+        <label>Browser GPU
+          <select id="browserGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">require WebGPU</option><option value="off">Canvas2D only</option></select>
+        </label>
+        <label>Browser source decode
+          <select id="browserSourceDecode"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">require WebCodecs</option><option value="video">HTML video fallback</option></select>
+        </label>
+        <label>WebCodecs bitrate <input id="webcodecsBitrate" type="number" min="0" step="1000000" value="0" title="0 = derive from resolution, FPS and CRF"></label>
       </div>
       <label class="check"><input id="buildMissing" type="checkbox" checked> Build native renderer if missing</label>
       <label class="check"><input id="codecRenderMaterialize" type="checkbox"> Materialize scheduled FFglitch effects before final render</label>
@@ -377,6 +401,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.34.0"></script>
+<script src="/static/gui.js?v=0.38.1"></script>
 </body>
 </html>

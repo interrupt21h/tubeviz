@@ -36,6 +36,8 @@ class NativeRenderConfig:
     keep_manifest: bool = False
     decoder_cache: int = 16
     threads: int = 0
+    gpu: str = "auto"
+    hwdecode: str = "auto"
 
 
 def _encode_path(path: Path) -> str:
@@ -582,12 +584,29 @@ def native_doctor(
                 capture_output=True,
             )
             libraries[library] = result.stdout.strip() if result.returncode == 0 else None
+    renderer_version = None
+    if renderer:
+        result = subprocess.run([str(renderer), "--version"], text=True, capture_output=True)
+        if result.returncode == 0:
+            renderer_version = result.stdout.strip()
+    ffmpeg = shutil.which("ffmpeg")
+    hwaccels: list[str] = []
+    if ffmpeg:
+        result = subprocess.run([ffmpeg, "-hide_banner", "-hwaccels"], text=True, capture_output=True)
+        if result.returncode == 0:
+            hwaccels = [line.strip() for line in result.stdout.splitlines()[1:] if line.strip()]
     return {
         "renderer": str(renderer) if renderer else None,
+        "renderer_version": renderer_version,
         "cmake": shutil.which("cmake"),
         "cxx": shutil.which("c++") or shutil.which("g++") or shutil.which("clang++"),
         "pkg_config": pkg_config,
         "libraries": libraries,
+        "ffmpeg": ffmpeg,
+        "ffmpeg_hwaccels": hwaccels,
+        "cuda_decode_advertised": "cuda" in hwaccels,
+        "vulkan_effects_buildable": libraries.get("libplacebo") is not None,
+        "nvidia_smi": shutil.which("nvidia-smi"),
         "build_dir": str(Path(build_dir or default_native_build_dir()).expanduser()),
         "source_dir": str(native_source_dir()),
     }
@@ -728,6 +747,10 @@ def render_timeline_native(
         str(max(4, cfg.decoder_cache)),
         "--threads",
         str(max(0, cfg.threads)),
+        "--gpu",
+        cfg.gpu,
+        "--hwdecode",
+        cfg.hwdecode,
     ]
     encoder_command = _raw_ffmpeg_command(
         output=output_path,
@@ -742,7 +765,8 @@ def render_timeline_native(
     )
     progress(
         f"Native renderer: {binary} "
-        f"(decoder-cache={cfg.decoder_cache}, threads={'auto' if cfg.threads == 0 else cfg.threads})"
+        f"(decoder-cache={cfg.decoder_cache}, threads={'auto' if cfg.threads == 0 else cfg.threads}, "
+        f"gpu={cfg.gpu}, hwdecode={cfg.hwdecode})"
     )
     progress(
         f"Native encoder: {cfg.video_codec} preset={cfg.preset} crf={cfg.crf}"

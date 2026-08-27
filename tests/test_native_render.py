@@ -144,3 +144,17 @@ def test_native_doctor_reports_toolchain_keys():
     assert "cmake" in info
     assert "libraries" in info
     assert "libavcodec" in info["libraries"]
+
+
+def test_render_cli_supports_browser_acceleration_controls():
+    args = build_parser().parse_args([
+        "render", "timeline.json", "--backend", "browser",
+        "--browser-transport", "webcodecs",
+        "--browser-gpu", "webgpu",
+        "--browser-source-decode", "webcodecs",
+        "--webcodecs-bitrate", "12000000",
+    ])
+    assert args.browser_transport == "webcodecs"
+    assert args.browser_gpu == "webgpu"
+    assert args.browser_source_decode == "webcodecs"
+    assert args.webcodecs_bitrate == 12_000_000

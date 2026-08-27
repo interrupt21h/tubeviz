@@ -321,6 +321,8 @@ $("renderBtn").onclick=()=>startJob("render",{
     backend:value("backend"),width:number("width"),height:number("height"),fps:number("fps"),
     crf:number("crf"),video_codec:value("codec"),native_preset:value("nativePreset"),
     native_decoder_cache:number("decoderCache"),native_threads:number("nativeThreads"),
+    native_gpu:value("nativeGpu"),native_hwdecode:value("nativeHwdecode"),
+    browser_transport:value("browserTransport"),browser_gpu:value("browserGpu"),browser_source_decode:value("browserSourceDecode"),webcodecs_bitrate:number("webcodecsBitrate"),
     native_build_if_missing:checked("buildMissing"),codec_materialize:checked("codecRenderMaterialize")
   }
 });
@@ -396,14 +398,14 @@ async function startPreview(){
     $("cancelJob").disabled=false;
     updateLiveLog($("jobLog"),job.log,{forceFollow:true});
     renderJobProgress(job);
-    waitForPreview(job.id,job.preview_url,preview);
+    waitForPreview(job.id,job.preview_url,preview,{quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto"});
     pollActiveJob();
   }catch(e){
     $("jobLog").textContent=`Preview error: ${e.message}`;
     if(preview)preview.close();
   }
 }
-async function waitForPreview(jobId,url,previewWindow){
+async function waitForPreview(jobId,url,previewWindow,previewOptions={}){
   const deadline=Date.now()+20000;
   while(Date.now()<deadline){
     try{
@@ -418,7 +420,7 @@ async function waitForPreview(jobId,url,previewWindow){
       if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
         if(previewWindow&&!previewWindow.closed){
           const sep=url.includes("?")?"&":"?";
-          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&t=${Date.now()}`;
+          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&preview=${encodeURIComponent(previewOptions.quality||"auto")}&gpu=${encodeURIComponent(previewOptions.gpu||"auto")}&t=${Date.now()}`;
         }
         return;
       }

@@ -24,6 +24,7 @@ add_executable(tubeviz-native-render
     src/manifest.cpp
     src/decoder.cpp
     src/effects.cpp
+    src/gpu.cpp
     src/renderer.cpp
 )
 
@@ -44,7 +45,7 @@ target_compile_options(tubeviz-native-render PRIVATE
 if(PLACEBO_FOUND)
     target_link_libraries(tubeviz-native-render PRIVATE PkgConfig::PLACEBO)
     target_compile_definitions(tubeviz-native-render PRIVATE TUBEVIZ_HAVE_PLACEBO=1)
-    message(STATUS "libplacebo found: ${PLACEBO_VERSION}; Phase-2 GPU hooks enabled")
+    message(STATUS "libplacebo found: ${PLACEBO_VERSION}; Vulkan creative-FX acceleration enabled")
 else()
     message(STATUS "libplacebo not found; building Phase-1 native FFmpeg renderer")
 endif()

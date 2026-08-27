@@ -776,6 +776,8 @@ def _cmd_render(args: argparse.Namespace) -> None:
                     keep_manifest=args.native_keep_manifest,
                     decoder_cache=args.native_decoder_cache,
                     threads=args.native_threads,
+                    gpu=args.native_gpu,
+                    hwdecode=args.native_hwdecode,
                 ),
             )
         else:
@@ -801,6 +803,10 @@ def _cmd_render(args: argparse.Namespace) -> None:
                     headed=args.headed,
                     seed=args.seed,
                     page_timeout_ms=args.page_timeout * 1000,
+                    browser_transport=args.browser_transport,
+                    browser_gpu=args.browser_gpu,
+                    browser_source_decode=args.browser_source_decode,
+                    webcodecs_bitrate=args.webcodecs_bitrate,
                 ),
             )
     except (RenderError, NativeRenderError, ValueError) as exc:
@@ -1469,13 +1475,39 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--native-preset", default="veryfast", help="FFmpeg encoder preset for native rendering; separate from browser --preset")
     render.add_argument("--native-decoder-cache", type=int, default=16, help="Number of native decoder contexts retained across rapid cuts")
     render.add_argument("--native-threads", type=int, default=0, help="OpenMP effect workers; 0 lets the runtime use all available cores")
+    render.add_argument("--native-gpu", choices=("auto", "vulkan", "off"), default="auto", help="Native creative-FX GPU path; auto uses libplacebo/Vulkan when available")
+    render.add_argument("--native-hwdecode", choices=("auto", "cuda", "off"), default="auto", help="Native source decode acceleration; auto uses CUDA/NVDEC when supported")
     render.add_argument(
         "--frame-format",
         choices=("png", "jpeg"),
         default="png",
-        help="Browser-to-FFmpeg frame transport; PNG is lossless, JPEG is faster",
+        help="Deprecated compatibility option retained for older commands; browser fallback transport is raw RGBA in v0.38+",
     )
     render.add_argument("--jpeg-quality", type=int, default=95)
+    render.add_argument(
+        "--browser-transport",
+        choices=("auto", "webcodecs", "raw", "frames"),
+        default="auto",
+        help="Browser offline transport; auto prefers WebCodecs H.264 and falls back to raw RGBA streaming; frames is a deprecated alias for raw",
+    )
+    render.add_argument(
+        "--browser-gpu",
+        choices=("auto", "webgpu", "off"),
+        default="auto",
+        help="Browser WebGPU compositor; auto uses WebGPU when available",
+    )
+    render.add_argument(
+        "--browser-source-decode",
+        choices=("auto", "webcodecs", "video"),
+        default="auto",
+        help="Browser source decoder; auto prefers frame-addressable WebCodecs and falls back to HTMLVideoElement",
+    )
+    render.add_argument(
+        "--webcodecs-bitrate",
+        type=int,
+        default=0,
+        help="Target WebCodecs H.264 bitrate in bits/s; 0 derives a high-quality value from size/FPS/CRF",
+    )
     render.add_argument(
         "--browser-channel",
         default="chrome",

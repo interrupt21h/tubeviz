@@ -1,3 +1,95 @@
+# 0.38.1 — WebGPU preview validation fixes
+
+- Fix the fused WGSL compositor failing to compile in current Chrome/Dawn because `target` is a reserved WGSL keyword; rename the local depth focal-point variable without changing the shader behavior.
+- Create textures used as destinations of `GPUQueue.copyExternalImageToTexture()` with `RENDER_ATTACHMENT` in addition to `TEXTURE_BINDING | COPY_DST`, matching current WebGPU validation requirements.
+- Store temporal history in the canvas preferred format instead of hard-coded `rgba8unorm`, keeping the swap-chain-to-history `copyTextureToTexture()` copy format-compatible on platforms whose preferred canvas format is `bgra8unorm`.
+- Build the render pipeline asynchronously and inspect WGSL compilation diagnostics before declaring WebGPU available. Shader/pipeline failures now become normal initialization errors so preview can fall back to Canvas2D instead of creating contagious invalid GPU objects and flooding DevTools. Track later uncaptured GPU validation errors as renderer failures so live preview can fall back on the following frame instead of remaining stuck on a broken GPU path.
+- Add WebGPU regression coverage for the reserved-keyword fix, external-image texture usage flags, history texture format, and asynchronous shader/pipeline validation path.
+
+# 0.38.0 — Sequential WebCodecs pipeline and compressed-image removal
+
+- Replace the v0.37 all-IDR `TVZ1` browser source cache with `TVZ2`, a normal-GOP Annex-B H.264 transport carrying explicit key/delta flags. Source `VideoDecoder`s now advance sequentially and only restart from the closest prior IDR when timeline access moves backwards, substantially reducing cache size and making hardware decoding behave like video decoding instead of independent still-frame decoding. Existing `TVZ1` caches remain readable.
+- Keep key access units independently restartable by prepending the current SPS/PPS when needed, use a two-second GOP with B-frames disabled, attempt NVENC cache creation first, and retain ultrafast x264 fallback. Cache identity includes the transport version/GOP so old all-IDR files are never mistaken for the new layout.
+- Move WebCodecs output encoding and `/ws/offline-render` backpressure into a dedicated `browser_encode_worker.js`. Offline rendering now separates source-decode workers, WebGPU composition, and output-codec/network work instead of servicing all codec callbacks on the page thread. Main-thread `VideoEncoder` remains an automatic compatibility fallback if worker encoding is unavailable.
+- Remove PNG/JPEG browser frame export from offline rendering entirely. The non-WebCodecs compatibility path now sends tightly packed RGBA frames over the binary WebSocket and FFmpeg consumes `rawvideo`; there is no `canvas.toBlob()`, base64 frame API, PNG/JPEG image stream, or FFmpeg image decode in the browser render architecture. The old `frames` transport spelling is accepted only as a deprecated alias for `raw`.
+- Expand the fused WebGPU compositor with pixelation, posterization, solarization, edge extraction, horizontal glitch, block displacement, VHS-style tracking, ripple/tempo deformation, slit-scan history, datamosh-like history blocks, motion trails, and frame echo. These effects no longer require their Canvas2D full-frame implementations when WebGPU is active.
+- Keep temporal history GPU-resident for WebGPU shots. CPU half-resolution delay buffers are now updated only when a rare compatibility mask actually needs them, and the full-resolution Canvas2D history copy is skipped while the GPU compositor is active. Hero flow/depth/temporal behavior is folded into the fused GPU parameters where possible.
+- Add regression coverage for TVZ2 key/delta packing, sequential worker decode wiring, encoder-worker ownership, raw-RGBA fallback, complete removal of image-compression transport, and the expanded WGSL effect set. Validate the new transport with a real FFmpeg H.264 encode/decode smoke test and validate raw fallback by encoding synthetic RGBA frames through FFmpeg.
+
+# 0.37.2 — Complete audio-AI packaging
+
+- Add `nnaudio==0.3.4` to the `audio-ai` optional dependency group in `pyproject.toml`, alongside PyTorch and Transformers. This makes `pip install -e '.[audio-ai]'` install the complete learned-audio runtime instead of relying on nnAudio to have been installed separately.
+- Keep nnAudio out of the base dependency set so core ingest, library, preview, and rendering installs do not pull in the PyTorch stack unless audio AI is requested.
+- Add repository-layout regression coverage for the nnAudio dependency and update the documented `audio-ai` extra contents.
+
+# 0.37.1 — WebGPU preview reliability
+
+- Fix live WebGPU preview initialization so the visible GPU canvas is never transferred to a worker until worker-side WebGPU has passed a real scratch-canvas probe. This preserves the main-thread WebGPU fallback; once `transferControlToOffscreen()` has run, the original canvas can no longer create a context.
+- Use main-thread WebGPU for interactive preview by default. The preview compositor still executes pixel work on the GPU, but avoids transferring two `VideoFrame`s to a worker and synchronizing them on every displayed frame. The worker WebGPU path remains preferred for deterministic offline browser rendering.
+- Add an end-to-end worker probe that checks secure-context access, `WorkerNavigator.gpu`, adapter/device creation, WGSL pipeline creation, external-image copies, rendering, and queue synchronization on a scratch `OffscreenCanvas` before the visible canvas is transferred.
+- Make preview startup fail-safe: WebGPU initialization errors no longer abort the top-level visualizer module. Interactive preview falls back to Canvas2D and remains usable even when **Preview GPU** explicitly prefers WebGPU.
+- Preserve strict `--browser-gpu webgpu` behavior for offline rendering: `tubevizOfflineInit()` fails with the actual WebGPU reason instead of silently rendering offline through Canvas2D.
+- Add a GPU-worker frame watchdog and asynchronous device-loss propagation. A stalled/lost worker now restores the Canvas2D preview instead of freezing indefinitely on the last GPU frame.
+- Add a visible renderer-status line to the preview HUD showing `WebGPU` vs `Canvas2D` and the initialization/fallback reason. This makes insecure-origin, unavailable-adapter, worker, shader, and device-loss problems diagnosable without opening DevTools.
+- Clarify the Studio Preview GPU selector: WebGPU is preferred for interactive preview but falls back safely; the offline Browser GPU selector retains its strict WebGPU option.
+
+# 0.37.0 — Browser WebCodecs source decode and worker WebGPU compositor
+
+- Remove the normal offline browser renderer's per-output-frame `HTMLVideoElement.currentTime` seek cycle. The private render server now exposes `/api/offline-source/{scene_index}/{layer_index}`, which resolves the exact timeline media securely beneath the selected library and builds/reuses a content-addressed, frame-addressable H.264 source cache.
+- Add the `TVZ1` browser source transport: FFmpeg samples only the requested scene range at render FPS, creates all-IDR Annex-B H.264 with AUD/SPS/PPS suitable for random WebCodecs access, packs independent access units, and stores them beneath `library/browser-webcodecs-cache/`. `h264_nvenc` is attempted first and `libx264` is the automatic fallback.
+- Add `browser_source.js` plus a dedicated `browser_source_worker.js`. Offline source layers now prefer `VideoDecoder` with hardware acceleration, decode only the access unit needed for the requested timestamp, and transfer the resulting `VideoFrame` back to the compositor. Main-thread WebCodecs remains a fallback if module workers are unavailable; individual clips fall back to HTML video in `auto` mode.
+- Look ahead one scene while the current shot renders and prepare the next scene transport serially in the background. The prewarm request cancels its response body after headers because the server-side content-addressed cache is already complete, avoiding an unnecessary duplicate in-browser buffer. Cached transport responses use `FileResponse`, so repeat renders stream the cache from disk instead of first reading the entire packed scene into Python memory.
+- Add `--browser-source-decode auto|webcodecs|video` and expose the same control in Studio. `auto` prefers the worker WebCodecs path and retains HTML video compatibility; `webcodecs` makes decoder availability/cache preparation failures fatal for debugging.
+- Move WebGPU command construction and the GPU canvas off the main thread with `transferControlToOffscreen()` and a dedicated module worker. Keep a main-thread WebGPU fallback where the canvas has not already transferred.
+- Replace the small v0.36 finishing shader with a fused worker WGSL compositor for common full-frame work: source-relative warp/flow, pseudo-depth parallax, real RGB displacement, bloom/streak approximation, temporal feedback/history, restrained directed color/palette accents, final source-chroma fidelity, vignette, scanlines, and strobe.
+- Add a persistent GPU history texture so feedback/temporal accumulation no longer depends on a full-resolution main-thread history copy for the migrated effect families. Rare local-symmetry/hero/vector/legacy effects stay on the compatibility compositor for deterministic parity and automatic fallback.
+- When WebGPU is active, skip the corresponding Canvas2D implementations of directed color, spectral/chromatic displacement, common creative flow/depth/temporal/palette/feedback, bass/ripple warp, RGB/chroma delay, and final source-fidelity pass; pass their bounded automation values to the fused GPU shader instead.
+- Preserve all v0.36 output fast paths: one in-page offline render sequence, binary render WebSocket, hardware-preferred WebCodecs H.264 output, direct Annex-B stream muxing, and binary PNG/JPEG fallback.
+- Add validation for the source transport packer, independent SPS/PPS+IDR access units, decoder mode configuration, source-worker/GPU-worker assets, CLI/Studio propagation, and the existing browser render fallbacks. A real FFmpeg smoke test confirms the packed source transport can be unpacked and decoded as H.264.
+
+## Compatibility and quality boundary
+
+- Live interactive preview still uses normal `HTMLVideoElement` playback because browsers already schedule continuous media playback efficiently; the WebCodecs source worker is used for deterministic **offline** frame access where repeated exact seeks were pathological.
+- The browser source transport is a high-quality temporary render cache, not a replacement for canonical library media. Deleting `library/browser-webcodecs-cache/` is safe; it will be regenerated on the next browser render.
+- Complex semantic masks, vector drawing, codec-fallback simulations, and rare hero effects still execute on Canvas2D before the worker GPU pass. This keeps visual compatibility while the high-frequency/full-frame effect workload moves off the main thread.
+- The final browser output path is still hybrid rather than a fully zero-copy `VideoDecoder → WebGPU external texture → VideoEncoder` graph. `VideoFrame` transfer removes the seek/decode bottleneck and WebGPU moves common effects off-thread; the remaining Canvas2D compatibility layer is the next boundary for future optimization.
+
+# 0.36.0 — Browser rendering acceleration foundation
+
+- Replace the browser offline renderer's per-frame Playwright `page.evaluate()` + base64 transport with a single in-page render loop and a dedicated binary WebSocket stream to the local render server.
+- Add an `auto` WebCodecs transport that probes `VideoEncoder.isConfigSupported()` and, when H.264 is available, creates `VideoFrame`s directly from the composed canvas, asks Chrome to prefer hardware encoding, streams Annex-B H.264 access units, and lets FFmpeg copy/mux that stream with the original audio. This removes PNG/JPEG encoding, base64 conversion, per-frame browser RPC, and FFmpeg image decoding from the fast path.
+- Keep a robust binary PNG/JPEG WebSocket fallback. `auto` retries the full render with this fallback if a browser advertises H.264 WebCodecs but fails during encoder initialization or use.
+- Add `--browser-transport auto|webcodecs|frames`, `--browser-gpu auto|webgpu|off`, and `--webcodecs-bitrate`; expose the same controls in Studio. WebCodecs currently emits H.264, so non-H.264 output requests use the frame fallback.
+- Add a real WebGPU finishing stage behind feature detection. The first GPU stage uses a high-performance adapter and a fused WGSL pass for simple full-frame finishing operations; Canvas2D remains the compatibility/reference compositor while more effect families migrate incrementally.
+- Make interactive preview start at a 720p-class internal render target instead of blindly multiplying the viewport by `devicePixelRatio`. `preview=auto` adapts among approximately 540p, 720p and 1080p based on measured frame time; fixed `540p`, `720p`, `1080p` and `native` modes are also available.
+- Drive live rendering from `HTMLVideoElement.requestVideoFrameCallback()` when a source is actively playing, so 24/30 fps media is not repeatedly reprocessed at a 60/120/144 Hz display refresh rate. Idle previews render at a low cadence instead of burning a full animation loop.
+- Add Studio Preview quality and Preview GPU selectors and propagate them as query parameters when launching the managed preview.
+- Add `/ws/offline-render` to the local FastAPI preview/render service for ordered binary browser output. The endpoint is only enabled for the private offline render server when a sink is supplied.
+- Preserve the old `tubevizRenderFrame`, frame-export, Canvas2D and image2pipe APIs as fallbacks/backward-compatible debugging surfaces.
+- Add regression coverage for WebCodecs muxing, browser acceleration CLI/Studio controls, binary WebSocket delivery, adaptive preview scheduling and WebGPU source presence.
+
+## Current boundary
+
+- v0.36.0 accelerates **browser output encoding/transport** and the first full-frame GPU finishing stage. Source media is still supplied through `HTMLVideoElement`; deterministic offline rendering still seeks those elements for exact source times. A future WebCodecs decoder/demux stage can remove that remaining seek-heavy bottleneck without changing the v0.36 transport protocol.
+- The WebGPU stage is deliberately hybrid: complex temporal/vector/semantic Canvas2D effects remain unchanged for visual parity while low-risk full-frame work begins moving to WGSL.
+
+# 0.35.0 — GPU-accelerated native rendering
+
+- Turn the existing optional libplacebo detection into a real Vulkan render path. The native renderer now executes virtual-camera motion, flow/harmonic warping, pseudo-depth parallax, sparse local symmetry, RGB displacement, source-derived bloom/streaks, restrained palette/color direction, reactive beat treatment, and source-fidelity chroma anchoring in one fused libplacebo custom-shader pass.
+- Keep temporal/history and vector operations on the CPU after the fused GPU pass so feedback, echoes, flow trails, codec/vector treatments, crossfades, and existing manifest behavior remain compatible. A per-frame GPU failure disables the Vulkan stage once and falls back to the complete CPU effect path for the remainder of the render.
+- Add CUDA/NVDEC hardware decode selection (`--native-hwdecode auto|cuda|off`) through FFmpeg's hardware-device API. `auto` discovers a CUDA-capable decoder configuration per source and falls back transparently to software decode when the stream/driver cannot use it. Cached decoders request CUDA's primary device context to avoid creating an unrelated CUDA context for every source clip.
+- Add native GPU selection (`--native-gpu auto|vulkan|off`) in the CLI and Studio Render panel. `auto` uses libplacebo/Vulkan when the library is built in and Vulkan initialization succeeds; otherwise rendering remains CPU-compatible.
+- Prefer a renderable RGB8 libplacebo texture when the GPU exposes one, allowing direct RGB24 upload/download with no RGB↔RGBA staging conversion. Fall back to RGBA8 only when required by the Vulkan device. Enable asynchronous Vulkan transfer/compute queues when supported.
+- Make libplacebo initialization strict-C++20 safe by constructing public parameter structs directly instead of invoking libplacebo's C compound-literal convenience macros. Vulkan uses libplacebo's documented default parameters, which retain asynchronous transfer/compute defaults.
+- Share one FFmpeg CUDA hardware-device wrapper across the decoder cache with the CUDA primary context enabled, and make hardware-format fallback choose a genuine software pixel format rather than another unconfigured hwaccel format.
+- Download direct RGB8 Vulkan output into a reusable staging buffer and swap it into the renderer only after a successful transfer, preserving a pristine CPU frame for automatic GPU failure fallback without adding another full-frame copy.
+- Disable libplacebo's global `dynamic_constants` mode; tubeviz shader controls are explicitly dynamic uniforms, avoiding the documented specialization/performance penalty from making every renderer constant dynamic.
+- Fuse shot-local brightness/contrast/saturation/hue/grayscale/noise, scanlines, and vignette into one OpenMP traversal instead of multiple full-HD passes.
+- Remove a full-frame temporal-history copy by swapping the completed RGB buffer into `previous_output_` after it has been written to the encoder pipe.
+- Add native diagnostics for renderer build features, FFmpeg hardware accelerators, CUDA decode advertisement, libplacebo buildability, and `nvidia-smi`. Native logs now report the selected Vulkan and per-decoder hardware backends.
+- Preserve the existing raw-RGB FFmpeg/NVENC output contract and CPU vector/history stages for compatibility. v0.35.0 is therefore a hybrid GPU compositor rather than a CUDA/Vulkan-to-NVENC zero-copy pipeline; this avoids changing timeline/manifests or requiring CUDA-specific build headers.
+- Add regression coverage for GPU/hardware-decode defaults, CLI/Studio propagation, CUDA decoder source wiring, libplacebo/CMake integration, and the previous-frame zero-copy swap.
+
 # 0.34.0 — Resource-aware two-pass AI editing
 
 - Upgrade the optional LLM director from a song-only treatment pass into a resource-aware two-pass directing system. Pass 1 now receives a compact manifest of the actual READY/output-pool library plus the renderer capabilities that are enabled for the run.

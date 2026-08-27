@@ -76,3 +76,31 @@ def test_server_serves_direct_original_media(tmp_path: Path):
     response = client.get(selection["media_url"])
     assert response.status_code == 200
     assert response.content == b"direct-source-media"
+
+
+def test_offline_render_websocket_forwards_binary_frames(tmp_path: Path):
+    class Sink:
+        def __init__(self):
+            self.data = []
+            self.payload = None
+        def consume(self, data: bytes):
+            self.data.append(bytes(data))
+        def complete(self, payload: dict):
+            self.payload = dict(payload)
+
+    track = TrackAnalysis(
+        source="/tmp/song.wav", duration=1.0, sample_rate=22050, hop_length=512,
+        tempo_bpm=120.0, beats=[], bars=[], events=[], sections=[],
+    )
+    timeline_path = tmp_path / "timeline.json"
+    timeline_path.write_text(DirectedTimeline(track=track, cues=[]).model_dump_json())
+    sink = Sink()
+    client = TestClient(create_app(timeline_path, offline_render_sink=sink))
+    with client.websocket_connect("/ws/offline-render") as ws:
+        ws.send_bytes(b"frame-one")
+        ws.send_bytes(b"frame-two")
+        ws.send_json({"type": "complete", "frames": 2, "transport": "frames"})
+        ack = ws.receive_json()
+    assert ack == {"type": "complete", "frames": 2}
+    assert sink.data == [b"frame-one", b"frame-two"]
+    assert sink.payload["frames"] == 2

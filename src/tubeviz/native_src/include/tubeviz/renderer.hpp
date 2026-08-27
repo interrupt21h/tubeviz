@@ -9,6 +9,7 @@
 
 #include "tubeviz/decoder.hpp"
 #include "tubeviz/effects.hpp"
+#include "tubeviz/gpu.hpp"
 #include "tubeviz/manifest.hpp"
 
 namespace tubeviz {
@@ -21,7 +22,9 @@ public:
         int height,
         double fps,
         std::size_t decoder_cache_limit = 16,
-        int threads = 0
+        int threads = 0,
+        std::string gpu_mode = "auto",
+        std::string hwdecode_mode = "auto"
     );
     int run();
 
@@ -45,11 +48,15 @@ private:
     std::size_t decoder_cache_limit_{16};
     std::uint64_t decoder_use_clock_{0};
     int threads_{0};
+    std::string gpu_mode_{"auto"};
+    std::string hwdecode_mode_{"auto"};
+    std::unique_ptr<GpuPostProcessor> gpu_;
+    bool gpu_frame_used_{false};
     ReactiveState reactive_{};
     std::size_t cue_index_{0};
     std::vector<std::uint8_t> previous_output_;
     // Composed primary+companion frame before creative/vector/reactive effects. Used
-    // by the final source-chroma guard so every native post-processing path obeys
+    // by the final source-chroma guard so every post-processing path obeys
     // CreativeEffectPlan.source_fidelity.
     std::vector<std::uint8_t> color_reference_;
     bool has_previous_output_{false};

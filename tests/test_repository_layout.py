@@ -12,6 +12,7 @@ def test_repository_has_apache_license_metadata():
     license_text = Path("LICENSE").read_text()
     assert 'license = "Apache-2.0"' in pyproject
     assert 'license-files = ["LICENSE", "NOTICE"]' in pyproject
+    assert '"nnaudio==0.3.4"' in pyproject
     assert "Apache License" in license_text
     assert "Version 2.0" in license_text
     assert Path("NOTICE").is_file()

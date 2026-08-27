@@ -9,8 +9,9 @@
     html,body { margin:0; width:100%; height:100%; overflow:hidden; background:#000; font-family:system-ui,sans-serif; }
     #stage { position:fixed; inset:0; overflow:hidden; background:#000; }
     .decoder { position:absolute; width:1px; height:1px; left:-100px; top:-100px; opacity:0; pointer-events:none; }
-    #video-fx,#canvas { position:absolute; inset:0; width:100%; height:100%; display:block; pointer-events:none; }
+    #video-fx,#gpu-fx,#canvas { position:absolute; inset:0; width:100%; height:100%; display:block; pointer-events:none; }
     #video-fx { z-index:1; background:#000; }
+    #gpu-fx { z-index:1; background:#000; display:none; }
     #canvas { z-index:2; }
     #hud { position:fixed; z-index:4; left:16px; bottom:16px; color:white; background:rgba(0,0,0,.48); padding:10px 12px; border-radius:8px; backdrop-filter:blur(10px); }
     #meta,#clip-meta { font-size:12px; opacity:.82; margin-top:6px; max-width:min(820px,80vw); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -34,12 +35,14 @@
   <video id="decoder-6" class="decoder" muted playsinline preload="auto"></video>
   <video id="decoder-7" class="decoder" muted playsinline preload="auto"></video>
   <canvas id="video-fx"></canvas>
+  <canvas id="gpu-fx"></canvas>
   <canvas id="canvas"></canvas>
 </div>
 <div id="hud">
   <audio id="audio" controls src="/audio"></audio>
   <div id="meta">Loading timeline…</div>
   <div id="clip-meta">Video renderer</div>
+  <div id="render-meta" style="font-size:11px;opacity:.62;margin-top:4px">Renderer initialization…</div>
   <button id="fx-toggle" type="button">FX controls</button>
   <div id="fx-panel">
     <label for="fx-master">Master</label><input id="fx-master" type="range" min="0" max="2" step="0.05" value="1"><span id="fx-master-v" class="fx-value">1.00</span>

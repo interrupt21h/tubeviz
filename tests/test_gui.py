@@ -144,3 +144,25 @@ def test_gui_rejects_unknown_job_kind():
         assert "unsupported" in str(exc)
     else:
         raise AssertionError("unknown GUI job kind was accepted")
+
+
+def test_gui_render_job_forwards_browser_acceleration_controls():
+    command = _job_command(JobRequest(
+        kind="render",
+        timeline="timelines/song.json",
+        audio="audio/song.mp3",
+        output="song.mp4",
+        options={
+            "backend": "browser",
+            "browser_transport": "webcodecs",
+            "browser_gpu": "webgpu",
+            "browser_source_decode": "webcodecs",
+            "webcodecs_bitrate": 14_000_000,
+        },
+    ))
+    joined = " ".join(command)
+    assert "--backend browser" in joined
+    assert "--browser-transport webcodecs" in joined
+    assert "--browser-gpu webgpu" in joined
+    assert "--browser-source-decode webcodecs" in joined
+    assert "--webcodecs-bitrate 14000000" in joined

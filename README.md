@@ -3,71 +3,30 @@
 # tubeviz
 
 **tubeviz** turns a music track and a library of source footage into a beat-aligned,
-AI-directed music video. It handles the whole production: finding and curating
-footage, detecting scenes, analyzing the music, planning a visual arc, choosing
-excerpts, composing layers and effects, previewing the result in a browser, and
-rendering a final encoded video.
+AI-directed music video. It can acquire and curate footage, detect scenes, analyze music,
+plan an edit, apply visual treatments, preview the result interactively, and render a
+finished video.
+
+The project supports both a browser-based **Studio** workflow and a full command-line
+interface. Both operate on the same persistent media library and the same directed
+timeline format.
 
 ## Sample videos
 
 Complete videos produced with tubeviz:
 
-- [Tubeviz - Moby - God Moving Over the Face of the Waters](https://www.youtube.com/watch?v=wKmsWvEj3No)
-- [Tubeviz - Fred Again - Delilah (Pull Me Out of This)](https://www.youtube.com/watch?v=EWGSQ80k_uY)
-- [Tubevis - Fred Again - Delilah (Pull Me Out of This) - v2](https://www.youtube.com/watch?v=x9o7jhfRlUw)
+- [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
 - [Tubeviz - Night Tapes - Drifting](https://youtu.be/Z5qFih1OKeo)
 - [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
 - [Tubeviz — Step It Up — Stereo MC's](https://youtu.be/nrYzxJzPYbE)
 
-## Contents
+## Architecture
 
-- [Overview](#overview)
-- [Requirements and installation](#requirements-and-installation)
-- [FFglitch installation](#ffglitch-installation)
-- [Quick start: Studio](#quick-start-studio)
-- [Working in Studio](#working-in-studio)
-- [Building a footage library](#building-a-footage-library)
-- [Curating the library](#curating-the-library)
-- [Analyzing music and building the edit](#analyzing-music-and-building-the-edit)
-- [Visual direction](#visual-direction)
-- [Semantic temporal creative renderer](#semantic-temporal-creative-renderer)
-- [Vector scene graph](#vector-scene-graph)
-- [FFglitch codec-space effects](#ffglitch-codec-space-effects)
-- [Previewing interactively](#previewing-interactively)
-- [Rendering a final video](#rendering-a-final-video)
-- [Library layout](#library-layout)
-- [Recommended four-minute EDM workflow](#recommended-four-minute-edm-workflow)
-- [Troubleshooting](#troubleshooting)
-- [Command reference](#command-reference)
-- [Development](#development)
-- [License](#license)
-
-## Overview
-
-Unlike an audio-reactive shader that changes parameters on a single image, tubeviz
-reasons across the entire production. Source video stays primary; compositing,
-transforms, vector treatments, and codec effects are scheduled around it.
-
-The central artifact is a versioned, Pydantic-validated **directed timeline**: a JSON
-plan that separates expensive or subjective decisions from playback and rendering. The
-same plan can be inspected, served in the browser, re-cut against an updated library,
-materialized into caches, or rendered by either backend without repeating the whole
+Tubeviz is built around a persistent clip library and a versioned **directed timeline**.
+The timeline is a JSON production plan that separates analysis and editorial decisions
+from playback and rendering. Once a timeline has been created, it can be previewed,
+replanned, materialized, or rendered without repeating the complete ingest and analysis
 workflow.
-
-Five ideas shape the system:
-
-- **Music-aware direction.** Beats, bars, variable tempo, onsets, sections, timbre,
-  energy, motifs, phrase trajectories, and optional learned audio semantics all
-  influence the edit.
-- **Footage-first visuals.** Real source video carries the frame; effects support it.
-- **Reusable local intelligence.** Normalized media, detected scenes, thumbnails,
-  semantic embeddings, visual measurements, provenance, curation state, and trim ranges
-  persist in a SQLite-backed library.
-- **Deterministic plans, controllable variation.** A stored timeline is reproducible,
-  while seeds, reshuffling, library replanning, and configurable novelty produce
-  alternate cuts on purpose.
-- **One engine, several interfaces.** Studio and the CLI invoke the same command
-  implementation; preview and both render paths consume the same timeline model.
 
 ```mermaid
 flowchart TB
@@ -81,7 +40,7 @@ flowchart TB
         STUDIO["Studio and CLI"]
         INGEST["Acquisition and ingest"]
         LIB[("Persistent clip library")]
-        PLAN["Analysis and direction"]
+        PLAN["Music analysis and visual direction"]
         TL[("Directed timeline JSON")]
         PREVIEW["Interactive preview"]
         RENDER["Browser or native renderer"]
@@ -92,9 +51,9 @@ flowchart TB
     AUDIO --> STUDIO
     STUDIO --> INGEST
     INGEST --> LIB
-    STUDIO --> PLAN
     AUDIO --> PLAN
     LIB --> PLAN
+    STUDIO --> PLAN
     PLAN --> TL
     TL --> PREVIEW
     TL --> RENDER
@@ -105,46 +64,151 @@ flowchart TB
     RENDER --> OUTPUT["Encoded music video"]
 ```
 
-Studio is an orchestration layer, not a parallel implementation. Its curated workflows
-and parser-generated Command Center launch validated CLI argument vectors. The CLI
-coordinates the Python planning pipeline, external media tools, the FastAPI preview
-service, and the native renderer.
+Tubeviz combines several kinds of information when constructing an edit:
 
-## Requirements and installation
+- beat, bar, onset, tempo, section, and phrase structure;
+- optional learned audio representations and semantic audio analysis;
+- detected source scenes, motion, complexity, palette, and temporal visual features;
+- optional OpenCLIP embeddings and AI-generated visual descriptions;
+- transition quality, novelty, clip reuse, curation preferences, and sequence continuity;
+- transforms, compositing, temporal effects, vector treatments, and optional codec-space
+  effects.
+
+Source video remains the primary visual material. Effects are scheduled around the
+footage rather than replacing it with a standalone audio-reactive shader.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Studio](#studio)
+- [AI configuration](#ai-configuration)
+- [Building a footage library](#building-a-footage-library)
+- [Curating the library](#curating-the-library)
+- [Analyzing music and creating a timeline](#analyzing-music-and-creating-a-timeline)
+- [Visual direction and effects](#visual-direction-and-effects)
+- [Previewing](#previewing)
+- [Rendering](#rendering)
+- [Hardware acceleration](#hardware-acceleration)
+- [FFglitch codec-space effects](#ffglitch-codec-space-effects)
+- [Library layout](#library-layout)
+- [Recommended workflow](#recommended-workflow)
+- [Troubleshooting](#troubleshooting)
+- [Command overview](#command-overview)
+- [Development](#development)
+- [License](#license)
+
+## Quick start
+
+For most users, Studio is the easiest way to work with tubeviz.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[semantic,audio-ai,render]'
+
+tubeviz gui \
+  --project-root "$PWD" \
+  --library ./library
+```
+
+Studio opens in the browser, normally at:
+
+```text
+http://127.0.0.1:8090/
+```
+
+A typical project flow is:
+
+```text
+1. Build or import a footage library
+2. Review, trim, reject, and enhance clips
+3. Analyze a music track and create a directed timeline
+4. Preview and adjust the edit
+5. Render the final video
+```
+
+The same workflow can be performed entirely from the command line:
+
+```bash
+# Acquire footage.
+tubeviz ingest \
+  --terms search_terms.txt \
+  --library ./library \
+  --results-per-term 10
+
+# Analyze the track and construct an edit.
+tubeviz analyze audio/song.mp3 \
+  --library ./library \
+  --semantic \
+  --output timelines/song.json
+
+# Preview it.
+tubeviz serve timelines/song.json \
+  --library ./library \
+  --audio audio/song.mp3
+
+# Render it.
+tubeviz render timelines/song.json \
+  --library ./library \
+  --audio audio/song.mp3 \
+  --output output/song.mp4 \
+  --backend auto
+```
+
+## Requirements
+
+### Core requirements
 
 - Python **3.11+**
-- FFmpeg / ffprobe
-- yt-dlp (installed with the Python package)
-- Chrome/Chromium plus Playwright, for the browser renderer only
-- CMake, a C++20 compiler, pkg-config, and FFmpeg development libraries, for the native
-  renderer only
-- OpenCLIP dependencies, for semantic/AI visual selection only
-- FFglitch **0.10.2** `ffedit`, for true codec-space motion-vector effects only.
-  `fflive` and `ffgac` are optional and not used by tubeviz
+- FFmpeg and ffprobe
+- yt-dlp, installed with the Python package
 
-### System packages
+### Optional components
 
-**Arch Linux / CachyOS:**
+| Capability | Additional requirements |
+|---|---|
+| Studio/browser preview | A current Chrome or Chromium browser |
+| Browser offline rendering | Playwright and Chromium |
+| Semantic visual selection | OpenCLIP dependencies and Pillow |
+| Learned audio analysis | PyTorch, Transformers, and nnAudio |
+| Native renderer | CMake, a C++20 compiler, pkg-config, and FFmpeg development libraries |
+| Native Vulkan Creative FX | libplacebo and a working Vulkan driver/device |
+| Native CUDA/NVDEC source decode | An FFmpeg build with CUDA hwaccel and a usable NVIDIA driver/runtime |
+| Codec-space glitch effects | FFglitch `ffedit` |
+
+### Linux system packages
+
+#### Arch Linux / CachyOS
 
 ```bash
 sudo pacman -S --needed \
-  base-devel cmake pkgconf ffmpeg curl unzip chromium
+  base-devel cmake pkgconf ffmpeg libplacebo vulkan-icd-loader \
+  vulkan-tools curl unzip chromium
 ```
 
-**Debian / Ubuntu:**
+#### Debian / Ubuntu
 
 ```bash
-sudo apt install \
-  build-essential cmake pkg-config ffmpeg curl unzip chromium \
-  libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
+sudo apt update
+sudo apt install -y \
+  build-essential cmake pkg-config ffmpeg curl unzip \
+  libavformat-dev libavcodec-dev libavutil-dev libswscale-dev \
+  libplacebo-dev libvulkan-dev vulkan-tools
 ```
 
-`chromium` is needed only for browser preview and offline browser rendering when you are
-not using Playwright's downloaded browser. The CMake/compiler and FFmpeg development
-headers are needed only to build the native C++ renderer. FFglitch is installed
-separately; it is not provided by tubeviz or Python packaging.
+Install Chrome/Chromium separately, or use Playwright's managed Chromium build with
+`playwright install chromium`. Distribution packaging for Chromium differs between
+Debian and Ubuntu.
 
-### Install
+The compiler, CMake, FFmpeg development headers, libplacebo, and Vulkan packages are
+needed only for the native renderer and its optional GPU path. Browser rendering does
+not depend on the native renderer.
+
+## Installation
+
+Clone the repository and install the base package:
 
 ```bash
 git clone <repo-url> tubeviz
@@ -154,18 +218,22 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-For semantic selection, AI ingest, learned audio analysis, browser rendering, and tests:
+Install all commonly used optional features:
 
 ```bash
-pip install -e '.[dev,semantic,audio-ai,render]'
+pip install -e '.[semantic,audio-ai,render]'
 ```
 
-Extras can be installed independently: `semantic` adds OpenCLIP and Pillow, `audio-ai`
-adds PyTorch and Transformers for CLAP/MERT, `render` adds Playwright, and `dev` adds
-test dependencies. Core DSP analysis, library management, preview serving, and native
-rendering work without the learned-AI extras.
+The extras can also be installed independently:
 
-If you want Playwright's own Chromium:
+| Extra | Purpose |
+|---|---|
+| `semantic` | OpenCLIP scene embeddings and image support |
+| `audio-ai` | CLAP/MERT learned audio analysis |
+| `render` | Playwright browser rendering |
+| `dev` | Test dependencies |
+
+If you want Playwright to manage its own Chromium build:
 
 ```bash
 playwright install chromium
@@ -178,120 +246,26 @@ tubeviz --help
 ffmpeg -version
 ```
 
-### Codec-cache filesystems and MP4 faststart
-
-Codec-glitch shots are finalized in tubeviz's local temporary directory and only then
-published to `library/codec-glitch/`. This keeps FFmpeg's `+faststart` in-place MP4
-rewrite off NFS, FUSE, network, merger, and other mounted library filesystems. If the
-optional faststart pass fails locally, tubeviz retries without it; cached shots do not
-require a front-loaded `moov` atom. Cache publication uses a same-directory temporary
-file plus `fsync` and atomic `os.replace`, so an interrupted materialization cannot
-leave a partially written MP4 in place.
-
-## FFglitch installation
-
-FFglitch is **not** a Python dependency and is not installed by `pip`. tubeviz uses the
-external `ffedit` executable for codec-space motion-vector materialization. The
-supported release is **FFglitch 0.10.2**. In FFglitch's own documentation, `ffedit` is
-the multimedia bitstream editor, `fflive` handles live playback/glitching, and `ffgac`
-is an FFmpeg variant with extra glitch functionality. tubeviz requires only `ffedit`.
-
-### Linux x86-64
-
-The official prebuilt archive:
-
-```text
-https://ffglitch.org/pub/bin/linux64/ffglitch-0.10.2-linux-x86_64.zip
-```
-
-A user-local installation that leaves `/usr/local` untouched:
+For optional acceleration features, also run:
 
 ```bash
-mkdir -p ~/.local/bin
-tmpdir="$(mktemp -d)"
-curl -L \
-  https://ffglitch.org/pub/bin/linux64/ffglitch-0.10.2-linux-x86_64.zip \
-  -o "$tmpdir/ffglitch.zip"
-unzip -q "$tmpdir/ffglitch.zip" -d "$tmpdir/unpacked"
-install -m 0755 \
-  "$(find "$tmpdir/unpacked" -type f -name ffedit -print -quit)" \
-  ~/.local/bin/ffedit
-rm -rf "$tmpdir"
-
-# Ensure ~/.local/bin is on PATH for this shell/session.
-export PATH="$HOME/.local/bin:$PATH"
-
-ffedit -h | head -40
+tubeviz native doctor
+tubeviz audio-ai doctor
+tubeviz music-ai doctor
 tubeviz codec doctor
 ```
 
-FFglitch's optional tools live in the same archive if you want them:
+## Studio
 
-```bash
-# Optional; tubeviz does not require these.
-install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name fflive -print -quit)" ~/.local/bin/fflive
-install -m 0755 "$(find /path/to/extracted-ffglitch -type f -name ffgac -print -quit)" ~/.local/bin/ffgac
-```
-
-### Linux aarch64
-
-```text
-https://ffglitch.org/pub/bin/linux-aarch64/ffglitch-0.10.2-linux-aarch64.7z
-```
-
-Extract with `7z`, copy `ffedit` onto `PATH`, and verify with `tubeviz codec doctor`.
-
-### macOS and Windows
-
-Official FFglitch 0.10.2 archives are published for macOS x86-64, macOS Apple silicon,
-and Windows x86-64. Install `ffedit` from the appropriate archive and put it on `PATH`
-before starting tubeviz. See the FFglitch download page for current links.
-
-### Diagnostics
-
-```bash
-command -v ffedit
-ffedit -h | head -40
-tubeviz codec doctor
-```
-
-If `tubeviz codec doctor` reports FFglitch as unavailable, analysis, preview, vector
-effects, and rendering all still work — only true codec materialization is unavailable.
-
-## Quick start: Studio
-
-Studio is the fastest way to work with tubeviz:
+Studio provides a browser interface over the same workflows exposed by the CLI.
 
 ```bash
 tubeviz gui \
-  --project-root /DATA/git/tubeviz \
-  --library /DATA/git/tubeviz/library
+  --project-root /path/to/tubeviz-project \
+  --library /path/to/tubeviz-project/library
 ```
 
-It opens `http://127.0.0.1:8090/` by default.
-
-```mermaid
-flowchart LR
-    GUI["tubeviz Studio"] --> CREATE["Create"]
-    GUI --> LIBRARY["Library"]
-    GUI --> JOBS["Jobs"]
-
-    CREATE --> I["AI ingest"]
-    CREATE --> A["Analyze + cut"]
-    CREATE --> P["Preview"]
-    CREATE --> R["Render"]
-    CREATE --> NB["Native build"]
-
-    LIBRARY --> PLAY["Play clips"]
-    LIBRARY --> REJECT["Reject / restore"]
-    LIBRARY --> DELETE["Delete"]
-    LIBRARY --> FILTER["Filter / inspect"]
-
-    JOBS --> LOG["Live logs"]
-    JOBS --> CANCEL["Cancel"]
-```
-
-Other launch options:
+Other launch examples:
 
 ```bash
 tubeviz gui --library ./library --port 8095
@@ -299,376 +273,151 @@ tubeviz gui --library ./library --no-open
 tubeviz gui --host 0.0.0.0 --port 8090
 ```
 
-Studio runs the same CLI workflows described below; it is not a separate rendering
-implementation. The header displays the running tubeviz version, and Studio assets are
-served with no-cache behavior so a restarted Studio process serves current assets
-immediately.
+> When binding Studio to a non-loopback address, treat it as a local development service
+> and place it behind appropriate network controls if other systems can reach it.
 
-## Working in Studio
+### Create
 
-### Interfaces
+The **Create** interface covers the main production workflow:
 
-Studio offers two complementary surfaces:
+- AI-assisted footage acquisition;
+- manual YouTube URL ingest;
+- music analysis and timeline generation;
+- interactive preview;
+- final rendering;
+- native renderer build and diagnostics.
 
-1. the curated **Create** and **Library** panels, for frequent workflows; and
-2. the generated **Command Center**, which mirrors the `argparse` command tree and
-   exposes every non-GUI CLI command and option.
+![tubeviz Studio — Create](screenshots/screenshot-create.png)
 
-```mermaid
-flowchart LR
-    CLI["tubeviz argparse tree"] --> SCHEMA["/api/gui/cli-schema"]
-    SCHEMA --> CC["Studio Command Center"]
-    CC --> ARGV["validated argument vector"]
-    ARGV --> PROC["python -m tubeviz.cli ..."]
+### Library
 
-    CREATE["Curated Create panel"] --> PROC
-    LIB["Visual Library panel"] --> PROC
-```
+The **Library** interface is used to inspect and curate source footage. It supports:
 
-The Command Center is generated from the parser rather than from a second
-hand-maintained option list, so any option available on commands such as `analyze`,
-`render`, `serve`, `codec materialize`, `library embed`, or `ingest` appears in Studio.
-Commands launch as argument vectors, without shell interpolation.
+- filtering and browsing clips;
+- video playback;
+- non-destructive In/Out trimming;
+- rejection and restoration;
+- permanent deletion;
+- scene and metadata inspection;
+- visual and AI analysis review.
 
-![tubeviz Studio — Command Center](screenshots/screenshot-command.png)
+![tubeviz Studio — Library](screenshots/screenshot-library.png)
 
-Generated command coverage:
+The clip detail view places the trim controls beside the media so the usable range can
+be adjusted while viewing the source.
 
-```text
-tubeviz ingest
-tubeviz ingest-url
-tubeviz library list
-tubeviz library show
-tubeviz library reject
-tubeviz library restore
-tubeviz library delete
-tubeviz library stats
-tubeviz library ai-report
-tubeviz library visual-index
-tubeviz library codec-motion-index
-tubeviz library embed
-tubeviz audio-ai doctor
-tubeviz audio-ai inspect
-tubeviz analyze
-tubeviz materialize
-tubeviz render
-tubeviz codec doctor
-tubeviz codec inspect
-tubeviz codec materialize
-tubeviz native build
-tubeviz native doctor
-tubeviz serve
-```
+![tubeviz Studio — Library clip details](screenshots/screenshot-library-detail.png)
 
-`tubeviz gui` is intentionally not launchable from Command Center, since the running
-Studio process already owns the GUI.
+### Jobs
 
-Select any command and click **Use current Project paths** to copy the Studio Library,
-Audio, Timeline, Output, and Search Terms fields into matching CLI arguments. The
-argument-vector preview shows the exact command before it launches. Advanced commands
-use the same cancellable job manager and live log as the curated controls.
-
-### Contextual help
-
-Form controls carry inline `?` help affordances. Hover or focus a help icon for
-tubeviz-specific guidance; Command Center controls draw their help, defaults, and
-choices from the CLI parser, so GUI help stays synchronized with the command line. Help
-bubbles render in a document-level floating layer with viewport clamping and automatic
-above/below placement, so panel overflow and scrolling cannot crop them. Press
-**Escape** to dismiss a focused tooltip.
-
-### Jobs and progress
-
-Long-running jobs report their current stage, elapsed time, and live log. Operations
-with a known unit count — rendered frames, indexed scenes, CLAP windows, input URLs,
-search terms, codec shots, downloaded bytes — also show a percentage, completed/total
-count, and an ETA when the underlying process supplies one. Work such as initial model
-loading or DSP analysis uses an indeterminate progress bar until a measurable stage
-begins. Python workers run unbuffered, so messages appear as they happen rather than
-sitting in stdout buffers.
+Long-running operations appear in the **Jobs** panel with live output, progress,
+elapsed time, and cancellation controls when supported.
 
 ![tubeviz Studio — Jobs](screenshots/screenshot-jobs.png)
 
-### AI Settings
+### Command Center
 
-The **AI Settings** tab is the single control surface for learned features. The master
-**Enable AI features throughout Tubeviz** switch gates AI-assisted acquisition and final
-analysis jobs; a separate storyboard switch controls paid OpenAI video-description
-requests. The same screen configures the OpenAI API key, Hugging Face token,
-OpenAI-compatible base URL, shared OpenAI model, image detail, frame budget, and timeout. The saved base URL/model/key are inherited automatically by storyboard analysis, acquisition planning, and whole-song AI directing; the Create tab does not maintain duplicate credentials or model fields.
-Saved secret values are never sent back to the browser.
+The **Command Center** exposes CLI commands and their arguments from inside Studio. It is
+useful for advanced operations that are not part of the curated Create or Library
+panels.
+
+![tubeviz Studio — Command Center](screenshots/screenshot-command.png)
+
+For exact command syntax, the CLI remains the authoritative reference:
+
+```bash
+tubeviz --help
+tubeviz analyze --help
+tubeviz render --help
+```
+
+## AI configuration
+
+Studio's **AI Settings** page is the central configuration surface for optional learned
+and API-backed features.
 
 ![tubeviz Studio — AI Settings](screenshots/screenshot-ai.png)
 
-Settings persist outside the repository at `~/.config/tubeviz/config.json` (or
-`$XDG_CONFIG_HOME/tubeviz/config.json`). Set `TUBEVIZ_CONFIG` to use another path.
-Tubeviz creates the file with user-only `0600` permissions. Saved credentials are
-injected only into child-process environments and are excluded from job commands, logs,
-and API responses. The saved OpenAI model is likewise the application-wide default for
-vision, acquisition planning, and whole-song directing. `OPENAI_API_KEY`, `HF_TOKEN`, and
-`HUGGING_FACE_HUB_TOKEN` act as fallbacks when the corresponding saved secret is empty.
+Configuration includes:
 
-#### Hugging Face authentication
+- a master AI-feature switch;
+- OpenAI API key;
+- OpenAI-compatible base URL;
+- shared OpenAI model;
+- Hugging Face token;
+- image detail and frame budget for visual description;
+- API timeouts;
+- storyboard/video-understanding controls.
 
-OpenCLIP and CLAP model downloads work without authentication for public models, but a
-Hugging Face token helps with authenticated, gated, or rate-limited Hub access. The
-preferred environment variable is `HF_TOKEN`. Studio reports whether a token is already
-available from its environment; otherwise save one in **AI Settings**. Saved Hugging Face
-credentials are passed only to tubeviz child processes as `HF_TOKEN` and never appear in
-command-line arguments, job metadata, or job logs. Leaving the saved field blank inherits
-the Studio server environment.
+Settings are stored outside the repository at:
 
-For a persistent shell setup:
+```text
+~/.config/tubeviz/config.json
+```
+
+or, when `XDG_CONFIG_HOME` is set:
+
+```text
+$XDG_CONFIG_HOME/tubeviz/config.json
+```
+
+Set `TUBEVIZ_CONFIG` to use a different configuration file.
+
+Environment variables can also provide credentials:
+
+```bash
+export OPENAI_API_KEY='...'
+export HF_TOKEN='hf_...'
+```
+
+### Hugging Face authentication
+
+Public models can often be downloaded without a token, but a Hugging Face token is
+useful for gated models, authenticated access, and rate limits.
 
 ```bash
 export HF_TOKEN='hf_...'
-tubeviz gui --library ./library
 ```
 
-A read token is sufficient for downloading models.
+A read token is sufficient for model downloads.
 
-### Video understanding
+### AI video understanding
 
-Vision description is opt-in, because image inputs consume API tokens. When enabled,
-each completed ingest is enhanced automatically, and the **Enhance Existing Library**
-action backfills every ready clip already in the library without downloading or
-transcoding it again. Cache keys include the ready-media checksum, model, detail
-level, prompt version, and sampled scene indexes, so unchanged clips are free to skip.
-Enable **Re-analyze cached clips** only when changing the desired interpretation or
-deliberately refreshing model output.
+When enabled, tubeviz can analyze sampled frames from clips and store descriptions that
+cover subjects, actions, location, camera language, lighting, palette, texture, mood,
+editing utility, and scene-level characteristics.
 
-```mermaid
-flowchart TD
-    READY["Ready clip"] --> SCENES["Detected scenes and thumbnails"]
-    SCENES --> SAMPLE["Stratified full-clip storyboard"]
-    SAMPLE --> CACHE{"Current cache key?"}
-    CACHE -->|yes| KEEP["Reuse description"]
-    CACHE -->|no| API["OpenAI Responses API"]
-    API --> CLIP["Clip summary and visual world"]
-    API --> SHOTS["Per-scene descriptions and utility"]
-    CLIP --> DB[("SQLite AI description cache")]
-    SHOTS --> DB
-```
+This metadata supplements local measurements and OpenCLIP embeddings; it does not
+replace deterministic scene analysis.
 
-The request sends all sampled thumbnails as one scene-labelled storyboard. The
-structured result covers visible subjects, actions, locations, camera language, palette,
-lighting, texture, mood, risks, semantic tags, and editing utility. Per-scene values
-include energy, motion, complexity, continuity, and fit for builds, drops, and ambient
-passages. Tubeviz stores both the clip-level analysis and the scene rows, so an existing
-library gains the same capabilities as freshly ingested footage.
-
-```mermaid
-flowchart TB
-    MUSIC["Musical section and trajectory"] --> QUERY["Semantic and editorial intent"]
-    LOCAL["OpenCLIP plus local visual features"] --> RANK["Candidate sequence ranking"]
-    VISION["All AI description fields"] --> TEXT["Full description retrieval"]
-    VISION --> UTILITY["Build, drop, ambient fit"]
-    QUERY --> RANK
-    TEXT --> RANK
-    UTILITY --> RANK
-    RANK --> PLAN["Directed timeline"]
-```
-
-This is not display-only metadata. Final scene planning searches the complete
-description corpus and blends the appropriate editing-utility score into section
-ranking. Local OpenCLIP embeddings, measured motion/palette/complexity, transition
-quality, novelty, curation preferences, and deterministic timing all remain active, so
-remote descriptions enrich the existing analysis rather than replacing it.
-
-Command-line backfill uses the same configuration and cache:
+Existing clips can be analyzed from the CLI:
 
 ```bash
 tubeviz library ai-describe --library ./library
+```
+
+Limit the operation or target a specific clip:
+
+```bash
 tubeviz library ai-describe --library ./library --limit 10
 tubeviz library ai-describe --library ./library --clip-id 42 --force
 ```
 
-Progress is emitted per clip: current clip/total, sampled-frame count, cache hits,
-stored results, and failures. Studio maps those lines onto its active-job stage and
-progress display and keeps the detailed log for diagnosis.
-
-### Play / Trim editor
-
-Studio can non-destructively mark the usable portion of any local library video — useful
-for footage with title cards, channel intros, credits, black leader, talking-head
-introductions, or anything else that should never enter a visualization.
-
-Open **Library**, choose **Play / Trim**, then use the visual editor:
-
-![tubeviz Studio — Library clip details](screenshots/screenshot-library-detail.png)
-
-```mermaid
-flowchart LR
-    FULL["Full ready media (source or proxy)"] --> EDIT["Studio Play / Trim"]
-    EDIT --> IN["Set In"]
-    EDIT --> OUT["Set Out"]
-    IN --> KEEP["Highlighted usable range"]
-    OUT --> KEEP
-    KEEP --> DB["usable_start / usable_end in SQLite"]
-    DB --> SCENES["Scene candidate clamp/filter"]
-    SCENES --> SELECT["Semantic + visual + rhythm selector"]
-```
-
-The editor provides:
-
-- two draggable In/Out handles over the clip timeline;
-- detected-scene boundary ticks and a live playhead marker;
-- **Set In to Playhead** and **Set Out to Playhead**;
-- jump-to-In and jump-to-Out controls;
-- automatic looping of the currently kept range;
-- millisecond readouts for In, Out, and kept duration;
-- **Save In / Out** and **Clear Trim**;
-- a visible trim badge on library cards.
-
-Trimming is non-destructive: tubeviz does not rewrite or re-encode the ready media.
-The saved bounds only define which source times are eligible for future scene plans. A
-90-second clip with a 7.5-second intro stays physically unchanged while Studio stores:
-
-```text
-usable_start = 7.500
-usable_end   = 90.000
-```
-
-A detected scene that crosses a trim boundary is clipped rather than discarded, as long
-as enough usable duration remains:
-
-```text
-indexed scene:   4.0 -------- 12.0
-saved usable:        7.5 ----------------
-selector sees:       7.5 ---- 12.0
-```
-
-Scenes entirely before or after the usable range disappear from scene selection.
-`--min-play-scene-seconds` and related minimum-duration checks apply to the **remaining**
-duration after trimming.
-
-Visual motion-accent metadata is shifted and filtered for a partially trimmed scene, so
-beat/motion alignment cannot seek back into an excluded intro. The persistent full-scene
-visual fingerprint stays intact, so changing or clearing a trim does not require
-rebuilding the visual feature index. Library thumbnails prefer the first scene inside the
-saved usable range, so a trimmed title card is not used as the primary thumbnail when a
-later scene thumbnail exists.
-
-Timeline JSON is immutable, so a timeline generated before a trim still references its
-old source range. Regenerate or replan scenes after curating:
-
-```bash
-tubeviz analyze song.mp3 \
-  --library ./library \
-  --semantic \
-  --output song.timeline.json
-```
-
-or, for interactive preview:
-
-```bash
-tubeviz serve song.timeline.json \
-  --audio song.mp3 \
-  --library ./library \
-  --replan-scenes
-```
-
-### Preview from Studio
-
-Preview servers are managed per launch. **Start Preview**:
-
-1. reads the current Timeline, Audio, and Library fields from Studio;
-2. retires the previous Studio-managed preview process;
-3. allocates a fresh local TCP port;
-4. starts `tubeviz serve` with the currently selected paths; and
-5. waits for Uvicorn startup before navigating the reusable preview tab.
-
-Each preview therefore reflects the paths currently selected in Studio rather than a
-stale in-memory timeline held by an earlier server on a fixed port. Studio subprocesses
-run with `--project-root` as their working directory, so relative Timeline, Audio, and
-Library paths resolve against the selected project. The preview job payload records
-`preview_timeline`, `preview_audio`, `preview_library`, and `preview_url`, and
-`/api/status` reports the timeline and audio currently loaded by the visualizer server.
-
 ## Building a footage library
 
-```mermaid
-flowchart TD
-    S["Brief, terms, or URLs"] --> D["Discover with yt-dlp"]
-    D --> M{"Metadata policy"}
-    M -->|reject| R1["Record reason"]
-    M -->|candidate| P["Strategic preview probes"]
-    P --> Q{"Motion, text, face,\ndiversity, aesthetics"}
-    Q -->|reject| R1
-    Q -->|pass| DL["Download chosen range"]
-    DL --> PREP{"Direct-play compatible?"}
-    PREP -->|yes| SRC["Use downloaded source directly"]
-    PREP -->|no| N["H.264 compatibility proxy<br/>NVENC when usable"]
-    SRC --> SC["Scene detection and thumbnails"]
-    N --> SC
-    SC --> VF["Temporal visual features"]
-    SC --> OC["OpenCLIP embeddings and labels"]
-    VF --> DB[("SQLite metadata")]
-    OC --> DB
-    SRC --> MEDIA["Canonical source media"]
-    N --> MEDIA["Optional compatibility proxy"]
-    DB --> CURATE["Trim, reject, restore, inspect"]
-```
+The footage library is persistent. Downloaded media, scene indexes, thumbnails,
+embeddings, trim ranges, curation state, provenance, and derived analysis can be reused
+across many songs and timelines.
 
-Automatic discovery uses progressively more expensive gates: cheap metadata screening
-comes first, then partial media probes, and full download and indexing is reserved for
-footage that survives the quality checks. Explicit `ingest-url` sources skip search
-ranking but run the same downstream media-preparation, scene, feature, and semantic-indexing
-pipeline.
+### Theme-first acquisition
 
-Active, upcoming, and post-live streams are rejected. Archived finite VODs remain usable
-when yt-dlp exposes suitable media.
-
-### Conditional media preparation
-
-Ingest no longer performs an unconditional full-video re-encode. After download, tubeviz
-uses `ffprobe` to inspect the first video stream and container. In the default
-`--media-prep auto` mode, common browser/native-safe YouTube combinations such as
-H.264/MP4, VP8/VP9/WebM, and AV1 in MP4/WebM are marked ready **using the downloaded
-source itself**. Scene detection, thumbnails, OpenCLIP, visual indexing, transforms, and
-the native renderer all consume that canonical source path directly.
-
-A compatibility proxy is created only when the source codec/container is not a direct-play
-target, or when `--media-prep normalize` is explicitly requested. Proxy creation preserves
-the source dimensions and frame rate by default (`--width 0 --height 0 --fps 0`) instead
-of downscaling 1080p acquisition to 720p. If FFmpeg can actually encode a one-frame NVENC
-probe, `--normalize-encoder auto` uses `h264_nvenc`; otherwise it uses `libx264`. If an
-auto-selected NVENC encode fails at runtime, tubeviz retries with libx264. Existing proxy
-files are reused unless `--force` is requested.
-
-During a required proxy encode, FFmpeg's machine-readable progress stream is converted to
-periodic elapsed/total/percentage lines in the Studio job log, so this stage no longer
-appears to hang. The browser preview server exposes `originals/` and `normalized/` through
-separate constrained mounts; the whole library root is never served.
-
-### Theme-first acquisition with a visual brief
-
-Search-term files are supported, but the recommended ingest path is a natural-language
-**visual brief**. Tubeviz combines the brief with the song's DSP analysis and a summary
-of the existing library, asks an OpenAI-compatible LLM for a structured acquisition plan,
-and then spends compute and bandwidth only on candidates that survive each gate.
-
-```mermaid
-flowchart TD
-    B["Visual brief"] --> P["LLM acquisition planner"]
-    A["Optional audio"] --> P
-    L["Existing library coverage"] --> P
-    P --> Q["Diverse role-aware YouTube queries"]
-    Q --> M["Metadata gate"]
-    M --> T["OpenCLIP thumbnail semantic + negative scoring"]
-    T --> V["Strategic partial-video preview"]
-    V --> F["Temporal music-video fitness\nmotion + complexity + entropy + semantic fit"]
-    F -->|reject| X["Skip before full download"]
-    F -->|pass| D["Full source download"]
-    D --> S["Scene detection + visual/semantic indexing"]
-    S --> R["Automatic weak intro/outro trim"]
-    R --> LIB["Curated clip library"]
-```
+A visual brief lets tubeviz generate a diverse set of searches and evaluate candidates
+before committing to full downloads.
 
 ```bash
 tubeviz ingest \
-  --visual-brief 'Dark futuristic techno: neon tunnels, liquid chrome, rhythmic machinery, surreal architecture, rave silhouettes and euphoric high-motion drops. Avoid text, logos, talking heads, tutorials and static footage.' \
-  --audio audio/connected.mp3 \
+  --visual-brief 'A nocturnal electronic dream: fluorescent city motion, abstract machinery, wet streets, refracted glass, underground dance energy, cinematic movement. Avoid title cards, logos, talking heads, tutorials, and static footage.' \
+  --audio audio/song.mp3 \
   --library ./library \
   --target-clips 40 \
   --acquisition-query-count 24 \
@@ -679,33 +428,13 @@ tubeviz ingest \
   --auto-trim
 ```
 
-`--visual-brief` enables AI discovery and the preview gate automatically. The acquisition
-planner distributes the overall target across its generated searches rather than treating
-each query as an independent large quota. By default the planner inherits the saved
-**AI Settings** base URL/model/key. Without a usable configured LLM, tubeviz falls back to
-a deterministic cinematography-oriented planner. `--ai-llm-base-url`, `--ai-llm-model`,
-and `--ai-llm-api-key` remain available as explicit CLI-only overrides.
+The preview gate evaluates short samples before a full download. It can reject footage
+with insufficient motion or useful visual activity, excessive text overlays, dominant
+talking heads, or other characteristics that make it a poor fit for music-video editing.
 
-The preview gate samples strategic points across each hydrated candidate before
-committing to a full download. OpenCLIP evaluates the preview against positive visual
-concepts and explicit negative concepts such as title cards, logos, talking heads,
-tutorials, presentations, and static footage. Temporal visual analysis separately
-measures useful motion, motion variation, complexity, entropy, and cut activity. Together
-these form a music-video fitness score, and low-fitness candidates are rejected before
-the expensive ingest path.
+### Search-term acquisition
 
-Once accepted footage is prepared and scene-indexed, `--auto-trim` moves the saved
-usable In/Out points past low-fitness edge scene runs, suppressing common title and logo
-lead-ins and static credit or outro material. The Studio trim editor remains available
-for correction or override.
-
-Studio exposes the same workflow under **AI Ingest**, with a visual brief editor, an
-optional terms file, acquisition-query count, preview gate, minimum video fitness, and
-AI auto-trim controls.
-
-### Search-term ingest
-
-`search_terms.txt` holds one visual concept per line:
+Create a text file containing one visual concept per line:
 
 ```text
 underground techno warehouse strobe
@@ -718,7 +447,7 @@ satellite earth night timelapse
 high speed train tunnel POV
 ```
 
-Basic ingest:
+Then ingest it:
 
 ```bash
 tubeviz ingest \
@@ -728,14 +457,14 @@ tubeviz ingest \
   --cookies-from-browser chrome
 ```
 
-AI-assisted ingest:
+Semantic discovery and scene embedding can be enabled when the semantic extra is
+installed:
 
 ```bash
 tubeviz ingest \
   --terms search_terms.txt \
   --library ./library \
   --results-per-term 10 \
-  --cookies-from-browser chrome \
   --ai-discovery \
   --ai-query-expansion \
   --ai-query-count 8 \
@@ -744,69 +473,32 @@ tubeviz ingest \
   --ai-index-scenes
 ```
 
-A more permissive source-duration configuration:
-
-```bash
-tubeviz ingest \
-  --terms search_terms.txt \
-  --library ./library \
-  --results-per-term 10 \
-  --search-pool 50 \
-  --max-search-pool 500 \
-  --search-pool-step 50 \
-  --preferred-max-duration 1200 \
-  --hard-max-duration 0 \
-  --scene-threshold 0.40 \
-  --min-scene-seconds 1.5 \
-  --download-socket-timeout 20 \
-  --concurrent-fragments 4 \
-  --download-retries 2 \
-  --fragment-retries 2 \
-  --cookies-from-browser chrome
-```
-
-Important ingest controls:
+Useful ingest controls include:
 
 | Option | Purpose |
 |---|---|
-| `--results-per-term N` | Desired READY clips per seed term |
-| `--search-pool N` | Initial search result window |
-| `--max-search-pool N` | Maximum progressively expanded search window |
-| `--search-pool-step N` | Expansion step when the READY quota is not filled |
-| `--min-duration S` | Reject clips shorter than this |
-| `--preferred-max-duration S` | Soft preference for shorter videos; `0` disables |
-| `--hard-max-duration S` | Hard rejection limit; `0` disables |
-| `--min-width PX` | Reject narrow video; `0` disables |
-| `--min-source-height PX` | Reject sources below this height; default `1080` |
-| `--max-source-height PX` | Cap the downloaded source representation; default `1080`, `0` disables |
-| `--media-prep auto\|source\|normalize` | `auto` reuses direct-play source media, `source` forbids transcoding, `normalize` always creates a proxy |
-| `--normalize-encoder auto\|nvenc\|x264` | Proxy encoder; `auto` performs a live NVENC probe and falls back to libx264 |
-| `--width/--height/--fps` | Compatibility-proxy geometry/rate; each defaults to `0` to preserve the source |
-| `--scene-threshold` | FFmpeg scene-change sensitivity |
+| `--results-per-term N` | Desired ready clips per search term |
+| `--target-clips N` | Overall acquisition target for visual-brief planning |
+| `--search-pool N` | Initial search result pool |
+| `--max-search-pool N` | Maximum expanded search result pool |
+| `--min-duration S` | Reject sources shorter than this |
+| `--preferred-max-duration S` | Prefer shorter source videos |
+| `--hard-max-duration S` | Reject sources longer than this; `0` disables |
+| `--min-source-height PX` | Minimum accepted source height |
+| `--max-source-height PX` | Maximum downloaded source height; `0` disables |
+| `--media-prep auto\|source\|normalize` | Select source reuse or compatibility-proxy behavior |
+| `--normalize-encoder auto\|nvenc\|x264` | Select proxy encoder |
+| `--scene-threshold` | Scene-change sensitivity |
 | `--min-scene-seconds` | Minimum indexed scene duration |
-| `--keep-audio` | Retain AAC audio when a compatibility proxy is created; direct source media is not rewritten just to strip audio |
-| `--no-scenes` | Skip scene detection/thumbnails |
-| `--force` | Reprocess already-ready clips |
-| `--cookies-from-browser BROWSER` | Use browser cookies through yt-dlp |
-| `--ai-discovery` | Rank candidates visually before downloading |
-| `--ai-query-expansion` | Expand seed concepts into diverse searches |
-| `--ai-query-count N` | Number of expanded searches |
-| `--ai-candidates-per-term N` | Candidate pool scored before download |
-| `--ai-model/--ai-pretrained` | OpenCLIP configuration |
-| `--ai-device auto\|cpu\|cuda...` | AI execution device |
-| `--ai-diversity-weight` | Penalize visually redundant candidates |
-| `--ai-near-duplicate-threshold` | Similarity threshold for near duplicates |
-| `--ai-negative-weight` | Strength of undesirable-content penalty |
-| `--ai-metadata-weight` | Metadata contribution to ranking |
-| `--ai-min-score` | Reject AI candidates below score |
-| `--ai-negative-concepts` | Comma-separated concepts to penalize |
-| `--ai-llm-base-url/--ai-llm-model` | Optional one-off override for the AI Settings endpoint/model |
-| `--ai-index-scenes` | Embed detected scenes while the AI model is loaded |
-| `--verbose-ytdlp` | Expose detailed yt-dlp diagnostics |
+| `--cookies-from-browser` | Supply browser cookies through yt-dlp |
+| `--preview-gate` | Evaluate samples before full download |
+| `--auto-trim` | Derive usable In/Out bounds from edge scenes |
 
-### Adding specific YouTube clips
+Use `tubeviz ingest --help` for the complete acquisition and filtering controls.
 
-When you already know the exact source footage you want, bypass search and AI discovery:
+### Manual URL ingest
+
+Known YouTube sources can be added directly:
 
 ```bash
 tubeviz ingest-url \
@@ -814,1634 +506,517 @@ tubeviz ingest-url \
   --library ./library
 ```
 
-Multiple URLs in one invocation:
+Multiple URLs are accepted:
 
 ```bash
-tubeviz ingest-url URL1 URL2 URL3 --library ./library --term hand-picked
-```
-
-Manual URL ingestion runs the full scene-understanding pipeline by default: yt-dlp
-metadata extraction, duplicate detection, download, conditional media preparation, scene
-detection, thumbnails, decoded temporal visual-feature indexing, OpenCLIP scene
-embeddings, and zero-shot semantic classification. Scene labels cover concepts such as
-crowd, dancing, nightlife, city, tunnel, transport, industrial, architecture, abstract,
-lights, moving POV, macro, and fire/smoke, plus negative classes such as text-heavy,
-talking-head, and static-presentation.
-
-The same browser-cookie and network controls are available:
-
-```bash
-tubeviz ingest-url 'https://youtu.be/VIDEO_ID' \
+tubeviz ingest-url URL1 URL2 URL3 \
   --library ./library \
-  --term head-at-curated \
-  --cookies-from-browser chrome \
-  --scene-threshold 0.40 \
-  --min-scene-seconds 1.5
+  --term hand-picked
 ```
 
-`--hard-max-duration` defaults to `0` (disabled) here, because an explicitly chosen
-source should not be rejected merely for exceeding the normal discovery policy. Pass
-`--hard-max-duration` when you do want that guardrail. `--force` reprocesses an existing
-clip.
-
-In Studio, the Create panel includes **Manual YouTube URL Ingest**: a multi-line editor
-taking one URL per line, plus an optional provenance term such as `hand-picked`,
-`head-at-curated`, or `industrial-favorites`. Uncommon network and compatibility-proxy
-settings sit under **Advanced ingest settings**. The visual form exposes the complete
-`ingest-url` workflow:
-
-```text
-provenance term
-minimum / hard maximum duration
-minimum source width
-media preparation policy and proxy encoder
-proxy width / height / FPS (`0` preserves source)
-scene-change threshold
-minimum scene duration
-browser cookies
-network timeout
-fragment concurrency and retries
-keep audio
-skip scene detection
-skip temporal visual indexing
-OpenCLIP semantic device / model / weights
-skip semantic embeddings
-skip automatic scene classification
-force reprocessing
-verbose yt-dlp
-```
-
-The resulting clips enter the same persistent library pipeline as searched clips:
-metadata, duplicate checks, download, conditional media preparation, scene indexing, thumbnails, visual
-fingerprints, trimming, semantic embeddings, and later selection are all shared.
+Manual ingest uses the same library pipeline as searched footage, including metadata,
+duplicate checks, scene indexing, thumbnails, visual analysis, and optional semantic
+indexing.
 
 ## Curating the library
 
-![tubeviz Studio — Library](screenshots/screenshot-library.png)
-
-The screenshot helper can also capture an open Library item inspector, including the video, In/Out editor, and AI visual-analysis panel:
-
-```bash
-python scripts/screenshot_studio.py --tab library-details
-```
-
-By default it opens the first playable clip, expands the inspector to its complete content height, and writes `screenshots/screenshot-library-detail.png`. The generated image includes the full video/trim editor and all available AI metadata rather than clipping at the modal's normal viewport scrollbar. Choose a specific clip by title substring or playable-clip index, and optionally control the displayed frame:
-
-```bash
-python scripts/screenshot_studio.py \
-  --tab library-details \
-  --clip-match "Floating Through Breathing Woods" \
-  --clip-time 47
-
-python scripts/screenshot_studio.py \
-  --tab library-details \
-  --clip-index 2
-```
-
-For a screenshot that intentionally matches the normal on-screen scrollable inspector instead, use `--viewport-details`:
-
-```bash
-python scripts/screenshot_studio.py \
-  --tab library-details \
-  --viewport-details
-```
-
-`--full-details` remains accepted for compatibility with v0.33.2 scripts, but full-height capture is now the default.
+Inspect basic library state:
 
 ```bash
 tubeviz library stats --library ./library
 tubeviz library list --library ./library --limit 50
-tubeviz library list --library ./library --status ready --term "warehouse"
-tubeviz library list --library ./library --json
+tubeviz library list --library ./library --status ready
 tubeviz library show VIDEO_ID --library ./library
-tubeviz library show VIDEO_ID --library ./library --json
 ```
 
-Reject without deleting:
+### Reject and restore
+
+Rejecting a clip is non-destructive and prevents it from being selected for future
+output:
 
 ```bash
 tubeviz library reject VIDEO_ID \
   --library ./library \
-  --reason "static talking-head footage"
+  --reason 'static talking-head footage'
 ```
 
-Restore:
+Restore it later:
 
 ```bash
 tubeviz library restore VIDEO_ID --library ./library
 ```
 
-Preview a destructive deletion first:
+### Delete
 
-```bash
-tubeviz library delete VIDEO_ID --library ./library --dry-run
-```
-
-Delete it:
+Permanent deletion removes the clip and its tracked derived assets:
 
 ```bash
 tubeviz library delete VIDEO_ID --library ./library
 ```
 
-Delete without confirmation:
+Use rejection when you may want to reconsider a clip. Use deletion when the source and
+its generated assets should be removed completely.
+
+### Trim usable source ranges
+
+Studio supports non-destructive In/Out marks for clips containing intros, title cards,
+credits, black leader, or other unusable edge material. The original source remains
+unchanged; the saved usable range constrains future scene planning.
+
+### Build or refresh visual indexes
+
+Local temporal visual features:
 
 ```bash
-tubeviz library delete VIDEO_ID --library ./library --yes
+tubeviz library visual-index --library ./library
 ```
 
-Keep the downloaded original while removing tracked derived assets and metadata:
-
-```bash
-tubeviz library delete VIDEO_ID --library ./library --keep-original
-```
-
-Inspect persisted AI ranking:
-
-```bash
-tubeviz library ai-report --library ./library --limit 50
-tubeviz library ai-report --library ./library --term "laser tunnel" --limit 25
-```
-
-Embed existing scene thumbnails:
+OpenCLIP scene embeddings:
 
 ```bash
 tubeviz library embed --library ./library --device auto
 ```
 
-Force regeneration:
+## Analyzing music and creating a timeline
+
+The `analyze` command extracts musical structure and can immediately attach a scene plan
+from the current library.
+
+A useful general-purpose starting point is:
 
 ```bash
-tubeviz library embed \
+tubeviz analyze audio/song.mp3 \
   --library ./library \
-  --model ViT-B-32 \
-  --pretrained laion2b_s34b_b79k \
-  --device cuda \
-  --batch-size 64 \
-  --force
-```
-
-Clip status and provenance are retained even for rejected candidates. The
-non-destructive `usable_start` and `usable_end` bounds let you exclude weak intros,
-outros, title cards, and other unwanted regions without rewriting the source or
-invalidating its stable scene fingerprints.
-
-## Analyzing music and building the edit
-
-```mermaid
-flowchart TB
-    A["Decoded audio"] --> DSP["Librosa DSP analysis"]
-    DSP --> GRID["Beats, bars, onsets, tempo curve"]
-    DSP --> FORM["Sections, key, vibe, motifs"]
-    A -. optional .-> CLAP["CLAP semantic windows"]
-    A -. optional .-> MERT["MERT representations"]
-    FORM --> TRAJ["Build, drop, release trajectory"]
-    CLAP --> TRAJ
-    MERT --> TRAJ
-    TRAJ --> INTENT["Per-section visual intent"]
-    GRID --> SHOTS["Beat-quantized shot windows"]
-    INTENT --> SELECT["Lookahead scene selection"]
-    LIBSCENES[("Indexed library scenes")] --> SELECT
-    SELECT --> SHOTS
-    SHOTS --> DIRECT["Layers, transforms, color, vectors, codec cues"]
-    DIRECT --> TL[("Directed timeline JSON")]
-```
-
-The selector evaluates sequences rather than isolated clips. Semantic relevance, phrase
-trajectory, motion and effect compatibility, transition quality, learned curation
-preferences, novelty, reuse cooldowns, and deterministic variation all contribute to the
-selected path. Edits stay quantized to the musical grid even when optional AI supplies
-higher-level treatment ideas.
-
-A good default analysis:
-
-```bash
-tubeviz analyze audio/connected.mp3 \
-  --library ./library \
+  --output timelines/song.json \
   --semantic \
   --semantic-device auto \
   --section-bars 8 \
   --max-video-layers 3 \
   --composition-intensity 1.2 \
   --transform-intensity 1.2 \
-  --dynamic-shots \
-  --min-shot-seconds 0.65 \
-  --max-shot-seconds 6 \
-  --source-excerpt-max-seconds 5 \
-  --target-unique-clips 0 \
   --novelty-weight 0.65 \
-  --reshuffle \
-  --output timelines/connected.json
-```
-
-`--target-unique-clips 0` scales the desired source diversity to track duration and
-available library size. A selected indexed scene does **not** have to play in full:
-`--source-excerpt-max-seconds` caps the source interval used for a single visual shot.
-
-A reproducible alternate cut:
-
-```bash
-tubeviz analyze audio/connected.mp3 \
-  --library ./library \
-  --semantic \
-  --selection-seed 48151623 \
+  --visual-match-weight 1.25 \
+  --transition-weight 0.7 \
+  --vector-intensity 1.0 \
   --selection-variation 0.30 \
-  --output timelines/connected-seed.json
+  --min-shot-seconds 0.65 \
+  --max-shot-seconds 6.0 \
+  --source-excerpt-max-seconds 5.0
 ```
 
-Another randomized cut:
+The resulting timeline contains musical analysis, visual intent, selected footage,
+source ranges, transforms, compositing, effect schedules, and provenance required by the
+preview and rendering paths.
 
-```bash
-tubeviz analyze audio/connected.mp3 \
-  --library ./library \
-  --semantic \
-  --reshuffle \
-  --output timelines/connected-alt.json
-```
+### Variable tempo and phrase choreography
 
-Key analysis groups:
+Tubeviz can model local tempo instead of assuming one BPM for the entire track. Phrase
+and section analysis can influence shot duration, visual intensity, anticipation before
+peaks, and release after them.
 
-| Controls | Options |
-|---|---|
-| Audio analysis | `--sample-rate`, `--hop-length`, `--beats-per-bar` |
-| Musical sections | `--section-bars`, `--section-seconds` |
-| Variable BPM | `--tempo-window-seconds`, `--tempo-smoothing-seconds`, `--tempo-curve-seconds`, `--tempo-change-bpm`, `--min-tempo`, `--max-tempo`, `--tempo-octave-min`, `--tempo-octave-max` |
-| Scene selection | `--library`, `--scene-crossfade`, `--clip-opacity`, `--min-play-scene-seconds` |
-| Semantic retrieval | `--semantic`, `--semantic-model`, `--semantic-pretrained`, `--semantic-device` |
-| Effects | `--no-transforms`, `--transform-intensity`, `--creative-effects`, `--creative-intensity`, `--max-video-layers`, `--composition-intensity` |
-| Alternate cuts | `--selection-seed`, `--selection-variation`, `--reshuffle` |
-| Diversity | `--target-unique-clips`, `--novelty-weight`, `--novelty-candidate-fraction`, `--clip-reuse-cooldown`, `--scene-reuse-cooldown` |
-| Dynamic editing | `--dynamic-shots`, `--min-shot-seconds`, `--max-shot-seconds`, `--source-excerpt-max-seconds` |
-| Vector direction | `--vector-effects`, `--vector-intensity` |
-
-### Variable BPM and vibe
-
-A long mix is not treated as a single immutable BPM. Analysis persists a local tempo
-curve and emits tempo-change events after sufficiently large local shifts. Musical
-direction also draws on section energy, brightness, onset density, spectral and timbral
-information, motif recurrence, and structural position to drive scene intent, edit
-density, composition, and transform intensity.
-
-```mermaid
-sequenceDiagram
-    participant A as Audio
-    participant M as Music analyzer
-    participant S as Scene selector
-    participant E as Edit director
-    participant R as Renderer
-
-    A->>M: samples
-    M->>M: beats + local tempo + sections + vibe
-    M->>S: SceneIntent per section/shot
-    S->>S: semantic score + novelty + cooldowns
-    S->>E: selected short excerpts
-    E->>E: beat edits + transforms + composition
-    E->>R: deterministic timeline
-```
-
-### Phrase-aware choreography
-
-The choreography layer reasons about **where the music is going**, not only what is
-happening at the current instant. Each section receives a trajectory:
+Useful controls include:
 
 ```text
-tension / tension slope
-build probability
-drop probability
-release probability
-time to next peak
-anticipation
-pre-drop withholding
-motion / complexity / contrast / edit-density targets
+--section-bars
+--tempo-window-seconds
+--tempo-smoothing-seconds
+--tempo-change-bpm
+--trajectory-strength
+--anticipation-seconds
+--visual-arc-strength
 ```
 
-```mermaid
-flowchart LR
-    DSP["DSP + section features"] --> TRAJ["Trajectory model"]
-    CLAP["CLAP semantics"] --> TRAJ
-    MERT["optional MERT novelty / velocity"] --> TRAJ
-    TRAJ --> ARC["Whole-song visual arc"]
-    ARC --> BEAM["Multi-shot beam search"]
-    LIB["Candidate scenes"] --> BEAM
-    PREF["Manual-reject preference profile"] --> BEAM
-    BEAM --> FX["Effect compatibility + visual direction"]
-    FX --> TL["Directed timeline"]
-```
+### CLAP audio semantics
 
-Phrase-aware choreography is enabled by default. Useful controls:
+CLAP can classify sliding windows of the music and influence scene selection and visual
+treatment:
 
 ```bash
---choreography
---trajectory-strength 0.85
---anticipation-seconds 12
---visual-arc-strength 0.70
---sequence-lookahead 5
---sequence-beam-width 6
---sequence-candidate-pool 18
---trajectory-weight 0.85
---anticipation-weight 0.75
---effect-compatibility-weight 0.60
---preference-learning
---preference-weight 0.35
+tubeviz audio-ai doctor --device auto
 ```
 
-The sequence optimizer keeps several possible edits alive over a short horizon and scores
-the **sequence**, including how its motion, complexity, and transition contrast evolve
-toward an approaching payoff. Musical timing stays beat-aligned and deterministic.
-
-A strong build therefore tends to progress like:
-
-```text
-wide / clean / longer
-        ↓
-more motion
-        ↓
-more visual complexity
-        ↓
-shorter beat-aligned shots
-        ↓
-stronger transition contrast
-        ↓
-brief pre-drop withholding
-        ↓
-DROP: high-contrast source change + impact treatment
-```
-
-Inspect the stored plan:
+Enable it during analysis:
 
 ```bash
-tubeviz choreography inspect timelines/connected.json
-tubeviz choreography inspect timelines/connected.json --json
-```
-
-### Audio-semantic AI choreography
-
-A second AI layer sits above the deterministic rhythm, variable-BPM, visual-fingerprint,
-and motif systems. It uses CLAP to interpret overlapping windows of the actual music,
-projects those audio semantics onto the same curated concept vocabulary used to
-interrogate OpenCLIP scene embeddings, and then lets the existing optimizer choose real
-library footage.
-
-```mermaid
-flowchart TD
-    AUDIO["Audio"] --> DSP["Beat / BPM / sections / timbre"]
-    AUDIO --> CLAP["CLAP sliding-window embeddings"]
-    CLAP --> ACONCEPT["Audio concept distribution"]
-    SCENES["OpenCLIP scene embeddings"] --> VCONCEPT["Scene concept distribution"]
-    ACONCEPT --> BRIDGE["Common semantic concept basis"]
-    VCONCEPT --> BRIDGE
-    DSP --> DIRECTOR["Deterministic semantic director"]
-    ACONCEPT --> DIRECTOR
-    BRIDGE --> SELECT["Scene optimizer"]
-    DIRECTOR --> SELECT
-    LLM["Optional whole-song LLM director"] --> DIRECTOR
-    SELECT --> RHYTHM["Visual-accent / beat alignment"]
-    RHYTHM --> FX["Color / vector / codec choreography"]
-```
-
-Install the optional runtime:
-
-```bash
-pip install -e '.[semantic,audio-ai,render]'
-```
-
-Check CUDA and Transformers availability:
-
-```bash
-tubeviz audio-ai doctor
-```
-
-After analysis, inspect what the model heard and how each section was directed:
-
-```bash
-tubeviz audio-ai inspect timelines/connected-ai.json
-```
-
-A solid AI-directed analysis:
-
-```bash
-tubeviz analyze audio/connected.mp3 \
+tubeviz analyze audio/song.mp3 \
   --library ./library \
+  --output timelines/song.json \
   --semantic \
-  --semantic-device cuda \
   --audio-ai \
-  --audio-ai-device cuda \
+  --audio-ai-device auto \
   --audio-ai-window 8 \
   --audio-ai-hop 4 \
-  --audio-visual-match-weight 1.10 \
-  --visual-match-weight 1.35 \
-  --transition-weight .55 \
-  --rhythm-alignment \
-  --vector-intensity .65 \
-  --transform-intensity .85 \
-  --composition-intensity .75 \
-  --min-shot-seconds 1.0 \
-  --max-shot-seconds 6 \
-  --reshuffle \
-  --output timelines/connected-ai.json
+  --audio-visual-match-weight 1.1
 ```
 
-CLAP analysis defaults to `laion/clap-htsat-fused`. Audio is resampled to 48 kHz and
-analyzed in overlapping windows. Results are cached under `~/.cache/tubeviz/audio-ai/`,
-so alternate reshuffles do not rerun the model unless `--audio-ai-force` is supplied.
+### MERT music representations
 
-Each window and musical section receives a probability distribution over a shared
-audio/visual concept basis covering mood, movement, visual world, texture, palette, and
-cinematography — concepts such as `hypnotic`, `industrial`, `forward_motion`, `rave`,
-`cold_blue`, `liquid`, `architecture`, `wide`, and `fragmented`.
-
-The cross-modal match deliberately does **not** cosine CLAP vectors directly against
-OpenCLIP vectors, since those models occupy different embedding spaces. Instead:
-
-```text
-CLAP(audio)      -> scores over shared text concepts
-OpenCLIP(scene)  -> scores over the same text concepts
-                           ↓
-                distribution affinity
-```
-
-Affinity is weighted by CLAP confidence, so high-entropy or ambiguous audio semantics
-have less power to override the deterministic visual and rhythm matchers.
-
-The semantic director also turns CLAP results into section-level targets for:
-
-```text
-visual world
-motion style / desired motion
-visual complexity
-edit density
-transition continuity vs contrast
-palette / target hue
-effect family
-vector intensity
-codec-glitch intensity
-```
-
-Edit density is quantized back onto musical beat counts, so AI can ask for a more urgent
-or more spacious montage but cannot move cuts off the beat grid.
-
-Studio exposes CLAP enable/device/window/hop settings, the audio-to-visual match weight,
-whole-song director enable/strength controls, bounded edit-consultant candidate count/weight,
-and an **Audio AI Doctor** action. The director and consultant inherit the same OpenAI
-endpoint, model, and key from **AI Settings**.
-
-### Resource-aware two-pass LLM director
-
-With `--ai-director`, tubeviz now uses the LLM in **two bounded passes** instead of asking
-it to imagine a visual treatment without knowing what the project actually contains.
-
-**Pass 1 — whole-song resource-aware director.** Before the request, tubeviz builds a
-compact manifest from the current READY/output-pool library and the renderer configuration.
-The model receives:
-
-- eligible clip and scene counts;
-- dominant visual worlds, semantic tags, search/provenance terms, motion distribution and
-  source-palette distribution;
-- representative described scenes from the actual library;
-- the enabled raster/temporal, vector, codec-space, hero and composition capabilities; and
-- hard planning boundaries explaining which decisions remain deterministic.
-
-The first pass chooses the song-scale visual arc, section treatment, effect family, pacing,
-continuity and creative trajectories. It still cannot select filenames, clip IDs, scene IDs
-or exact cut times. This keeps the global plan compact enough to reason over the entire song
-without dumping thousands of raw scene rows into one prompt.
-
-**Pass 2 — bounded AI edit consultant.** For each musical section, the deterministic
-retriever scores the complete eligible output pool and builds a small slate of the strongest
-real scenes across that section's shot trajectory. The LLM sees only those validated
-`scene_id` values, their descriptions/tags, source title, motion/complexity/brightness,
-palette, editing utility and deterministic score. It may rank those IDs and optionally
-suggest an effect family or one sparse hero treatment. Invented IDs/effects are discarded.
-The preference becomes a **soft score inside both greedy and lookahead beam search**; trim
-bounds, duration, motif identity, source/scene cooldowns, media validity, beat-aligned cut
-windows and renderer limits always remain authoritative.
-
-```mermaid
-flowchart TD
-    MUSIC["DSP + CLAP + MERT + trajectories"] --> P1["Pass 1: whole-song LLM director"]
-    LIB["READY/output-pool library"] --> MANIFEST["Compact resource manifest"]
-    FX["Enabled raster/vector/codec/hero effects"] --> MANIFEST
-    MANIFEST --> P1
-    P1 --> ARC["Resource-aware visual arc"]
-    ARC --> RETRIEVE["Deterministic all-library retrieval"]
-    LIB --> RETRIEVE
-    RETRIEVE --> SLATE["Bounded valid scene slate per section"]
-    SLATE --> P2["Pass 2: AI edit consultant"]
-    P2 --> SOFT["Validated soft scene/effect preferences"]
-    SOFT --> OPT["Deterministic greedy + beam optimizer"]
-    RETRIEVE --> OPT
-    OPT --> TL["Beat-aligned directed timeline"]
-```
-
-A normal resource-aware run is simply:
+MERT can add learned structural representations for novelty and musical change:
 
 ```bash
-tubeviz analyze audio/connected.mp3 \
-  --library ./library \
-  --semantic \
-  --audio-ai \
-  --ai-director \
-  --ai-director-strength .70 \
-  --output timelines/connected-ai-directed.json
+tubeviz music-ai doctor --device auto
 ```
 
-The bounded edit consultant is enabled automatically with `--ai-director --library`. Tune or
-disable it with:
-
-```text
---ai-edit-consultant / --no-ai-edit-consultant
---ai-consultant-candidates 12
---ai-consultant-weight .85
---ai-consultant-max-completion-tokens 4096
-```
-
-A larger candidate slate exposes more real alternatives to the LLM but increases prompt
-size. The default of 12 is intentionally small; candidates are chosen as a union of strong
-retrieval results across the section rather than simply the first twelve scenes. Consultant
-responses are cached per section alongside the whole-song director cache, so unchanged
-audio/library/direction inputs do not repeatedly incur LLM work.
-
-Both passes inherit the saved **AI Settings** base URL, model and OpenAI credential by
-default. `--ai-director-base-url`, `--ai-director-model`, and
-`--ai-director-api-key` remain available for one-off CLI overrides, including local or
-third-party OpenAI-compatible endpoints. Secrets are resolved at request time and are not
-stored in timeline provenance or job argv.
-
-The timeline stores the compact `ai_resource_manifest` used for Pass 1 and, on consulted
-shots, an `ai_consultant` provenance object containing the validated preference list,
-whether the selected scene was preferred, optional treatment hints, and the short editorial
-reason. This makes AI influence inspectable without giving the model authority over hard
-execution details.
-
-The authority split is therefore:
-
-```text
-LLM pass 1:      what should the whole song look like, given resources we really have?
-retriever:       which real scenes are plausible for this musical section?
-LLM pass 2:      among that bounded valid slate, which sequence best serves the edit?
-optimizer:       enforce timing, trim, cooldown, motif, diversity and transition constraints
-rhythm engine:   exactly where cuts and accents land
-renderer:        execute bounded raster/vector/codec/hero treatments
-```
-
-### Optional MERT music representations
-
-CLAP is tubeviz's audio/text semantic model. MERT serves a different purpose:
-music-specific representation **dynamics**. With MERT enabled, tubeviz measures how
-rapidly the learned musical state is changing and how novel a section is relative to the
-one before it. Abrupt representation changes support a visual-world change; stable
-embeddings favor continuity.
+Enable it with:
 
 ```bash
-tubeviz analyze song.mp3 \
+tubeviz analyze audio/song.mp3 \
   --library ./library \
   --music-ai \
-  --music-ai-model m-a-p/MERT-v1-95M \
   --music-ai-device auto \
-  --music-ai-window 8 \
-  --music-ai-hop 4 \
-  --audio-ai \
-  --semantic \
-  --output song.json
+  --output timelines/song.json
 ```
 
-Check the optional runtime and device first:
+### AI director
+
+When configured, the optional AI director can provide whole-song visual direction and
+bounded editorial guidance while deterministic validation continues to control actual
+scene IDs, durations, source availability, and renderer capabilities.
 
 ```bash
-tubeviz music-ai doctor
-```
-
-MERT's Hugging Face model implementation requires `trust_remote_code=True`, so tubeviz
-keeps it explicitly opt-in. The `m-a-p/MERT-v1-95M` weights are separately licensed
-(CC-BY-NC-4.0 on the model card) and are **not** redistributed by tubeviz. Review the
-model's license before using it in a commercial workflow.
-
-### CUDA compatibility-aware `auto`
-
-`torch.cuda.is_available()` does not guarantee that an installed PyTorch wheel contains
-kernels for the actual GPU. tubeviz compares `torch.cuda.get_device_capability()` with
-`torch.cuda.get_arch_list()` before selecting CUDA automatically. A Pascal `sm_61` GPU
-paired with a wheel that only ships `sm_75+` kernels therefore falls back to CPU rather
-than failing inside CLAP, OpenCLIP, or MERT inference.
-
-## Visual direction
-
-### Video-first effects
-
-tubeviz transforms **rendered video** rather than placing small rectangular clips over a
-conventional procedural visualizer.
-
-Visual treatment is deliberately heterogeneous: most shots preserve their source hue, strong
-color grades and mask/symmetry effects are sparse, and a section rotates through compatible
-effect families instead of applying one permanent visual style. Circular/portal masks are
-reserved for rare explicit accents rather than used as a default composition.
-
-Depending on backend support and timeline direction, the effect system includes:
-
-- crop/zoom/pan, mirror, rotation, playback-rate treatment;
-- brightness, contrast, saturation, hue, grayscale, blur and posterization;
-- feedback and recursive video tunnels;
-- pixelation and RGB/chromatic displacement;
-- glitch slicing and block displacement;
-- scanlines, vignette and VHS-style tracking;
-- ripple and beat-driven warping;
-- organic mirrored/kaleidoscopic deformation rather than a persistent centered square;
-- slit-scan and delayed-frame echoes;
-- chroma delay and motion trails;
-- datamosh-like delayed block copying;
-- mask wipes, vortex treatment and slice recursion;
-- multi-source single/split/mosaic/luma/strip compositions;
-- beat/bar/onset/drop-driven retriggers, jumps, freezes, focus changes and effect pulses.
-
-```mermaid
-flowchart TD
-    SRC["Decoded source excerpts"] --> XFORM["Per-source transforms"]
-    XFORM --> MULTI["1–4 video layers"]
-    MULTI --> COMP["Full-frame composition"]
-    COMP --> TEMP["Temporal frame history"]
-    TEMP --> WARP["Warp / displacement / feedback"]
-    WARP --> RHYTHM["Beat + onset + drop modulation"]
-    RHYTHM --> FRAME["Final rendered video frame"]
-```
-
-### Visual Director: motion, palette, rhythm, narrative
-
-Every indexed scene carries a persistent temporal visual fingerprint. New ingests build
-it automatically, and existing libraries are backfilled on the next `analyze` or scene
-replan unless disabled.
-
-Index manually:
-
-```bash
-tubeviz library visual-index \
-  --library ./library
-```
-
-Force a complete rebuild:
-
-```bash
-tubeviz library visual-index \
-  --library ./library \
-  --fps 6 \
-  --max-frames 180 \
-  --force
-```
-
-Each scene fingerprint includes:
-
-```text
-brightness + variance
-saturation
-dominant hue
-warmth
-5-color source palette
-visual complexity
-visual entropy
-motion magnitude / peak / entropy
-approximate global motion direction
-internal cut/change rate
-natural visual motion accents
-```
-
-```mermaid
-flowchart TD
-    MEDIA["Indexed scene"] --> SAMPLE["Low-resolution temporal sampling"]
-    SAMPLE --> COLOR["Palette / hue / brightness"]
-    SAMPLE --> STRUCT["Complexity / entropy"]
-    SAMPLE --> MOTION["Motion curve"]
-    MOTION --> ACCENTS["Natural visual accents"]
-    COLOR --> FP["Persistent scene fingerprint"]
-    STRUCT --> FP
-    ACCENTS --> FP
-
-    MUSIC["Musical section + beats"] --> MATCH["Visual Director"]
-    FP --> MATCH
-    SEM["OpenCLIP semantic score"] --> MATCH
-    NOV["Novelty / cooldown"] --> MATCH
-    PREV["Previous selected shot"] --> MATCH
-
-    MATCH --> CHOICE["Scene choice"]
-    MATCH --> OFFSET["Source offset + playback-rate search"]
-    OFFSET --> SYNC["Visual accents phase-aligned to beats"]
-    CHOICE --> DIRECTION["Color + FX + narrative direction"]
-    SYNC --> DIRECTION
-```
-
-Scene ranking combines:
-
-```text
-semantic relevance
-+ visual motion compatibility
-+ brightness / complexity / saturation compatibility
-+ novelty and unique-source pressure
-+ recent scene/clip cooldown
-+ transition continuity or contrast
-+ motif memory
-```
-
-Transition behavior is musical: breakdowns and hypnotic passages prefer visual
-continuity, while peaks, heavy or fractured sections, and payoffs reward stronger color,
-motion, and brightness contrast.
-
-Natural visual accents drive a search over source offsets and modest playback rates, so
-motion already present in the footage can land on musical beats. Camera whips, flashes,
-machine movement, and dancer movement can feel synchronized even though the source
-footage has nothing to do with the song.
-
-Controls:
-
-```text
---visual-match-weight 1.25
---transition-weight 0.70
---rhythm-alignment / --no-rhythm-alignment
---visual-auto-index / --no-visual-auto-index
-```
-
-An aggressively directed edit:
-
-```bash
-tubeviz analyze song.mp3 \
+tubeviz analyze audio/song.mp3 \
   --library ./library \
   --semantic \
-  --visual-match-weight 1.5 \
-  --transition-weight 0.9 \
-  --rhythm-alignment \
-  --target-unique-clips 0 \
-  --novelty-weight 0.75 \
-  --dynamic-shots \
+  --ai-director \
+  --output timelines/song.json
+```
+
+Studio can supply the configured API endpoint, model, and key automatically.
+
+### Alternate cuts
+
+Use a deterministic seed for reproducible variation:
+
+```bash
+tubeviz analyze audio/song.mp3 \
+  --library ./library \
+  --selection-seed 12345 \
+  --selection-variation 0.35 \
+  --output timelines/song-alt.json
+```
+
+Or request a fresh seed:
+
+```bash
+tubeviz analyze audio/song.mp3 \
+  --library ./library \
   --reshuffle \
-  --output song.timeline.json
+  --output timelines/song-alt.json
 ```
 
-### Continuous color and effect choreography
+## Visual direction and effects
 
-Every selected primary shot carries a `direction` object with:
+Tubeviz schedules effects according to musical and visual context. The renderer can mix
+ordinary source transforms with semantic/temporal effects, vector treatments, layered
+composition, and optional codec-space effects.
+
+### Video-first transforms
+
+Typical source treatments include:
+
+- crop, scale, pan, rotation, and virtual-camera motion;
+- flow and harmonic warp;
+- pseudo-depth parallax;
+- RGB displacement;
+- bloom, streaks, scanlines, noise, and vignette;
+- palette and contrast direction;
+- beat-reactive push and motion;
+- multi-source composition and crossfades.
+
+The goal is to preserve source identity while creating motion and continuity that follow
+the song.
+
+### Semantic temporal effects
+
+The creative renderer can combine persistent temporal state with source-derived visual
+features. Depending on the planned shot, treatments can include:
+
+- feedback and frame echo;
+- motion trails;
+- slit-scan/history effects;
+- pixelation and posterization;
+- solarization and edge extraction;
+- glitch and block displacement;
+- VHS-style tracking;
+- ripple and tempo deformation;
+- sparse depth, flow, and focal-point treatments.
+
+Effect strength is controlled by the timeline and the analysis settings rather than by a
+single global preset.
+
+### Vector effects
+
+Vector treatments derive structure from source imagery and motion. They can be used for
+sparse outlines, motion-linked geometry, motif memory, and scene-responsive graphical
+accents.
+
+Control their overall contribution with:
 
 ```text
-rhythm alignment score
-motion compatibility
-transition score
-source playback rate
-narrative role: introduce / develop / mutate / payoff
-effect family
-source and target palette direction
-continuous automation curves
+--vector-effects / --no-vector-effects
+--vector-intensity
 ```
 
-Effect families are `dream`, `liquid`, `analog`, `fracture`, `hyper`, `prismatic`, and
-`cinematic`.
+### Composition
 
-The browser renderer consumes continuous automation for:
+Tubeviz can plan multiple simultaneous source layers when appropriate:
 
 ```text
-hue evolution
-saturation
-spectral displacement
-chromatic/prismatic separation
-feedback
-flow/ripple
-glitch
-bloom
+--max-video-layers
+--composition-intensity
+--clip-opacity
+--scene-crossfade
 ```
 
-These effects operate on the already-composited video frame. Spectral displacement moves
-strips of the actual footage through a continuously changing field, while prismatic,
-flow-RGB, temporal-RGB, chroma-delay, and beat accents displace the source frame's real
-red/green/blue channels rather than screen-blending fixed hue-rotated copies. Musical
-color direction is a bounded source-relative grade, so a forest remains recognizably
-green and a blue scene remains predominantly blue unless a sparse hero treatment earns
-a stronger departure.
+Higher values can produce denser edits, but one or two strong source layers are often
+more readable than continuous maximum-density composition.
 
-The native backend receives the same source-fidelity and post-composite color direction
-plus timed creative trajectories so native and browser rendering follow the same phrase
-shape rather than merely sharing static peak values.
+## Previewing
 
-Visual motif callbacks also carry narrative roles. A recurring musical motif can return
-to a remembered source family while changing excerpt, transform, palette, and effect
-treatment, producing an introduce → mutate → payoff visual arc instead of simple clip
-repetition.
-
-## Semantic temporal creative renderer
-
-The v0.33 creative renderer sits between ordinary video transforms and the sparse vector/
-codec punctuation layers. Its rule is intentionally conservative: **keep the source
-recognizable most of the time, then let distortion grow when the musical phrase earns
-it.** A shot therefore receives one coherent `CreativeEffectPlan` instead of a random
-set of independent filters.
-
-The plan carries:
-
-```text
-flow warp / trails / motion-following RGB
-temporal echo / channel memory / time smear
-saliency-targeted virtual camera energy and drift
-content-derived depth/parallax and atmospheric separation
-semantic subject preservation and background warp
-recursive feedback scale/rotation
-local focal-point symmetry
-source-derived bloom and light streaks
-palette propagation
-source-fidelity target
-abstraction state
-rare hero-effect kind/window/amount
-independent per-channel automation curves
-```
-
-The planner combines musical section state, build/drop trajectory, onset density, bass and
-percussive balance, the scene's persistent motion/color/complexity fingerprint, semantic
-metadata, motif recurrence and optional whole-song AI direction. `source_fidelity` normally
-keeps roughly 80–95% of the source's color identity intact and can relax briefly for rare
-hero moments; music/AI hue requests are small relative biases rather than absolute palette
-replacement. Effects ramp through a shot instead of switching on at a beat. Builds generally rise toward the end of a shot,
-breakdowns use wider/softer envelopes, withholding suppresses visual clutter before an
-impact, and payoff shots can hit early and decay.
-
-```mermaid
-flowchart LR
-    MUSIC["Section + phrase trajectory"] --> PLAN["CreativeEffectPlan"]
-    VIS["Motion / palette / complexity"] --> PLAN
-    AI["Scene semantics + focal point"] --> PLAN
-    LLM["Optional creative trajectory"] --> PLAN
-    PLAN --> CAM["Virtual camera"]
-    PLAN --> FLOW["Optical-flow deformation"]
-    PLAN --> TIME["Temporal memory"]
-    PLAN --> DEPTH["Depth / foreground separation"]
-    PLAN --> TEX["Feedback / texture / palette"]
-    PLAN --> HERO["Sparse hero punctuation"]
-    CAM --> FRAME["Recognizable source-led frame"]
-    FLOW --> FRAME
-    TIME --> FRAME
-    DEPTH --> FRAME
-    TEX --> FRAME
-    HERO --> FRAME
-```
-
-### Semantic focal points and foreground protection
-
-When clip AI enhancement is enabled, storyboard analysis now asks for a normalized focal
-point, approximate subject scale, depth character, and visible foreground/background
-regions for each sampled scene. The renderer blends that image-derived focal point with
-measured motion direction. Existing libraries without the newer metadata fall back to a
-deterministic saliency estimate, so no migration is required.
-
-For person/face/text-heavy footage, destructive spatial effects are reduced and the
-foreground is restored after deformation. Browser rendering builds a coarse content mask
-from focal proximity plus local source-color continuity; native rendering applies the same
-idea directly against the source pixels. This lets water, architecture, sky, or moving
-background structure distort while a meaningful subject remains readable.
-
-### Optical flow, temporal memory and depth
-
-The browser path reuses its low-resolution live optical-flow field as a deformation input:
-flow patches stretch along actual source motion, color channels can separate in the same
-direction, and delayed frames form trails rather than drawing the vectors themselves. The
-native CPU path estimates local motion from temporal luminance change plus spatial
-gradients against the previous output frame and uses that field for source deformation.
-
-Both renderers also build a small content-derived depth field from perspective, luminance,
-color variation and semantic focal information. It is deliberately lightweight — there is
-no mandatory neural depth dependency during final render — but it provides scene-aware
-2.5D parallax, background movement and depth fog instead of a fixed horizontal-band
-illusion.
-
-### Feedback, source texture and palette continuity
-
-Recursive feedback is centered on the semantic target and slowly scales/rotates previous
-output, so it can accumulate organic structures without permanently centering the image.
-Bloom and streak layers are synthesized from bright regions of the footage itself, and
-palette treatment uses the indexed source palette rather than unrelated random colors.
-Local symmetry is likewise restricted to a moving focal region instead of turning every
-frame into a full-screen centered kaleidoscope.
-
-### Rare hero moments
-
-Hero effects are globally budgeted across the song and kept at least roughly ten seconds
-apart. Depending on semantics and effect family, selected shots can become:
-
-- `subject_echo` — temporal copies around a protected foreground subject;
-- `flow_melt` — optical-flow deformation that carries motion across the shot;
-- `depth_burst` — exaggerated depth separation with recursive feedback;
-- `time_prism` — delayed RGB/time slices plus local symmetry;
-- `recursive_portal` — focal symmetry, source texture and recursive feedback.
-
-The selector favors payoff/build/peak moments but remains deterministic for a stored
-timeline. These are intentionally rare; normal footage provides the contrast that makes a
-hero moment read as an event.
-
-### AI director trajectories
-
-The whole-song director may optionally return section-level start/end targets for
-`abstraction`, `camera_energy`, `temporal`, `feedback`, `depth`, `flow`, and `palette`.
-Tubeviz never lets the LLM directly execute an effect. Instead, each requested trajectory
-is blended with measured audio confidence and the deterministic creative planner, then
-serialized into the timeline. This keeps rendering reproducible and bounded while letting
-the AI describe a visual arc rather than name arbitrary filters.
-
-Controls:
-
-```text
---creative-effects / --no-creative-effects
---creative-intensity 1.0
-```
-
-`--creative-intensity 0` produces an inert creative plan while preserving semantic metadata.
-Values around `0.7–1.2` are designed to remain source-led; values above `1` progressively
-raise the effect ceilings. Studio exposes the same controls as **Creative FX**. Legacy
-`--transform-intensity`, vector effects, and codec-space FFglitch remain separate controls.
-
-## Vector scene graph
-
-Every directed shot carries a vector scene graph. Vector effects are chosen by the Visual
-Director from the music state, source visual fingerprint, narrative role, motif
-recurrence, and effect family. They are not random UI overlays — most primitives are
-derived from the actual video or used to mask and displace the footage.
-
-```mermaid
-flowchart TD
-    VIDEO["Composited video"] --> EDGES["Live edge / saliency extraction"]
-    VIDEO --> MOTION["Scene motion fingerprint"]
-    COMPANION["Companion video"] --> TRANSPLANT["Temporal motion field"]
-    MUSIC["Beat / vibe / energy"] --> VD["Visual Director"]
-    EDGES --> VD
-    MOTION --> VD
-    VD --> GRAPH["Vector scene graph"]
-
-    GRAPH --> CONTOUR["Contours / subject outlines"]
-    GRAPH --> FLOW["Bezier ribbons / particles"]
-    GRAPH --> ECHO["Vector echoes"]
-    GRAPH --> GRID["Perspective grid"]
-    GRAPH --> MESH["Delaunay / Voronoi"]
-    GRAPH --> PORTAL["Companion portals"]
-    GRAPH --> GLYPH["Motif glyphs"]
-    GRAPH --> DISP["Vector displacement"]
-    GRAPH --> TRANSPLANT
-
-    CONTOUR --> FINAL["Final video"]
-    FLOW --> FINAL
-    ECHO --> FINAL
-    GRID --> FINAL
-    MESH --> FINAL
-    PORTAL --> FINAL
-    GLYPH --> FINAL
-    DISP --> FINAL
-    TRANSPLANT --> FINAL
-```
-
-Primitive kinds:
-
-| Kind | Function |
-|---|---|
-| `contours` | Sobel-derived vector-like topology from the live video frame |
-| `semantic_outline` | saliency-oriented subject contour proxy with a stable semantic-outline abstraction |
-| `flow_ribbons` | Bézier motion ribbons biased by indexed source motion |
-| `flow_particles` | short vector trajectories moving with the same field |
-| `vector_echo` | retained edge geometry from preceding frames |
-| `perspective_grid` | vanishing-point geometry biased by scene motion direction |
-| `delaunay_fracture` | feature-seeded triangulation; triangles can displace/reveal the actual video |
-| `voronoi` | dual geometry generated from the feature-seeded Delaunay mesh |
-| `portal` | animated vector masks that reveal actual companion footage |
-| `motif_glyph` | deterministic recurring symbols forming a visual alphabet for musical motifs |
-| `motion_transplant` | motion extracted from a companion video deforms the primary source |
-| `vector_displacement` | invisible music-driven vector geometry used only as a displacement field |
-
-The browser renderer is the reference vector implementation. It performs low-resolution
-live edge extraction, deterministic geometry caching, true Bowyer-Watson-style Delaunay
-construction, Voronoi dual rendering, temporal edge-history echoes, and temporal
-companion-video motion transplantation.
-
-The native renderer receives `VEC` records in its manifest and renders CPU equivalents
-for contours, subject outlines, flow paths, particles, vector echoes, perspective
-geometry, fracture/Voronoi geometry, motif glyphs, displacement, and companion-video
-portals. It deliberately uses cheaper geometry for high-throughput final rendering while
-preserving the same Visual Director decisions.
-
-Vector effects are on by default:
+Serve an existing timeline:
 
 ```bash
-tubeviz analyze song.mp3 \
+tubeviz serve timelines/song.json \
   --library ./library \
-  --semantic \
-  --vector-effects \
-  --vector-intensity 1.0 \
-  --output song.timeline.json
+  --audio audio/song.mp3
 ```
 
-Disable them:
+Studio also provides a managed preview action from the Create interface.
+
+The interactive renderer can use WebGPU when the browser and environment provide a
+working device. If WebGPU is unavailable during normal interactive preview, tubeviz can
+use its Canvas2D compatibility path.
+
+For best browser GPU support:
+
+- use a current Chrome or Chromium build;
+- use a secure context or loopback address;
+- keep the browser's hardware acceleration enabled;
+- confirm the browser exposes WebGPU;
+- avoid remote-display configurations that disable GPU access.
+
+The preview HUD reports the active rendering path so it is possible to distinguish
+WebGPU rendering from Canvas2D fallback.
+
+## Rendering
+
+Tubeviz offers two offline rendering backends:
+
+- **native** — C++/FFmpeg renderer with optional libplacebo/Vulkan effects and
+  CUDA/NVDEC source decode;
+- **browser** — deterministic browser renderer using WebCodecs/WebGPU when available,
+  with compatibility fallbacks.
+
+`auto` prefers the native backend when a usable native renderer is available.
+
+### Automatic backend
 
 ```bash
---no-vector-effects
-```
-
-Or push them harder:
-
-```bash
---vector-intensity 1.6
-```
-
-A strongly generative EDM cut:
-
-```bash
-tubeviz analyze song.mp3 \
+tubeviz render timelines/song.json \
   --library ./library \
-  --semantic \
-  --visual-match-weight 1.5 \
-  --transition-weight .9 \
-  --rhythm-alignment \
-  --vector-effects \
-  --vector-intensity 1.4 \
-  --max-video-layers 4 \
-  --composition-intensity 1.35 \
-  --transform-intensity 1.4 \
-  --novelty-weight .75 \
-  --dynamic-shots \
-  --reshuffle \
-  --output song-vector.json
-```
-
-### Structural vector rendering
-
-Visible vector rendering is intentionally sparse and structural.
-
-```mermaid
-flowchart LR
-    VIDEO["Composited video"] --> SOBEL["Sobel magnitude + direction"]
-    SOBEL --> NMS["Non-maximum suppression"]
-    NMS --> HYST["Hysteresis threshold"]
-    HYST --> COMP["Connected edge components"]
-    COMP --> TRACE["Ordered contour tracing"]
-    TRACE --> RDP["RDP simplification"]
-    RDP --> SMOOTH["Chaikin smoothing"]
-    SMOOTH --> STABLE["Temporal path stabilization"]
-    STABLE --> PATHS["Long continuous vector paths"]
-```
-
-The browser vector renderer:
-
-- performs non-maximum-suppressed, hysteresis-connected edge extraction;
-- traces connected components into whole contour paths rather than drawing one tiny line
-  per edge sample;
-- rejects short or noisy components using arc-length and bounding-area gates;
-- simplifies paths with Ramer-Douglas-Peucker and smooths them before drawing;
-- temporally matches and stabilizes contours against the previous extraction;
-- stores complete paths in vector echo history rather than collections of short tangent
-  marks;
-- limits ordinary contour rendering to a handful of long paths;
-- uses low default opacity and line density.
-
-The native CPU renderer follows the same approach: its contour path groups strong edges
-into connected components and renders ordered paths, and its flow approximation seeds
-from strong image structure rather than random screen locations.
-
-Flow ribbons use a local low-resolution block-matched motion field:
-
-```mermaid
-flowchart LR
-    PREV["Previous 64×36 frame"] --> MATCH["Patch block matching"]
-    CUR["Current 64×36 frame"] --> MATCH
-    MATCH --> FIELD["Sparse local optical-flow field"]
-    FIELD --> SEED["Strong motion seeds"]
-    SEED --> INTEGRATE["Integrate streamlines through field"]
-    INTEGRATE --> RIBBON["Smooth ribbons / short particles"]
-```
-
-Ribbons therefore originate where the frame is actually moving and bend through local
-motion, instead of trailing off as pseudo-random tendrils biased by a single global
-direction.
-
-The Visual Director also applies a visible-vector budget. Non-peak shots use at most one
-visible vector family; strong peaks may use two. A deterministic share of non-peak shots
-carries no visible vector geometry at all. Invisible video displacement and
-motion-transplant effects can stay active, since they change the footage without covering
-it in lines.
-
-Typical family vocabulary:
-
-| Effect family | Preferred visible vectors |
-|---|---|
-| `dream` | contour echo or sparse connected contours |
-| `liquid` | local-flow ribbons, occasional echo/portal |
-| `analog` | perspective grid or sparse contours |
-| `fracture` | Delaunay fracture and, at peaks, Voronoi |
-| `hyper` | local-flow ribbons and impact fracture |
-| `prismatic` | companion portal and Voronoi |
-| `cinematic` | salient connected outline or restrained grid |
-
-Motif glyphs are not continuously overlaid. They are reserved for returning motif
-callbacks and peak punctuation, which preserves the visual alphabet without turning it
-into a persistent logo.
-
-Timelines written by older versions of tubeviz are pruned to the current visible-vector
-budget at load time, so a dense older plan does not need regenerating just to thin out
-its overlay. All invisible displacement effects remain available. Regenerating the
-timeline still gives cleaner shot-level choreography.
-
-### Motion transplantation
-
-Motion transplantation uses a secondary video as an invisible motion source:
-
-```mermaid
-flowchart LR
-    B["Companion clip B"] --> SAMPLE["64×36 temporal samples"]
-    SAMPLE --> FIELD["Temporal difference + gradient field"]
-    A["Primary clip A"] --> WARP["Local video displacement"]
-    FIELD --> WARP
-    WARP --> OUT["Clip A moving with clip B's motion"]
-```
-
-This makes effects possible such as crowd motion deforming architecture, ocean motion
-deforming machinery, or a dancer's movement perturbing a city scene even when the
-companion itself stays mostly hidden.
-
-### Motif glyph memory
-
-`motif_glyph` seeds its geometry from scene and motif identity, so recurring musical
-motifs return with recognizable vector symbols whose rotation, strength, color, and
-mutation evolve with the musical callback. The vector system can act as a persistent
-visual alphabet rather than a stream of unrelated generative shapes.
-
-## FFglitch codec-space effects
-
-Codec-space effects are a separate domain from tubeviz's raster glitches, vector
-geometry, and optical-flow displacement. FFglitch modifies prediction and motion-vector
-structures inside a supported compressed video stream, producing true codec artifacts
-that ordinary pixel filters can only imitate.
-
-FFglitch 0.10.2 documents `ffedit` as its bitstream editor and exposes MPEG-4 Part 2
-features including `mv`, `mv_delta`, and macroblock information. tubeviz never assumes
-that an arbitrary downloaded H.264 or WebM clip is directly editable. It first creates a
-controlled short MPEG-4 Part 2 AVI working stream, transplicates that stream with
-`ffedit`, then converts the result back to a normal H.264 MP4 cache asset for the
-browser and native renderers.
-
-```mermaid
-flowchart LR
-    SRC["Selected tubeviz shot"] --> PREP["FFmpeg preparation encode\nMPEG-4 Part 2 / AVI\ncontrolled GOP"]
-    PREP --> FFEDIT["ffedit -f mv\nQuickJS motion-vector script"]
-    MUSIC["Visual Director\nbeat + vibe + role + motion"] --> PLAN["CodecEffect plan"]
-    PLAN --> FFEDIT
-    FFEDIT --> MOSH["Transplicated AVI"]
-    MOSH --> FINAL["FFmpeg H.264 MP4\ncodec-glitch cache"]
-    FINAL --> BROWSER["Browser renderer"]
-    FINAL --> NATIVE["Native renderer"]
-```
-
-### Availability
-
-```bash
-tubeviz codec doctor
-```
-
-A healthy result looks roughly like:
-
-```text
-available: true
-ffedit: /path/to/ffedit
-ffedit_version: ffglitch-0.10.2 ...
-ffmpeg: /usr/bin/ffmpeg
-ffgac: optional
-working_codec: mpeg4
-```
-
-`ffgac` is detected and reported, but materialization uses standard FFmpeg for the
-controlled preparation and final conversion, and `ffedit` for the bitstream manipulation
-itself.
-
-### Scheduling codec effects
-
-Codec effects are **opt-in** during analysis, because they land hardest when used
-sparingly:
-
-```bash
-tubeviz analyze song.mp3 \
-  --library ./library \
-  --semantic \
-  --codec-glitch musical \
-  --codec-glitch-intensity .65 \
-  --output song.codec-plan.json
-```
-
-Modes:
-
-| Mode | Behavior |
-|---|---|
-| `off` | no codec-space effects; default |
-| `subtle` | only restrained build/impact accents |
-| `musical` | sparse build, mutation, fractured and payoff effects |
-| `aggressive` | broader codec treatment across energetic passages |
-
-The Visual Director schedules a compact vocabulary of true motion-vector operations:
-
-```text
-mv_drift
-mv_wave
-mv_shear
-mv_explode
-mv_implode
-mv_spiral
-mv_jitter
-mv_freeze
-mv_feedback
-mv_invert
-mv_radial_wave
-datamosh
-```
-
-A shot is capped at one or two codec effects, so codec treatment stays a punctuation and
-transition device rather than constant visual noise.
-
-Inspect the plan before materializing:
-
-```bash
-tubeviz codec inspect song.codec-plan.json
-tubeviz codec inspect song.codec-plan.json --json
-```
-
-### Parameter compatibility
-
-FFglitch's `-sp` setup-parameter parser is not used for tubeviz's codec-effect plan. In
-FFglitch 0.10.2 that parser rejects floating-point JSON values, while tubeviz effect
-envelopes require fractional amounts and normalized start/end positions. tubeviz
-therefore embeds the deterministic JSON-compatible effect payload directly into the
-generated QuickJS source as a JavaScript object literal, preserving full precision while
-still using FFglitch's documented `setup()` / `glitch_frame()` scripting path.
-
-### Materialization
-
-Bake scheduled codec effects into deterministic cached shot assets:
-
-```bash
-tubeviz codec materialize song.codec-plan.json \
-  --library ./library \
-  --output song.codec.json
-```
-
-Tuning controls:
-
-```text
---qscale 3       MPEG-4 preparation quality
---gop 18         preparation GOP length
---fps 30         preparation frame rate
---width 1280
---height 720
---threads 0      ffedit automatic threading
---crf 18         final cached H.264 quality
---preset fast
---force          rebuild cached codec assets
-```
-
-The cache lives under:
-
-```text
-library/codec-glitch/
-```
-
-Each materialized MP4 has a JSON provenance sidecar recording the source, source range,
-FFglitch version, effect plan, preparation codec/GOP/quality, and cache key. Cache keys
-include source file identity, selected range, effect plan, and working/output parameters.
-Final files are written atomically, so an aborted materialization is never mistaken for a
-completed cache entry. The materialized timeline keeps the original source media and
-range in `codec_materialization`, so `--force` regenerates from the original footage
-instead of recursively glitching an already-glitched cache file.
-
-### Rendering and previewing codec effects
-
-Final rendering can materialize codec effects in one step:
-
-```bash
-tubeviz render song.codec-plan.json \
-  --audio song.mp3 \
-  --library ./library \
-  --backend native \
-  --codec-materialize \
-  --output song-viz.mp4
-```
-
-The generated codec-materialized timeline is kept beside the output video by default,
-which keeps the render reproducible.
-
-Browser preview can materialize first as well:
-
-```bash
-tubeviz serve song.codec-plan.json \
-  --audio song.mp3 \
-  --library ./library \
-  --codec-materialize
-```
-
-Without materialization, both renderers substitute musically equivalent raster fallbacks
-for scheduled codec effects. Planning stays immediately previewable, and the genuinely
-different codec artifacts are reserved for the FFglitch materialization step.
-
-### Codec motion as a scene-selection feature
-
-FFglitch can export motion-vector JSON, which tubeviz can use as a second
-motion-analysis source alongside decoded-image temporal analysis:
-
-```bash
-tubeviz library codec-motion-index \
-  --library ./library
-```
-
-Force a rebuild:
-
-```bash
-tubeviz library codec-motion-index \
-  --library ./library \
-  --force
-```
-
-The persisted scene fingerprint gains:
-
-```text
-codec_motion
-codec_motion_peak
-codec_motion_direction_x
-codec_motion_direction_y
-codec_motion_accents
-codec_motion_frames
-```
-
-Scene matching blends codec motion with the visual-motion estimate when both are
-available. Natural codec-motion peaks are also merged into beat-to-visual-accent
-alignment, helping the source-offset and playback-rate search find moments where encoded
-camera or object motion naturally lands on the music.
-
-### Codec effects in Studio
-
-Studio exposes:
-
-```text
-Codec glitch mode
-Codec intensity
-Materialize true FFglitch effects for browser preview
-Materialize scheduled FFglitch effects before final render
-FFglitch Doctor
-Materialize Codec FX
-Codec Motion Index
-```
-
-A productive workflow:
-
-```text
-1. codec doctor
-2. optionally build Codec Motion Index once
-3. Analyze with codec-glitch=musical
-4. preview using raster fallbacks while editing
-5. enable FFglitch materialization for a high-fidelity preview
-6. final render with codec materialization enabled
-```
-
-## Previewing interactively
-
-```bash
-tubeviz serve timelines/connected.json \
-  --audio audio/connected.mp3 \
-  --library ./library \
-  --host 127.0.0.1 \
-  --port 8080
-```
-
-Open `http://127.0.0.1:8080/`.
-
-Re-select footage from the current library without re-analyzing audio:
-
-```bash
-tubeviz serve timelines/connected.json \
-  --audio audio/connected.mp3 \
-  --library ./library \
-  --replan-scenes \
-  --semantic \
-  --reshuffle
-```
-
-Recompute transforms for an existing scene plan:
-
-```bash
-tubeviz serve timelines/connected.json \
-  --audio audio/connected.mp3 \
-  --library ./library \
-  --replan-transforms \
-  --transform-intensity 1.5
-```
-
-The `serve` replan path supports the same selection controls as `analyze`: semantic
-model and device, crossfade, opacity, layers, composition intensity, seed and reshuffle,
-unique-clip target, novelty and cooldowns, dynamic shots, and source-excerpt limits.
-
-Service endpoints:
-
-| Endpoint | Purpose |
-|---|---|
-| `/` | Interactive visualizer |
-| `/api/timeline` | Directed timeline |
-| `/api/status` | Renderer/library status |
-| `/audio` | Selected music |
-| `/media/...` | Normalized clip media |
-| `/transforms/...` | Materialized transform cache |
-| `/ws` | Playback clock and visual cues |
-
-## Rendering a final video
-
-```mermaid
-flowchart TD
-    TL[("DirectedTimeline")]
-    TL --> TRACK["Track analysis\nevents, tempo, sections, arc"]
-    TL --> EDIT["Cues, motifs, memory"]
-    TL --> SCENES["Scene plan\nsource ranges and layers"]
-    SCENES --> DIR["Transforms, color, vectors, codec effects"]
-
-    TL --> SERVER["FastAPI + WebSocket clock"]
-    SERVER --> CANVAS["Interactive Canvas preview"]
-
-    TL --> BROWSER["Playwright frame capture"]
-    BROWSER --> FFMPEG1["FFmpeg mux and encode"]
-
-    TL --> MANIFEST["Native manifest adapter"]
-    MANIFEST --> CPP["C++20 sequential decode and composite"]
-    CPP --> RAW["Raw RGB24 stream"]
-    RAW --> FFMPEG2["FFmpeg mux and encode"]
-
-    FFMPEG1 --> VIDEO["Final video"]
-    FFMPEG2 --> VIDEO
-```
-
-The browser path gives visual parity with the interactive Canvas renderer. The native
-path avoids browser screenshots entirely: C++ decodes source video sequentially through
-FFmpeg libraries, composites simultaneous layers, emits raw RGB frames, and pipes them
-straight to FFmpeg for encoding.
-
-### Optional: materialize source transforms
-
-Materialization bakes expensive per-source transforms into reusable files while the live
-renderer still handles composition and music-reactive post-processing:
-
-```bash
-tubeviz materialize timelines/connected.json \
-  --library ./library \
-  --width 1280 \
-  --height 720 \
+  --audio audio/song.mp3 \
+  --output output/song.mp4 \
+  --backend auto \
+  --width 1920 \
+  --height 1080 \
   --fps 30 \
-  --crf 20 \
-  --preset medium \
-  --output timelines/connected.materialized.json
+  --crf 20
 ```
 
-Use `--force` to regenerate cached transforms. Materialization is optional; the renderers
-do not require it.
+### Native backend
 
-### Build the native renderer
+Build it:
 
-The native renderer has one canonical source tree, inside the Python package, so editable
-installs and built wheels compile identical renderer sources:
-
-```text
-src/tubeviz/native_src/
-├── CMakeLists.txt
-├── include/tubeviz/
-├── src/
-└── shaders/
+```bash
+tubeviz native build --clean
 ```
 
-Check availability:
+Inspect the local toolchain and native build:
 
 ```bash
 tubeviz native doctor
 ```
 
-With explicit paths:
+Render explicitly with the native backend:
 
 ```bash
-tubeviz native doctor \
-  --binary ~/.cache/tubeviz/native-build/tubeviz-native-render \
-  --build-dir ~/.cache/tubeviz/native-build
-```
-
-Build:
-
-```bash
-tubeviz native build
-tubeviz native build --clean
-tubeviz native build --clean --jobs 16
-```
-
-For a manual CMake build:
-
-```bash
-cmake -S src/tubeviz/native_src -B build/native -DCMAKE_BUILD_TYPE=Release
-cmake --build build/native -j
-```
-
-The wrapper command is normally preferable.
-
-The native renderer uses FFmpeg/libavcodec decoding, a C++ video-effects and compositor
-path, decoder caching, and OpenMP where available.
-
-```mermaid
-flowchart LR
-    TL["Timeline"] --> M["Native manifest"]
-    M --> D["FFmpeg/libavcodec decoders"]
-    D --> C["Decoder LRU cache"]
-    C --> FX["C++ video transforms"]
-    FX --> COMP["Multi-source compositor"]
-    COMP --> BEAT["Beat/tone-driven effects"]
-    BEAT --> PIPE["Raw frames → FFmpeg encoder"]
-    AUDIO["Original audio"] --> PIPE
-    PIPE --> MP4["MP4"]
-```
-
-### Native backend
-
-```bash
-tubeviz render timelines/connected.json \
-  --audio audio/connected.mp3 \
+tubeviz render timelines/song.json \
   --library ./library \
-  --output connected-native.mp4 \
+  --audio audio/song.mp3 \
+  --output output/song.mp4 \
   --backend native \
-  --native-build-if-missing \
   --width 1920 \
   --height 1080 \
   --fps 30 \
+  --video-codec libx264 \
   --crf 20 \
   --native-preset veryfast \
   --native-decoder-cache 16 \
-  --native-threads 0
+  --native-threads 0 \
+  --native-gpu auto \
+  --native-hwdecode auto \
+  --native-build-if-missing
 ```
 
-`--native-threads 0` lets OpenMP choose available workers.
+Native GPU controls:
 
-For NVIDIA hardware encoding, first check FFmpeg support:
-
-```bash
-ffmpeg -hide_banner -encoders | grep nvenc
-```
-
-Then:
-
-```bash
-tubeviz render timelines/connected.json \
-  --audio audio/connected.mp3 \
-  --library ./library \
-  --output connected-native-nvenc.mp4 \
-  --backend native \
-  --video-codec h264_nvenc \
-  --crf 20 \
-  --native-preset fast \
-  --native-decoder-cache 24 \
-  --native-threads 0
-```
-
-With NVENC, tubeviz maps the quality value to FFmpeg CQ controls rather than x264-style
-`-crf`.
-
-Native-specific controls:
-
-| Option | Purpose |
+| Option | Behavior |
 |---|---|
-| `--native-binary` | Explicit native renderer executable |
-| `--native-build-dir` | CMake build/cache directory |
-| `--native-build-if-missing` | Build when the native executable is absent |
-| `--native-keep-manifest` | Keep the generated TSV manifest |
-| `--native-preset` | Native FFmpeg encoder preset |
-| `--native-decoder-cache` | Decoder contexts retained across cuts |
-| `--native-threads` | OpenMP effect workers; `0` = automatic |
+| `--native-gpu auto` | Use libplacebo/Vulkan when a usable Vulkan device is available; otherwise use CPU effects |
+| `--native-gpu vulkan` | Require the Vulkan creative-FX path |
+| `--native-gpu off` | Disable native Vulkan effects |
+| `--native-hwdecode auto` | Use CUDA/NVDEC when a compatible decoder/device is available |
+| `--native-hwdecode cuda` | Require CUDA hardware decode |
+| `--native-hwdecode off` | Use software source decode |
 
 ### Browser backend
 
 ```bash
-tubeviz render timelines/connected.json \
-  --audio audio/connected.mp3 \
+tubeviz render timelines/song.json \
   --library ./library \
-  --output connected-browser.mp4 \
+  --audio audio/song.mp3 \
+  --output output/song-browser.mp4 \
   --backend browser \
-  --width 1280 \
-  --height 720 \
+  --width 1920 \
+  --height 1080 \
   --fps 30 \
-  --crf 20 \
-  --frame-format jpeg \
-  --jpeg-quality 90 \
-  --browser-executable /path/to/chrome
+  --browser-transport auto \
+  --browser-gpu auto \
+  --browser-source-decode auto
 ```
 
-Other browser controls include `--browser-channel`, `--headed`, `--seed`, and
-`--page-timeout`.
+Browser acceleration controls:
 
-### Automatic backend selection
+| Option | Purpose |
+|---|---|
+| `--browser-transport auto\|webcodecs\|raw` | Select encoded browser output or raw RGBA transport |
+| `--browser-gpu auto\|webgpu\|off` | Select WebGPU composition behavior |
+| `--browser-source-decode auto\|webcodecs\|video` | Select browser source-decoding path |
+| `--webcodecs-bitrate N` | Override browser WebCodecs output bitrate; `0` selects automatically |
+
+Use explicit `webgpu` or `webcodecs` modes when diagnosing acceleration. Use `auto` for
+normal operation.
+
+## Hardware acceleration
+
+Tubeviz can use several independent acceleration paths. Availability of one does not
+imply availability of the others.
+
+```mermaid
+flowchart LR
+    SRC["Source video"] --> DECODE{"Source decode"}
+    DECODE -->|CUDA/NVDEC| CUDA["NVIDIA decode"]
+    DECODE -->|software| CPUDEC["CPU decode"]
+
+    CUDA --> FX{"Creative FX"}
+    CPUDEC --> FX
+    FX -->|libplacebo/Vulkan| VK["GPU effects"]
+    FX -->|CPU| CPUFX["CPU effects"]
+
+    VK --> ENC["FFmpeg output encoder"]
+    CPUFX --> ENC
+```
+
+### Native diagnostics
 
 ```bash
-tubeviz render timelines/connected.json \
-  --audio audio/connected.mp3 \
-  --library ./library \
-  --output connected.mp4 \
-  --backend auto
+tubeviz native doctor
 ```
 
-`auto` prefers a usable native renderer and falls back to the browser path.
+Also test the underlying runtimes directly when diagnosing GPU availability:
 
-Common final-render controls are `--width`, `--height`, `--fps`, `--video-codec`,
-`--crf`, `--preset`, `--pixel-format`, `--audio-codec`, and `--audio-bitrate`.
+```bash
+vulkaninfo --summary
+nvidia-smi
+ffmpeg -hide_banner -hwaccels
+```
+
+`libplacebo` being installed means the native renderer can be built with libplacebo
+support; it does **not** guarantee that Vulkan can create a usable GPU device at runtime.
+Likewise, `cuda` appearing in `ffmpeg -hwaccels` means the FFmpeg build advertises CUDA
+support; actual source decoding still depends on the driver, codec, and runtime device.
+
+### WSL notes
+
+Under WSL, CUDA/NVDEC and Vulkan are separate paths:
+
+- CUDA/NVDEC uses the NVIDIA Windows driver exposed to WSL;
+- Vulkan requires a Vulkan implementation visible inside the Linux environment;
+- libplacebo can only use Vulkan devices exposed by that Linux Vulkan stack.
+
+If `vulkaninfo --summary` reports only a CPU renderer such as llvmpipe, native
+libplacebo effects will not use the GPU. Resolve Vulkan device visibility before
+troubleshooting tubeviz itself.
+
+## FFglitch codec-space effects
+
+FFglitch is optional. Tubeviz uses the external `ffedit` program to materialize true
+codec-space motion-vector effects. Other FFglitch tools are not required for normal
+tubeviz operation.
+
+Check availability:
+
+```bash
+tubeviz codec doctor
+```
+
+### Linux x86-64 installation
+
+Download the FFglitch release archive from the official FFglitch site, extract
+`ffedit`, and place it on `PATH`. A user-local installation can use `~/.local/bin`:
+
+```bash
+mkdir -p ~/.local/bin
+# Copy the extracted ffedit binary into ~/.local/bin/ffedit
+chmod 0755 ~/.local/bin/ffedit
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Verify it:
+
+```bash
+command -v ffedit
+ffedit -h | head -40
+tubeviz codec doctor
+```
+
+### Schedule codec effects
+
+Codec-space effects can be included while analyzing a track:
+
+```bash
+tubeviz analyze audio/song.mp3 \
+  --library ./library \
+  --codec-glitch musical \
+  --codec-glitch-intensity 0.65 \
+  --output timelines/song.json
+```
+
+Available scheduling profiles are:
+
+```text
+off
+subtle
+musical
+aggressive
+```
+
+### Materialize codec shots
+
+```bash
+tubeviz codec materialize timelines/song.json \
+  --library ./library
+```
+
+The rendered or previewed timeline can then reference the materialized codec-shot cache.
+
+If FFglitch is unavailable, ordinary analysis, preview, vector effects, and rendering
+remain usable.
 
 ## Library layout
 
-A library is persistent and can be reused even if an ingest run is interrupted.
+A tubeviz library is self-contained and reusable. The exact set of derived directories
+can vary with enabled features, but the high-level structure is:
 
 ```text
 library/
@@ -2450,296 +1025,366 @@ library/
 ├── normalized/
 ├── thumbnails/
 ├── metadata/
-└── transforms/          # created when materialization is used
+├── transforms/                 # created when transform materialization is used
+├── codec-glitch/               # created when codec effects are materialized
+└── browser-webcodecs-cache/    # created by accelerated browser rendering
 ```
 
-SQLite tracks discovery provenance, terms, status, source metadata, canonical ready media,
-scenes, duplicate relationships, AI scores, and scene embeddings.
+SQLite stores clip metadata, discovery provenance, scenes, duplicate relationships,
+trim ranges, tags, curation state, visual features, AI analysis, and scene embeddings.
+Generated directories are created only when the corresponding workflow needs them.
 
-```mermaid
-erDiagram
-    CLIP ||--o{ CLIP_TERM : discovered_by
-    SEARCH_TERM ||--o{ CLIP_TERM : groups
-    CLIP ||--o{ SCENE : contains
-    SCENE ||--o{ SCENE_EMBEDDING : represents
-    SCENE ||--o| VISUAL_FEATURES : measures
+### Tags and output pool
 
-    CLIP {
-        int id PK
-        string source_id
-        string status
-        string normalized_path
-        float usable_start
-        float usable_end
-    }
-    SEARCH_TERM {
-        int id PK
-        string term
-    }
-    CLIP_TERM {
-        int clip_id FK
-        int term_id FK
-        int rank
-    }
-    SCENE {
-        int id PK
-        int clip_id FK
-        float start_time
-        float end_time
-    }
-    SCENE_EMBEDDING {
-        int scene_id FK
-        string model
-        int dim
-    }
-    VISUAL_FEATURES {
-        int scene_id FK
-        int version
-        string data_json
-    }
-```
+User tags are separate from acquisition/search terms. Search terms record how footage
+entered the library; tags are for organizing footage for reuse. Studio can also maintain
+an output pool that restricts planning to selected ready clips.
 
-### Tags and the output pool
+With an empty output pool, all eligible ready clips can be selected. When clips are
+marked for output, analysis and replanning use only those marked clips. Clearing the pool
+returns planning to the full ready library.
 
-Studio stores editable user tags and one temporary **output pool**. Tags are deliberately
-separate from discovery terms: a search term records how footage entered the library,
-while a tag describes how you want to organize and reuse it. Each Library card can be
-tagged and independently marked for output. Studio can mark or unmark every visible ready
-clip, or every ready clip carrying the selected tag.
+Do not treat generated cache directories as irreplaceable source media. The SQLite
+library database and original source assets are the important persistent state.
 
-The output pool is opt-in. With no clips marked, all ready clips stay eligible for scene
-planning. As soon as one clip is marked, new `analyze` and scene-replan operations
-consider only marked ready clips. **Clear pool** returns immediately to the full ready
-library. Marking changes neither clip status nor media, and rejecting a marked clip
-removes it from the active pool without discarding its tags.
+## Recommended workflow
 
-Studio playback resolves the canonical ready-media path first, then canonical duplicate media,
-downloaded originals, and compatibility paths for older libraries. The legacy SQLite
-`normalized_path` column is retained for schema compatibility but may now point to either
-`originals/` direct source media or `normalized/` compatibility proxies.
+The following workflow works well for a full-length electronic track.
 
-## Recommended four-minute EDM workflow
+### 1. Build a diverse library
 
-For a large and varied source pool:
+Start with a strong visual brief or a varied set of search concepts. Favor footage with
+movement, changing composition, useful camera motion, and minimal persistent text.
 
 ```bash
 tubeviz ingest \
-  --terms edm_search_terms.txt \
+  --visual-brief 'Kinetic nocturnal electronic imagery with industrial motion, neon infrastructure, crowds, transit, abstract macro textures, and cinematic movement.' \
+  --audio audio/song.mp3 \
   --library ./library \
-  --results-per-term 15 \
-  --ai-discovery \
-  --ai-query-expansion \
-  --ai-candidates-per-term 150 \
-  --ai-index-scenes \
-  --cookies-from-browser chrome
+  --target-clips 50 \
+  --preview-gate \
+  --auto-trim
+```
 
-tubeviz analyze song.mp3 \
+### 2. Curate it
+
+Use Studio's Library view to reject weak material and trim intros/outros. A smaller,
+high-quality pool usually produces better edits than a large pool full of visually
+static sources.
+
+### 3. Add semantic indexes
+
+```bash
+tubeviz library visual-index --library ./library
+tubeviz library embed --library ./library --device auto
+```
+
+Optionally add AI visual descriptions from Studio or:
+
+```bash
+tubeviz library ai-describe --library ./library
+```
+
+### 4. Analyze the song
+
+```bash
+tubeviz analyze audio/song.mp3 \
+  --library ./library \
+  --output timelines/song.json \
+  --semantic \
+  --semantic-device auto \
+  --audio-ai \
+  --audio-ai-device auto \
+  --section-bars 8 \
+  --max-video-layers 3 \
+  --composition-intensity 1.2 \
+  --transform-intensity 1.2 \
+  --novelty-weight 0.65 \
+  --visual-match-weight 1.25 \
+  --transition-weight 0.7 \
+  --vector-intensity 1.0 \
+  --selection-variation 0.30 \
+  --min-shot-seconds 0.65 \
+  --max-shot-seconds 6 \
+  --source-excerpt-max-seconds 5
+```
+
+Treat these values as a starting point rather than a required preset. Different music
+benefits from different shot lengths, layer density, novelty, and effect intensity.
+
+### 5. Preview and iterate
+
+```bash
+tubeviz serve timelines/song.json \
+  --library ./library \
+  --audio audio/song.mp3
+```
+
+If the material is good but the cut is not, create an alternate selection before
+changing the visual-effect stack:
+
+```bash
+tubeviz analyze audio/song.mp3 \
   --library ./library \
   --semantic \
-  --section-bars 8 \
-  --dynamic-shots \
-  --target-unique-clips 0 \
-  --novelty-weight 0.75 \
-  --source-excerpt-max-seconds 4 \
-  --max-video-layers 3 \
-  --transform-intensity 1.35 \
-  --composition-intensity 1.25 \
   --reshuffle \
-  --output song.timeline.json
+  --output timelines/song-alt.json
+```
 
-tubeviz render song.timeline.json \
-  --audio song.mp3 \
+### 6. Render
+
+```bash
+tubeviz render timelines/song.json \
   --library ./library \
-  --backend native \
-  --native-build-if-missing \
+  --audio audio/song.mp3 \
+  --output output/song.mp4 \
+  --backend auto \
   --width 1920 \
   --height 1080 \
   --fps 30 \
-  --crf 20 \
-  --output song-viz.mp4
+  --crf 20
 ```
-
-This favors many distinct clips while using short, musically appropriate excerpts rather
-than exhausting each selected source sequentially.
 
 ## Troubleshooting
 
-### YouTube 403 / Forbidden
+### YouTube returns 403 / Forbidden
 
-Use a current yt-dlp and, for content your browser can access, pass cookies:
+Use current yt-dlp and, when necessary, browser cookies:
 
 ```bash
+pip install -U yt-dlp
+
 tubeviz ingest \
   --terms search_terms.txt \
   --library ./library \
   --cookies-from-browser chrome
 ```
 
-A candidate-specific failure does not invalidate the existing library; ingest continues
-toward the READY quota.
+If the failure is specific to one video, test it directly with yt-dlp before changing
+tubeviz settings.
 
-### Ingest appears stuck
+### Ingest appears slow
 
-Use bounded download settings and `--verbose-ytdlp` when diagnosing:
+Large source files, high-resolution downloads, scene detection, preview sampling,
+embedding generation, and AI description can each add significant work.
+
+Useful checks:
 
 ```bash
-tubeviz ingest \
-  --terms search_terms.txt \
-  --library ./library \
-  --download-socket-timeout 20 \
-  --download-retries 2 \
-  --fragment-retries 2 \
-  --verbose-ytdlp
+tubeviz library stats --library ./library
 ```
 
-### Native renderer reports an unknown new argument
+Use Studio's Jobs panel to identify the active stage. To isolate bottlenecks, temporarily
+disable optional analysis or reduce the candidate pool rather than assuming the download
+itself is stalled.
 
-The Python package and the cached native executable are different versions. Rebuild
-cleanly:
+### Native renderer cache or version mismatch
+
+The native executable is built into a cache directory. If the Python CLI and native
+binary appear out of sync, rebuild it cleanly:
 
 ```bash
 tubeviz native build --clean
-```
-
-### Native render is slow
-
-Confirm the optimized native binary is actually in use:
-
-```bash
 tubeviz native doctor
 ```
 
-Then try:
+You can also inspect the executable reported by `native doctor` and run it directly with
+`--version`.
+
+### Native Vulkan effects are unavailable
+
+Start with:
 
 ```bash
-tubeviz render timeline.json \
-  --audio song.mp3 \
-  --library ./library \
-  --backend native \
-  --native-preset veryfast \
-  --native-decoder-cache 24 \
-  --native-threads 0 \
-  --fps 30 \
-  --output output.mp4
+tubeviz native doctor
+vulkaninfo --summary
 ```
 
-Where available, `h264_nvenc` removes software x264 encoding from the critical path.
+Check both of the following:
 
-### Studio Play says "No media"
+1. `libplacebo` is visible to the build through `pkg-config`;
+2. Vulkan can create a suitable runtime device.
 
-Studio checks actual local media availability. Inspect the record:
+For example:
 
 ```bash
-tubeviz library show VIDEO_ID --library ./library --json
+pkg-config --modversion libplacebo
+vulkaninfo --summary
 ```
 
-A clip can exist in SQLite without a currently resolvable local media file.
+If Vulkan sees only a CPU renderer, native GPU Creative FX will not be available even
+though libplacebo is installed.
+
+Use this render mode to make Vulkan failure explicit while diagnosing it:
+
+```text
+--native-gpu vulkan
+```
+
+Return to:
+
+```text
+--native-gpu auto
+```
+
+for normal operation with CPU fallback.
+
+### CUDA/NVDEC is not being used
+
+A native log line such as:
+
+```text
+decoder_open=... hw=software
+```
+
+means the source is being decoded on the CPU.
+
+Test CUDA independently with the same source file:
+
+```bash
+nvidia-smi
+
+ffmpeg -hide_banner -loglevel verbose \
+  -hwaccel cuda \
+  -hwaccel_output_format cuda \
+  -i /path/to/source.mp4 \
+  -frames:v 30 \
+  -f null -
+```
+
+If that command fails, fix the FFmpeg/driver/runtime problem before troubleshooting the
+tubeviz decoder.
+
+Use this render mode to require CUDA during diagnosis:
+
+```text
+--native-hwdecode cuda
+```
+
+### Browser preview is using Canvas2D instead of WebGPU
+
+Check:
+
+- Chrome/Chromium is current;
+- browser hardware acceleration is enabled;
+- the preview is served from loopback or another secure context;
+- `navigator.gpu` is available in DevTools;
+- the preview HUD reports the WebGPU initialization reason;
+- the GPU/driver is not blocked by the browser.
+
+For normal interactive use, automatic fallback keeps the preview usable. For browser
+offline-render diagnostics, require WebGPU explicitly:
+
+```text
+--browser-gpu webgpu
+```
+
+### Browser rendering is slow
+
+Use automatic accelerated paths first:
+
+```text
+--browser-transport auto
+--browser-gpu auto
+--browser-source-decode auto
+```
+
+If the browser cannot use WebCodecs or WebGPU, the fallback paths can be substantially
+slower at 1080p. Compare with the native backend when available.
+
+### Studio Play reports no media
+
+Confirm the clip has usable local media and inspect it from the CLI:
+
+```bash
+tubeviz library show VIDEO_ID --library ./library
+```
+
+If the clip was only partially ingested, reprocess or delete/reingest it as appropriate.
 
 ### Confirming which installation is running
 
-The Studio header shows the running version. To confirm which checkout is active:
-
 ```bash
-python - <<'PY'
-import tubeviz
-import tubeviz.gui
-print("version:", tubeviz.__version__)
-print("package:", tubeviz.__file__)
-print("gui:", tubeviz.gui.__file__)
-PY
-```
-
-## Command reference
-
-The CLI is the authoritative option reference:
-
-```bash
+command -v tubeviz
+python -c 'import tubeviz, inspect; print(inspect.getfile(tubeviz))'
 tubeviz --help
-tubeviz ingest --help
-tubeviz library --help
-tubeviz library list --help
-tubeviz library show --help
-tubeviz library reject --help
-tubeviz library restore --help
-tubeviz library delete --help
-tubeviz library stats --help
-tubeviz library ai-report --help
-tubeviz library visual-index --help
-tubeviz library codec-motion-index --help
-tubeviz library embed --help
-tubeviz analyze --help
-tubeviz materialize --help
-tubeviz render --help
-tubeviz codec doctor --help
-tubeviz audio-ai doctor --help
-tubeviz audio-ai inspect --help
-tubeviz codec inspect --help
-tubeviz codec materialize --help
-tubeviz native build --help
-tubeviz native doctor --help
-tubeviz gui --help
-tubeviz serve --help
 ```
+
+When developing from a checkout, activate the intended virtual environment before
+launching Studio or rendering.
+
+## Command overview
 
 Top-level commands:
 
 | Command | Purpose |
 |---|---|
-| `tubeviz ingest` | Search, download, conditionally prepare media, scene-index and optionally AI-rank footage |
-| `tubeviz ingest-url` | Import explicit YouTube URLs through the complete scene-understanding pipeline |
-| `tubeviz library` | Inspect, curate, delete, report on and embed the persistent library |
-| `tubeviz analyze` | Analyze music and produce the directed timeline |
-| `tubeviz choreography` | Inspect stored phrase trajectories and the whole-song visual arc |
-| `tubeviz music-ai` | Diagnose optional MERT music-representation support |
-| `tubeviz materialize` | Bake selected source transforms into cached media |
-| `tubeviz render` | Render final video with the native, browser or auto backend |
-| `tubeviz codec` | Inspect, materialize and diagnose FFglitch codec-space effects |
-| `tubeviz audio-ai` | Diagnose and inspect CLAP/AI choreography metadata |
-| `tubeviz native` | Build or diagnose the native renderer |
+| `tubeviz ingest` | Search for footage and build/update the library |
+| `tubeviz ingest-url` | Add explicit YouTube URLs |
+| `tubeviz library ...` | Inspect, curate, describe, and index clips |
+| `tubeviz analyze` | Analyze music and create a directed timeline |
+| `tubeviz choreography` | Inspect phrase-level choreography |
+| `tubeviz audio-ai ...` | CLAP audio-semantic tools |
+| `tubeviz music-ai ...` | MERT music-representation tools |
+| `tubeviz materialize` | Pre-render planned source transforms into a reusable cache |
+| `tubeviz serve` | Serve an interactive timeline preview |
+| `tubeviz render` | Render a finished video |
+| `tubeviz codec ...` | Inspect and materialize FFglitch effects |
+| `tubeviz native ...` | Build and diagnose the native renderer |
 | `tubeviz gui` | Launch Studio |
-| `tubeviz serve` | Run the interactive visualizer/preview server |
+
+Use the built-in help for the complete current option set:
+
+```bash
+tubeviz --help
+tubeviz ingest --help
+tubeviz ingest-url --help
+tubeviz library --help
+tubeviz analyze --help
+tubeviz serve --help
+tubeviz render --help
+tubeviz codec --help
+tubeviz native --help
+```
 
 ## Development
 
-Run tests:
+Install the development dependencies:
 
 ```bash
-pytest -q
+pip install -e '.[dev,semantic,audio-ai,render]'
 ```
 
-JavaScript syntax checks:
+Run the test suite:
 
 ```bash
-node --check src/tubeviz/static/visualizer.js
-node --check src/tubeviz/static/gui.js
+pytest
 ```
 
-Native build diagnostics:
+Useful focused diagnostics include:
 
 ```bash
 tubeviz native doctor
+tubeviz codec doctor
+tubeviz audio-ai doctor
+tubeviz music-ai doctor
 ```
 
-Release history is maintained in [CHANGELOG.md](CHANGELOG.md).
+Release history and implementation-specific changes are documented in
+[`CHANGELOG.md`](CHANGELOG.md). The README is intended to describe the current user
+workflow and supported capabilities.
 
 ## License
 
-tubeviz is licensed under the **Apache License, Version 2.0**. See [LICENSE](LICENSE) for
-the complete license text and [NOTICE](NOTICE) for project notices. Source files use the
-SPDX identifier:
-
-```text
-SPDX-License-Identifier: Apache-2.0
-```
+Tubeviz is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) and
+[`NOTICE`](NOTICE).
 
 ### Third-party software, models, and media
 
-The Apache-2.0 license applies to the **tubeviz software itself**. It does not grant
-rights to third-party videos, audio, model weights, downloaded media, or external tools
-used with tubeviz. FFmpeg, yt-dlp, FFglitch, OpenCLIP, CLAP/Transformers models, PyTorch,
-Playwright/Chromium, and other dependencies retain their own licenses and terms. tubeviz
-does not redistribute FFglitch binaries.
+Tubeviz integrates with external software and optional model providers, each of which is
+subject to its own license and terms. Examples include FFmpeg, yt-dlp, Playwright,
+OpenCLIP, PyTorch, Transformers, libplacebo, Vulkan implementations, and FFglitch.
 
-You are responsible for ensuring that media you download, import, transform, or
-distribute with tubeviz is used consistently with applicable copyright law, licenses,
-platform terms, and other requirements.
+Users are responsible for ensuring that source media is acquired and used in accordance
+with applicable licenses, copyright law, platform terms, and any other relevant
+permissions.

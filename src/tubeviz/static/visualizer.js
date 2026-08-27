@@ -1,11 +1,16 @@
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js';
+import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js';
+import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js';
 // SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
 const ctx = canvas.getContext('2d', {alpha:true});
 const videoFx = document.querySelector('#video-fx');
 const fx = videoFx.getContext('2d', {alpha:false});
+const gpuCanvas = document.querySelector('#gpu-fx');
 const audio = document.querySelector('#audio');
 const meta = document.querySelector('#meta');
 const clipMeta = document.querySelector('#clip-meta');
+const renderMeta = document.querySelector('#render-meta');
 const decoders = Array.from({length:8}, (_,i)=>document.querySelector(`#decoder-${i}`));
 const banks = [decoders.slice(0,4), decoders.slice(4,8)];
 const bankState = [[], []];
@@ -25,7 +30,38 @@ const fragments=[]; const motifObjects=new Map();
 
 const query=new URLSearchParams(location.search);
 const offlineMode=query.get('offline')==='1';
+const browserGpuMode=(query.get('gpu')||'auto').toLowerCase();
+const previewQuality=(query.get('preview')||'auto').toLowerCase();
+let adaptivePreviewHeight=720,renderPixelRatio=1,previewFrameEma=0,previewLastResize=0;
+let gpuInit={finalizer:null,reason:'not initialized'};
+try{
+  gpuInit=await createBrowserGpuFinalizer(gpuCanvas,browserGpuMode,{preferWorker:offlineMode});
+}catch(error){
+  gpuInit={finalizer:null,reason:`WebGPU initialization error: ${String(error?.message||error)}`};
+  console.warn('tubeviz WebGPU preview initialization failed; using Canvas2D',error);
+}
+let browserGpuFinalizer=gpuInit.finalizer;
+let browserGpuActive=!!browserGpuFinalizer;
+function updateRendererStatus(extra=''){
+  if(!renderMeta)return;
+  const renderer=browserGpuActive?'WebGPU':'Canvas2D';
+  const reason=String(extra||gpuInit.reason||'');
+  renderMeta.textContent=`Preview renderer: ${renderer}${reason?` · ${reason}`:''}`;
+}
+function disableBrowserGpu(reason){
+  const old=browserGpuFinalizer;
+  browserGpuFinalizer=null;browserGpuActive=false;
+  gpuCanvas.style.display='none';videoFx.style.visibility='visible';
+  try{old?.close?.();}catch(_){}
+  console.warn(`tubeviz WebGPU preview disabled: ${reason||'unknown failure'}`);
+  updateRendererStatus(`fallback · ${reason||'WebGPU failure'}`);
+}
+if(browserGpuActive){gpuCanvas.style.display='block';videoFx.style.visibility='hidden';}
+else{gpuCanvas.style.display='none';videoFx.style.visibility='visible';}
+updateRendererStatus();
+function finalVideoCanvas(){return browserGpuActive?gpuCanvas:videoFx;}
 let offlineTime=0,offlineFps=60,offlineCueIndex=0,offlineLoadedScene=-1,offlineRandState=0x51f15e;
+let offlineSourceDecodeMode='video',offlineSourceStrict=false,offlineSourceFallbacks=0;
 function clockSeconds(){return offlineMode?offlineTime:audio.currentTime;}
 function clockNowMs(){return offlineMode?offlineTime*1000:performance.now();}
 function rand(){
@@ -75,9 +111,21 @@ let creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
 const delayCtx=[delayACtx,delayBCtx,delayCCtx];
 let delayWrite=0,delayCount=0,historyReady=false;
 
+function desiredRenderSize(){
+  if(offlineMode)return{width:Math.max(1,Math.floor(innerWidth)),height:Math.max(1,Math.floor(innerHeight)),ratio:1};
+  let targetHeight=adaptivePreviewHeight;
+  if(previewQuality==='540p')targetHeight=540;
+  else if(previewQuality==='720p')targetHeight=720;
+  else if(previewQuality==='1080p')targetHeight=1080;
+  else if(previewQuality==='native')targetHeight=Math.max(1,Math.floor(innerHeight*Math.min(1.5,globalThis.devicePixelRatio||1)));
+  const ratio=Math.min(previewQuality==='native'?1.5:1, targetHeight/Math.max(1,innerHeight));
+  return{width:Math.max(1,Math.round(innerWidth*ratio)),height:Math.max(1,Math.round(innerHeight*ratio)),ratio};
+}
 function resize(){
-  width=canvas.width=videoFx.width=Math.floor(innerWidth*devicePixelRatio);
-  height=canvas.height=videoFx.height=Math.floor(innerHeight*devicePixelRatio);
+  const desired=desiredRenderSize();renderPixelRatio=desired.ratio;
+  width=canvas.width=videoFx.width=desired.width;
+  height=canvas.height=videoFx.height=desired.height;
+  if(browserGpuFinalizer)browserGpuFinalizer.resize(width,height);
   for(const c of [history,scratch,sourceColorAnchor,freezeCanvas,holdCanvas,edgeCanvas,subjectLayer]){c.width=width;c.height=height;}
   for(const c of delayBuffers){c.width=Math.max(1,Math.floor(width/2));c.height=Math.max(1,Math.floor(height/2));}
   exportCanvas.width=width;exportCanvas.height=height;
@@ -99,6 +147,15 @@ function resize(){
   historyCtx.fillStyle='#000';historyCtx.fillRect(0,0,width,height);
 }
 addEventListener('resize',resize); resize();
+function updateAdaptivePreview(frameMs){
+  if(offlineMode||previewQuality!=='auto'||!Number.isFinite(frameMs))return;
+  previewFrameEma=previewFrameEma?previewFrameEma*.92+frameMs*.08:frameMs;
+  const now=performance.now();if(now-previewLastResize<2500)return;
+  let next=adaptivePreviewHeight;
+  if(previewFrameEma>37&&adaptivePreviewHeight>540)next=adaptivePreviewHeight>=1080?720:540;
+  else if(previewFrameEma<18&&adaptivePreviewHeight<1080)next=adaptivePreviewHeight<=540?720:1080;
+  if(next!==adaptivePreviewHeight){adaptivePreviewHeight=next;previewLastResize=now;resize();}
+}
 
 const timeline=await fetch('/api/timeline').then(r=>r.json());
 const status=await fetch('/api/status').then(r=>r.json()).catch(()=>({clips_enabled:false,scene_count:0}));
@@ -136,20 +193,41 @@ function waitMetadata(v){if(v.readyState>=1)return Promise.resolve();return new 
 function mediaUrl(layer){if(layer.media_url)return layer.media_url;const parts=String(layer.media_file||"").split("/");const root=parts[0]==="originals"?"/originals/":"/media/";if(parts[0]==="originals"||parts[0]==="normalized")parts.shift();return root+parts.map(encodeURIComponent).join("/");}
 function allLayers(scene){return [{...scene,role:'primary',opacity:scene.opacity??.92,blend_mode:scene.transform?.blend_mode??'normal'},...(scene.layers??[])].slice(0,4);}
 
-async function loadBank(bankIndex,scene){
+function closeBankSources(bankIndex){
+  for(const st of bankState[bankIndex]??[])try{st.source?.close();}catch(_){}
+}
+async function loadHtmlLayer(v,layer,scene,i){
+  const url=mediaUrl(layer),abs=new URL(url,location.href).href;
+  if(v.src!==abs){v.src=url;v.load();}
+  await waitMetadata(v);
+  const start=Number(layer.start??0),end=Number(layer.end??v.duration),span=Math.max(.05,end-start);
+  const resume=i===0&&Number.isFinite(scene.resume_at)?scene.resume_at:start;
+  v.currentTime=Math.max(start,Math.min(end-.02,resume));
+  const t=layer.transform??{};v.playbackRate=t.materialized?1:(t.playback_rate??1);
+  if(!audio.paused&&!offlineMode)v.play().catch(()=>{});
+  return{video:v,source:null,frame:null,layer,start,end,span,transform:t,offlineBias:0};
+}
+async function loadBank(bankIndex,scene,sceneIndex=null){
+  closeBankSources(bankIndex);
   const layers=allLayers(scene),vids=banks[bankIndex],states=[];
   for(let i=0;i<vids.length;i++){
     const v=vids[i],layer=layers[i];
     if(!layer){v.pause();v.removeAttribute('src');v.load();continue;}
-    const url=mediaUrl(layer),abs=new URL(url,location.href).href;
-    if(v.src!==abs){v.src=url;v.load();}
-    await waitMetadata(v);
-    const start=Number(layer.start??0),end=Number(layer.end??v.duration),span=Math.max(.05,end-start);
-    const resume=i===0&&Number.isFinite(scene.resume_at)?scene.resume_at:start;
-    v.currentTime=Math.max(start,Math.min(end-.02,resume));
-    const t=layer.transform??{};v.playbackRate=t.materialized?1:(t.playback_rate??1);
-    states.push({video:v,layer,start,end,span,transform:t,offlineBias:0});
-    if(!audio.paused)v.play().catch(()=>{});
+    const start=Number(layer.start??0),declaredEnd=Number(layer.end??0),t=layer.transform??{};
+    if(offlineMode&&offlineSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex)){
+      try{
+        v.pause();v.removeAttribute('src');v.load();
+        const source=await WebCodecsSceneSource.open(sceneIndex,i,{fps:offlineFps,strict:true});
+        const end=declaredEnd>start?declaredEnd:start+source.frameCount/source.fps;
+        states.push({video:null,source,frame:null,layer,start,end,span:Math.max(.05,end-start),transform:t,offlineBias:0});
+        continue;
+      }catch(error){
+        if(offlineSourceStrict)throw error;
+        offlineSourceFallbacks++;
+        console.warn(`WebCodecs source ${sceneIndex}/${i} unavailable; using HTMLVideoElement`,error);
+      }
+    }
+    states.push(await loadHtmlLayer(v,layer,scene,i));
   }
   bankState[bankIndex]=states;bankMode[bankIndex]=scene.composition_mode??'single';
 }
@@ -192,7 +270,8 @@ function transformedRect(t,rect){
   return{x:rect.x+panX,y:rect.y+panY,w:rect.w*zoom,h:rect.h*zoom};
 }
 function drawLayer(target,state,rect,alpha=1,blend=null){
-  const{video,transform:t,layer}=state;if(video.readyState<2)return;
+  const{video,frame,transform:t,layer}=state;const source=frame??video;
+  if(!source||(video&&video.readyState<2))return;
   target.save();target.globalAlpha=alpha*(layer.opacity??.75);target.globalCompositeOperation=blend||layer.blend_mode||t.blend_mode||'source-over';
   // Clamp legacy timeline hue transforms as well.  New planners already emit only
   // subtle shot-local hue variation, but this keeps older v0.33 timelines from
@@ -201,8 +280,8 @@ function drawLayer(target,state,rect,alpha=1,blend=null){
   if('filter' in target)target.filter=`brightness(${t.brightness??1}) contrast(${t.contrast??1}) saturate(${t.saturation??1}) hue-rotate(${layerHue}deg) blur(${t.blur_px??0}px) grayscale(${t.grayscale??0})`;
   target.beginPath();target.rect(rect.x,rect.y,rect.w,rect.h);target.clip();
   target.translate(rect.x+rect.w/2,rect.y+rect.h/2);target.rotate((t.rotation_degrees??0)*Math.PI/180);target.scale(t.mirror?-1:1,1);target.translate(-(rect.x+rect.w/2),-(rect.y+rect.h/2));
-  const d=transformedRect(t,rect),vw=video.videoWidth||width,vh=video.videoHeight||height,scale=Math.max(d.w/vw,d.h/vh),dw=vw*scale,dh=vh*scale;
-  target.drawImage(video,d.x+(d.w-dw)/2,d.y+(d.h-dh)/2,dw,dh);target.restore();
+  const d=transformedRect(t,rect),vw=source.displayWidth||source.codedWidth||source.videoWidth||source.width||width,vh=source.displayHeight||source.codedHeight||source.videoHeight||source.height||height,scale=Math.max(d.w/vw,d.h/vh),dw=vw*scale,dh=vh*scale;
+  target.drawImage(source,d.x+(d.w-dw)/2,d.y+(d.h-dh)/2,dw,dh);target.restore();
 }
 function rectFor(mode,index,count){
   // Legacy split/mosaic/pip timelines no longer produce boxed thumbnails.
@@ -278,21 +357,19 @@ function captureSourceColorAnchor(){
   sourceColorAnchorCtx.drawImage(videoFx,0,0,width,height);
   sourceColorAnchorCtx.restore();
 }
-function applySourceColorFidelity(){
-  if(!activeScene)return;
-  const fidelity=sourceFidelity();
-  if(fidelity<=.60)return;
-  const color=activeScene?.direction?.color??{};
-  const creative=activeScene?.direction?.creative??{};
+function sourceFidelityAlpha(){
+  if(!activeScene)return 0;
+  const fidelity=sourceFidelity();if(fidelity<=.60)return 0;
+  const color=activeScene?.direction?.color??{},creative=activeScene?.direction?.creative??{};
   const hue=Math.abs(Number(automationValue('hue',color.hue_shift_degrees??0)))/14;
   const palette=Math.max(0,Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)));
   const hero=(typeof heroEnvelope==='function')?heroEnvelope():0;
-  // Normal shots get a strong source-chroma anchor. Explicit color design and hero
-  // moments can relax it, but never allow a persistent whole-frame LUT to take over.
   const base=Math.max(0,Math.min(1,(fidelity-.60)/.40));
   const intentional=Math.max(0,Math.min(1,.48*hue+.35*palette+.42*hero));
-  const alpha=Math.max(0,Math.min(.94,base*(.94-.48*intentional)));
-  if(alpha<=.025)return;
+  return Math.max(0,Math.min(.94,base*(.94-.48*intentional)));
+}
+function applySourceColorFidelity(){
+  const alpha=sourceFidelityAlpha();if(alpha<=.025)return;
   fx.save();
   fx.globalAlpha=alpha;
   // CSS/Canvas 'color' blend takes hue+saturation from the source anchor while
@@ -474,7 +551,7 @@ function applyPosterize(amount){
   posterCtx.putImageData(img,0,0);fx.save();fx.imageSmoothingEnabled=false;fx.globalAlpha=.18+.62*amount;fx.drawImage(posterCanvas,0,0,width,height);fx.restore();fx.imageSmoothingEnabled=true;
 }
 function applyEdge(amount){
-  if(amount<=.035)return;snapshot();edgeCtx.clearRect(0,0,width,height);edgeCtx.save();if('filter'in edgeCtx)edgeCtx.filter='grayscale(1) contrast(2.2)';edgeCtx.drawImage(scratch,0,0);edgeCtx.globalCompositeOperation='difference';const d=(1.5+amount*5)*devicePixelRatio;edgeCtx.drawImage(scratch,d,d);edgeCtx.restore();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.10+.52*amount;fx.drawImage(edgeCanvas,0,0);fx.restore();
+  if(amount<=.035)return;snapshot();edgeCtx.clearRect(0,0,width,height);edgeCtx.save();if('filter'in edgeCtx)edgeCtx.filter='grayscale(1) contrast(2.2)';edgeCtx.drawImage(scratch,0,0);edgeCtx.globalCompositeOperation='difference';const d=(1.5+amount*5)*renderPixelRatio;edgeCtx.drawImage(scratch,d,d);edgeCtx.restore();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.10+.52*amount;fx.drawImage(edgeCanvas,0,0);fx.restore();
 }
 function applyRgbSplit(amount){
   if(amount<=.02)return;snapshot();
@@ -485,13 +562,13 @@ function applyPixel(amount){
   if(amount<=.03)return;const scale=Math.max(.06,1-amount*.88);snapshot();scratchCtx.imageSmoothingEnabled=false;posterCtx.imageSmoothingEnabled=false;posterCtx.clearRect(0,0,posterCanvas.width,posterCanvas.height);posterCtx.drawImage(scratch,0,0,posterCanvas.width*scale,posterCanvas.height*scale);fx.save();fx.imageSmoothingEnabled=false;fx.globalAlpha=.45+.45*amount;fx.drawImage(posterCanvas,0,0,posterCanvas.width*scale,posterCanvas.height*scale,0,0,width,height);fx.restore();fx.imageSmoothingEnabled=true;scratchCtx.imageSmoothingEnabled=true;
 }
 function applyGlitch(amount){
-  if(amount<=.02)return;snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.12+amount*.35;for(let i=0;i<2+Math.floor(amount*12);i++){const h=Math.max(2,(4+rand()*45*amount)*devicePixelRatio),y=rand()*Math.max(1,height-h),dx=(rand()-.5)*width*.11*amount;fx.drawImage(scratch,0,y,width,h,dx,y,width,h);}fx.restore();
+  if(amount<=.02)return;snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.12+amount*.35;for(let i=0;i<2+Math.floor(amount*12);i++){const h=Math.max(2,(4+rand()*45*amount)*renderPixelRatio),y=rand()*Math.max(1,height-h),dx=(rand()-.5)*width*.11*amount;fx.drawImage(scratch,0,y,width,h,dx,y,width,h);}fx.restore();
 }
 function applyFeedback(amount){
-  if(amount<=.02||!historyReady)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.04+amount*.18;const d=amount*18*devicePixelRatio;fx.drawImage(history,-d,-d,width+d*2,height+d*2);fx.restore();
+  if(amount<=.02||!historyReady)return;fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.04+amount*.18;const d=amount*18*renderPixelRatio;fx.drawImage(history,-d,-d,width+d*2,height+d*2);fx.restore();
 }
 function applyScanlines(amount){
-  if(amount<=.02)return;fx.save();fx.globalAlpha=.05+amount*.18;fx.fillStyle='#000';const step=Math.max(3,Math.floor((5-amount*2)*devicePixelRatio));for(let y=0;y<height;y+=step)fx.fillRect(0,y,width,Math.max(1,devicePixelRatio));fx.restore();
+  if(amount<=.02)return;fx.save();fx.globalAlpha=.05+amount*.18;fx.fillStyle='#000';const step=Math.max(3,Math.floor((5-amount*2)*renderPixelRatio));for(let y=0;y<height;y+=step)fx.fillRect(0,y,width,Math.max(1,renderPixelRatio));fx.restore();
 }
 function applyVignette(amount){
   if(amount<=.02)return;const g=fx.createRadialGradient(width/2,height/2,Math.min(width,height)*.20,width/2,height/2,Math.max(width,height)*.65);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(0,0,0,${Math.min(.85,amount)})`);fx.fillStyle=g;fx.fillRect(0,0,width,height);
@@ -644,7 +721,7 @@ function applyVhsTracking(amount){
   const dx=Math.sin(clockSeconds()*31)*width*.025*amount;
   fx.drawImage(scratch,0,y,width,bandH,dx,y,width,bandH);
   fx.globalCompositeOperation='screen';
-  fx.fillStyle=`rgba(255,255,255,${.05+.12*amount})`;fx.fillRect(0,y,width,Math.max(1,devicePixelRatio));
+  fx.fillStyle=`rgba(255,255,255,${.05+.12*amount})`;fx.fillRect(0,y,width,Math.max(1,renderPixelRatio));
   fx.restore();
 }
 function applyVortex(amount){
@@ -876,8 +953,14 @@ function applyPaletteCreative(amount){
 function heroEnvelope(){
   const c=activeScene?.direction?.creative??{},amount=Number(c.hero_amount??0);if(!c.hero_kind||amount<=0)return 0;const p=directedProgress(),a=Number(c.hero_start??0),b=Number(c.hero_end??1);if(p<a||p>b)return 0;const q=(p-a)/Math.max(1e-6,b-a),attack=Math.min(1,q/.16),release=Math.min(1,(1-q)/.22);const smooth=x=>x*x*(3-2*x);return amount*Math.min(smooth(attack),smooth(release));
 }
-function applyHeroCreative(){
+function applyHeroCreative(gpuCommon=false){
   const c=activeScene?.direction?.creative??{},a=heroEnvelope();if(a<=.02)return;
+  // Common temporal/depth/flow hero work is folded into the WebGPU pass below.
+  // Keep only treatments whose semantics are intentionally Canvas/vector-local.
+  if(gpuCommon){
+    if(c.hero_kind==='recursive_portal')applyLocalSymmetryCreative(.78*a);
+    return;
+  }
   switch(c.hero_kind){
     case'subject_echo':applyTemporalSmearCreative(.55*a);applyTemporalRgbCreative(.38*a);preserveCreativeSubject(Math.min(1,(c.subject_preserve??.6)+.25)*a);break;
     case'flow_melt':applyFlowWarpCreative(.92*a);applyTemporalSmearCreative(.55*a);applyFlowRgbCreative(.35*a);break;
@@ -887,14 +970,23 @@ function applyHeroCreative(){
   }
 }
 
-function applyDirectedColor(){
-  const dir=activeScene?.direction;if(!dir)return;
+function colorToRgb01(value){
+  const v=String(value??'').trim();let m=v.match(/^#([0-9a-f]{6})$/i);if(m){const n=parseInt(m[1],16);return[((n>>16)&255)/255,((n>>8)&255)/255,(n&255)/255];}
+  m=v.match(/^#([0-9a-f]{3})$/i);if(m){return[parseInt(m[1][0]+m[1][0],16)/255,parseInt(m[1][1]+m[1][1],16)/255,parseInt(m[1][2]+m[1][2],16)/255];}
+  return[0,0,0];
+}
+function directedColorValues(){
+  const dir=activeScene?.direction;if(!dir)return{hue:0,sat:1,contrast:1,brightness:1};
   const color=dir.color??{},rawHue=automationValue('hue',color.hue_shift_degrees??0);
-  // Defensive clamp for timelines planned by older releases with absolute hue LUTs.
-  if(legacyTreatment()&&sceneSparseGate(31)<.70)return;
+  if(legacyTreatment()&&sceneSparseGate(31)<.70)return{hue:0,sat:1,contrast:1,brightness:1};
   const hue=Math.max(-14,Math.min(14,Number(rawHue)));
   const sat=Math.max(.65,Math.min(1.55,Number(automationValue('saturation',color.saturation_scale??1))));
   const contrast=Math.max(.72,Math.min(1.55,Number(color.contrast_scale??1))),brightness=Math.max(.72,Math.min(1.35,Number(color.brightness_scale??1)));
+  return{hue,sat,contrast,brightness};
+}
+function applyDirectedColor(){
+  if(!activeScene?.direction)return;
+  const {hue,sat,contrast,brightness}=directedColorValues();
   if(Math.abs(hue)<.2&&Math.abs(sat-1)<.01&&Math.abs(contrast-1)<.01&&Math.abs(brightness-1)<.01)return;
   const room=Math.max(0,1-sourceFidelity());
   if(room<.005)return;
@@ -1104,7 +1196,7 @@ function drawContours(effect,semantic=false){
   const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
   const edges=extractVectorEdges(),paths=semantic?edges.salientPaths:edges.paths;
   const max=Math.min(paths.length,Math.max(1,Math.round((semantic?5:9)*(.45+.65*amount))));
-  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.2))*devicePixelRatio;
+  fx.save();fx.globalCompositeOperation=effect.blend_mode||'screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.2))*renderPixelRatio;
   for(let i=0;i<max;i++){
     const path=paths[i],quality=Math.min(1,path.arc/32),alpha=(effect.opacity??.22)*amount*(semantic?.48:.38)*(.55+.45*quality);
     strokeSmoothPath(path.points,effect,alpha,semantic?28:0);
@@ -1149,13 +1241,13 @@ function drawFlowRibbons(effect,particles=false){
       const ds=(particles?.008:.014)*(1+.9*amount)*(.55+.65*v.strength);x+=rx/norm*ds;y+=ry/norm*ds;if(x<0||x>1||y<0||y>1)break;pts.push({x,y});
     }
     if(pts.length<2)continue;const alpha=(effect.opacity??.2)*amount*(particles?.38:.55)*(.5+.5*(seed.strength??.2));
-    fx.lineWidth=Math.max(.65,(effect.line_width??1.4)*devicePixelRatio*(particles?.45:.72));strokeSmoothPath(pts,effect,alpha,i*5.5);
+    fx.lineWidth=Math.max(.65,(effect.line_width??1.4)*renderPixelRatio*(particles?.45:.72));strokeSmoothPath(pts,effect,alpha,i*5.5);
   }
   fx.restore();
 }
 function drawVectorEcho(effect){
   const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;extractVectorEdges();
-  fx.save();fx.globalCompositeOperation='screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.1))*devicePixelRatio;
+  fx.save();fx.globalCompositeOperation='screen';fx.lineJoin='round';fx.lineCap='round';fx.lineWidth=Math.max(.7,(effect.line_width??1.1))*renderPixelRatio;
   const generations=Math.min(vectorEchoHistory.length,Math.max(1,Math.min(4,effect.count)));
   for(let g=0;g<generations;g++){
     const paths=vectorEchoHistory[g],fade=(1-g/(generations+1))*amount,drift=(g+1)*width*.0025*Math.sin(phase*.7+g);
@@ -1168,7 +1260,7 @@ function drawPerspectiveGrid(effect){
   const p=effect.parameters??{},mx=Number(p.motion_x??0),my=Number(p.motion_y??0);
   const vx=width*(.5+.24*mx+.07*Math.sin(phase*.35)),vy=height*(.38+.18*my+.05*Math.cos(phase*.28));
   const count=Math.max(6,Math.min(40,effect.count));
-  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.15)*amount);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;
+  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.15)*amount);fx.lineWidth=(effect.line_width??1)*renderPixelRatio;
   for(let i=0;i<=count;i++){
     const x=i/count*width;fx.beginPath();fx.moveTo(vx,vy);fx.lineTo(x,height);fx.stroke();
   }
@@ -1225,7 +1317,7 @@ function drawDelaunay(effect){
     fx.save();fx.beginPath();fx.moveTo(a.x,a.y);fx.lineTo(b.x,b.y);fx.lineTo(c.x,c.y);fx.closePath();fx.clip();
     if(effect.displace&&explode>.02){fx.globalAlpha=.32+.46*amount;fx.drawImage(scratch,Math.cos(angle)*push,Math.sin(angle)*push,width,height);}
     fx.restore();
-    if(effect.visible!==false){fx.strokeStyle=vectorColor(effect,(effect.opacity??.25)*amount,ti*2.1);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;fx.beginPath();fx.moveTo(a.x,a.y);fx.lineTo(b.x,b.y);fx.lineTo(c.x,c.y);fx.closePath();fx.stroke();}
+    if(effect.visible!==false){fx.strokeStyle=vectorColor(effect,(effect.opacity??.25)*amount,ti*2.1);fx.lineWidth=(effect.line_width??1)*renderPixelRatio;fx.beginPath();fx.moveTo(a.x,a.y);fx.lineTo(b.x,b.y);fx.lineTo(c.x,c.y);fx.closePath();fx.stroke();}
   }
   fx.restore();
 }
@@ -1233,7 +1325,7 @@ function drawVoronoi(effect){
   const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
   const geo=delaunay(effect),edgeMap=new Map();
   for(let ti=0;ti<geo.tris.length;ti++){const t=geo.tris[ti],cc=circumcircle(geo.pts[t[0]],geo.pts[t[1]],geo.pts[t[2]]);if(!cc)continue;for(const e of [[t[0],t[1]],[t[1],t[2]],[t[2],t[0]]]){const k=e[0]<e[1]?`${e[0]}:${e[1]}`:`${e[1]}:${e[0]}`;if(!edgeMap.has(k))edgeMap.set(k,[]);edgeMap.get(k).push(cc);}}
-  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,35);fx.lineWidth=(effect.line_width??1)*devicePixelRatio;
+  fx.save();fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,35);fx.lineWidth=(effect.line_width??1)*renderPixelRatio;
   for(const centers of edgeMap.values())if(centers.length===2){fx.beginPath();fx.moveTo(centers[0].x,centers[0].y);fx.lineTo(centers[1].x,centers[1].y);fx.stroke();}
   fx.restore();
   if(effect.displace)applyVectorDisplacement({...effect,amount:amount*.45});
@@ -1251,14 +1343,14 @@ function drawPortal(effect){
   const count=Math.min(effect.count,companions.length);
   for(let i=0;i<count;i++){
     fx.save();const shape=portalPath(effect,i,amount);fx.clip();drawLayer(fx,companions[i],{x:0,y:0,w:width,h:height},Math.min(.9,(effect.opacity??.5)+amount*.35),'screen');fx.restore();
-    fx.save();fx.strokeStyle=vectorColor(effect,(effect.opacity??.4)*amount,i*55);fx.lineWidth=(effect.line_width??2)*devicePixelRatio;portalPath(effect,i,amount);fx.stroke();fx.restore();
+    fx.save();fx.strokeStyle=vectorColor(effect,(effect.opacity??.4)*amount,i*55);fx.lineWidth=(effect.line_width??2)*renderPixelRatio;portalPath(effect,i,amount);fx.stroke();fx.restore();
   }
 }
 function drawMotifGlyph(effect){
   const amount=Math.min(1,effectCurveValue(effect,'amount',effect.amount));if(amount<.015)return;
   const rotation=effectCurveValue(effect,'rotation',0),arms=Math.max(3,Math.min(12,effect.count)),cx=width*.5,cy=height*.5;
   const base=Math.min(width,height)*(.055+.08*amount);
-  fx.save();fx.translate(cx,cy);fx.rotate(rotation*Math.PI+phase*.08*(1+amount));fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,70);fx.lineWidth=(effect.line_width??1.5)*devicePixelRatio;
+  fx.save();fx.translate(cx,cy);fx.rotate(rotation*Math.PI+phase*.08*(1+amount));fx.globalCompositeOperation='screen';fx.strokeStyle=vectorColor(effect,(effect.opacity??.2)*amount,70);fx.lineWidth=(effect.line_width??1.5)*renderPixelRatio;
   for(let arm=0;arm<arms;arm++){fx.save();fx.rotate(arm/arms*Math.PI*2);fx.beginPath();fx.moveTo(0,0);let x=0,y=0;for(let n=1;n<=6;n++){const len=base*(.16+.13*n),bend=Math.sin(effect.seed*.001+n*1.7)*base*.12;x+=len*.38;y+=(n%2?1:-1)*bend;fx.quadraticCurveTo(x-len*.18,y*.6,x,y);}fx.stroke();fx.restore();}
   fx.restore();
 }
@@ -1414,43 +1506,52 @@ function applyPostFx(){
   const creativeBloom=Math.min(1,creativeValue('texture_bloom',creative.texture_bloom??0)*m);
   const creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion);
   const creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m)*(legacy&&sceneSparseGate(89)<.70?0:1);
+  const gpuCommon=!!browserGpuFinalizer;
 
   // Directed color happens on the composed video, then temporal processing
   // evolves continuously over the shot rather than toggling static filters.
-  applyDirectedColor();
-  applySpectralDisplacement(Math.min(1,directedWarp+beatWarpFx*.20));
-  applyPrismaticShift(Math.min(1,directedChroma+(activeScene?.direction?.color?.chromatic_aberration??0)*.25));
-  if(directedBloom>.02){snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.08+.28*directedBloom;if('filter'in fx)fx.filter=`brightness(${1+.45*directedBloom}) saturate(${1+.35*directedBloom})`;fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  if(!gpuCommon){
+    applyDirectedColor();
+    applySpectralDisplacement(Math.min(1,directedWarp+beatWarpFx*.20));
+    applyPrismaticShift(Math.min(1,directedChroma+(activeScene?.direction?.color?.chromatic_aberration??0)*.25));
+    if(directedBloom>.02){snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.08+.28*directedBloom;if('filter'in fx)fx.filter=`brightness(${1+.45*directedBloom}) saturate(${1+.35*directedBloom})`;fx.drawImage(scratch,0,0,width,height);fx.restore();}
+  }
 
-  // Capture the pre-temporal frame before time-based effects mutate it.
-  captureDelayFrame();
+  // WebGPU keeps temporal history resident on the GPU. Only the rare Canvas2D
+  // mask path still needs the half-resolution CPU delay ring when GPU is active.
+  const needsCpuDelay=!gpuCommon||mask>.025;
+  if(needsCpuDelay)captureDelayFrame();
 
   // v0.33 creative-state pipeline: source-derived and semantic-aware effects run
   // before legacy punctuation FX, so later glitches can accent rather than erase them.
-  applyPaletteCreative(creativePalette);
-  applySourceTextureCreative(creativeBloom,creativeStreaks);
-  applyDepthParallaxCreative(creativeDepth);
-  applyBackgroundWarpCreative(creativeBackground);
-  applyFlowWarpCreative(creativeFlow);
-  applyFlowRgbCreative(creativeFlowRgb);
-  applyTemporalSmearCreative(creativeSmear);
-  applyTemporalRgbCreative(creativeTemporalRgb);
-  applyMotionTrails(creativeFlowTrails*.78);
-  applyFrameEcho(creativeTemporal*.70);
+  if(!gpuCommon){
+    applyPaletteCreative(creativePalette);
+    applySourceTextureCreative(creativeBloom,creativeStreaks);
+    applyDepthParallaxCreative(creativeDepth);
+    applyBackgroundWarpCreative(creativeBackground);
+    applyFlowWarpCreative(creativeFlow);
+    applyFlowRgbCreative(creativeFlowRgb);
+    applyTemporalSmearCreative(creativeSmear);
+    applyTemporalRgbCreative(creativeTemporalRgb);
+    applyMotionTrails(creativeFlowTrails*.78);
+    applyFrameEcho(creativeTemporal*.70);
+    applyRecursiveFeedbackCreative(creativeFeedback);
+  }
+  // Local symmetry and hero effects are intentionally rare and remain on the
+  // compatibility compositor until their semantics can be expressed exactly.
   applyLocalSymmetryCreative(creativeSymmetry);
-  applyRecursiveFeedbackCreative(creativeFeedback);
-  applyHeroCreative();
+  applyHeroCreative(gpuCommon);
 
   applyShutter(shutter);
-  applyBeatWarp(beatWarpFx,beatLow,beatMid,beatHigh);
-  applyTempoWarp(tempoWarpFx);
-  applySlitScan(slitScan);
-  applyMotionTrails(motionTrails);
-  applyFrameEcho(frameEcho);
-  applyRipple(ripple);
-  applyBlockDisplace(blocks);
-  applyDatamosh(datamosh);
-  applyVhsTracking(tracking);
+  if(!gpuCommon)applyBeatWarp(beatWarpFx,beatLow,beatMid,beatHigh);
+  if(!gpuCommon)applyTempoWarp(tempoWarpFx);
+  if(!gpuCommon)applySlitScan(slitScan);
+  if(!gpuCommon)applyMotionTrails(motionTrails);
+  if(!gpuCommon)applyFrameEcho(frameEcho);
+  if(!gpuCommon)applyRipple(ripple);
+  if(!gpuCommon)applyBlockDisplace(blocks);
+  if(!gpuCommon)applyDatamosh(datamosh);
+  if(!gpuCommon)applyVhsTracking(tracking);
   applyTiles(tiles);
   applyMirrorCorridor(corridor);
   applyKaleidoscope(kaleido);
@@ -1458,26 +1559,44 @@ function applyPostFx(){
   applyTunnel(tunnel);
   applySliceRecursion(sliceRecursion);
   applyMaskWipe(mask);
-  applyPosterize(posterize);
-  applySolarize(solarize);
-  applyEdge(edge);
-  applyPixel(pixel);
-  applyChromaDelay(chromaDelay);
-  applyRgbSplit(rgb);
-  applyGlitch(glitch);
-  applyFeedback(feedback);
-  applyScanlines(scan);
-  applyVignette(vignette);
-  applyStrobe(strobe);
+  if(!gpuCommon){applyPosterize(posterize);applySolarize(solarize);applyEdge(edge);applyPixel(pixel);}
+  if(!gpuCommon){applyChromaDelay(chromaDelay);applyRgbSplit(rgb);}
+  if(!gpuCommon)applyGlitch(glitch);
+  if(!gpuCommon)applyFeedback(feedback);
 
-  // Final raster color guard: preserve the source clip's hue/saturation even after
-  // many additive temporal/spatial passes. Vector accents are drawn afterwards so
-  // they can retain their deliberately designed accent colors.
-  applySourceColorFidelity();
+  // Final raster color guard remains before vector accents so their designed
+  // colors survive. WebGPU, when available, handles the simple full-frame
+  // finishing passes that used to keep the main thread busy drawing scanlines,
+  // vignette and strobe overlays at display resolution.
+  if(!gpuCommon)applySourceColorFidelity();
   renderVectorSceneGraph();
 
-  historyCtx.globalAlpha=.92;
-  historyCtx.drawImage(videoFx,0,0);historyReady=true;
+  let gpuFinished=false;
+  if(browserGpuFinalizer?.failed)disableBrowserGpu(browserGpuFinalizer.failureReason||'GPU worker failed');
+  if(browserGpuFinalizer){
+    const dc=directedColorValues(),room=Math.max(0,1-sourceFidelity()),colorMix=Math.min(.24,.015+room*.36);
+    const palette=(activeScene?.direction?.color?.palette??[])[0];
+    const target=creativeTarget(),heroA=heroEnvelope(),heroKind=creative.hero_kind??'';
+    const heroTemporal=['subject_echo','flow_melt','time_prism'].includes(heroKind)?heroA:0;
+    const heroFlow=heroKind==='flow_melt'?heroA:0,heroDepth=heroKind==='depth_burst'?heroA:0;
+    const heroFeedback=['depth_burst','recursive_portal'].includes(heroKind)?heroA:0,heroChroma=heroKind==='time_prism'?heroA:0;
+    gpuFinished=browserGpuFinalizer.render(videoFx,sourceColorAnchor,{
+      fidelity:sourceFidelityAlpha(),vignette,scanlines:scan,strobe,time:clockSeconds(),
+      warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42+beatWarpFx*.36),
+      chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82),
+      bloom:Math.min(1,directedBloom+creativeBloom*.75),paletteStrength:creativePalette,palette:colorToRgb01(palette),
+      feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65),
+      flow:Math.min(1,creativeFlow+heroFlow*.85),targetX:target.x/Math.max(1,width),targetY:target.y/Math.max(1,height),
+      hueRadians:dc.hue*Math.PI/180*colorMix,saturation:1+(dc.sat-1)*colorMix,contrast:1+(dc.contrast-1)*colorMix,brightness:1+(dc.brightness-1)*colorMix,
+      streaks:creativeStreaks,backgroundWarp:creativeBackground,flowRgb:creativeFlowRgb,temporalRgb:creativeTemporalRgb,
+      pixel,posterize,solarize,edge,glitch,blockDisplace:Math.min(1,blocks+(heroKind==='time_prism'?heroA*.30:0)),tracking,ripple,tempoWarp:tempoWarpFx,
+      slitScan,datamosh,motionTrails,frameEcho
+    });
+    if(!gpuFinished)disableBrowserGpu(browserGpuFinalizer?.failureReason||'GPU frame submission failed');
+  }
+  if(!gpuFinished){applyScanlines(scan);applyVignette(vignette);applyStrobe(strobe);}
+
+  if(!gpuCommon){historyCtx.globalAlpha=.92;historyCtx.drawImage(videoFx,0,0);historyReady=true;}
 }
 function renderVideo(){
   if(clockNowMs()<freezeUntil){fx.drawImage(freezeCanvas,0,0);return;}
@@ -1485,7 +1604,7 @@ function renderVideo(){
   if(transition){const p=transition.duration<=0?1:Math.min(1,(clockNowMs()-transition.start)/transition.duration);drawBank(transition.from,1-p);const saved=activeBank;activeBank=transition.to;drawBank(transition.to,p);activeBank=saved;if(p>=1){banks[transition.from].forEach(v=>v.pause());activeBank=transition.to;transition=null;}}
   else drawBank(activeBank,1);applyPostFx();
 }
-function maintainRanges(){for(const states of bankState)for(const st of states){const v=st.video;if(audio.paused)continue;if(v.currentTime>=st.end-.03||v.currentTime<st.start-.1){v.currentTime=st.start;v.play().catch(()=>{});}}}
+function maintainRanges(){for(const states of bankState)for(const st of states){const v=st.video;if(!v||audio.paused)continue;if(v.currentTime>=st.end-.03||v.currentTime<st.start-.1){v.currentTime=st.start;v.play().catch(()=>{});}}}
 function seekActive(delta=null,fraction=null){
   if(activeBank<0)return;
   for(const st of bankState[activeBank]){
@@ -1600,7 +1719,7 @@ function drawOverlay(){
 
     const zoom=1.02+f.life*.07;
     ctx.translate(cx,cy);ctx.rotate((f.vx-f.vy)*.08);ctx.scale(zoom,zoom);ctx.translate(-cx,-cy);
-    ctx.drawImage(videoFx,f.vx*55,f.vy*55,width,height);
+    ctx.drawImage(finalVideoCanvas(),f.vx*55,f.vy*55,width,height);
     ctx.restore();
   }
 
@@ -1631,7 +1750,7 @@ function drawOverlay(){
 
     const zoom=1.04+.10*strength;
     ctx.translate(x,y);ctx.rotate(Math.sin(drift*.43)*.12*strength);ctx.scale(zoom,zoom);ctx.translate(-x,-y);
-    ctx.drawImage(videoFx,0,0,width,height);
+    ctx.drawImage(finalVideoCanvas(),0,0,width,height);
     ctx.restore();
     mi++;
   }
@@ -1649,9 +1768,31 @@ function advanceDynamics(){
   datamoshFx*=decay(.88);chromaDelayFx*=decay(.90);vortexFx*=decay(.91);motionTrailFx*=decay(.91);sliceRecursionFx*=decay(.89);
   beatWarpFx*=decay(.76);beatLow*=decay(.82);beatMid*=decay(.80);beatHigh*=decay(.76);tempoWarpFx*=decay(.93);
 }
+let liveFrameScheduled=false;
+function primaryLiveVideo(){
+  if(activeBank<0)return null;
+  return bankState[activeBank]?.[0]?.video??null;
+}
+function scheduleLiveFrame(){
+  if(offlineMode||liveFrameScheduled)return;
+  liveFrameScheduled=true;
+  const v=primaryLiveVideo();
+  if(v&&!v.paused&&typeof v.requestVideoFrameCallback==='function'){
+    v.requestVideoFrameCallback(()=>{liveFrameScheduled=false;frame();});
+  }else if(audio.paused){
+    setTimeout(()=>{liveFrameScheduled=false;frame();},100);
+  }else{
+    requestAnimationFrame(()=>{liveFrameScheduled=false;frame();});
+  }
+}
 function frame(){
+  const started=performance.now();
   advanceDynamics();
-  renderVideo();drawOverlay();maintainRanges();requestAnimationFrame(frame);
+  renderVideo();
+  if(browserGpuFinalizer&&!activeScene)browserGpuFinalizer.render(videoFx,videoFx,{time:clockSeconds()});
+  drawOverlay();maintainRanges();
+  updateAdaptivePreview(performance.now()-started);
+  scheduleLiveFrame();
 }
 
 function sceneIndexAt(t){
@@ -1685,23 +1826,28 @@ async function seekDecoder(video,target){
 async function seekOfflineBank(bankIndex,scene,t){
   const states=bankState[bankIndex];
   const elapsed=Math.max(0,t-scene.time);
-  await Promise.all(states.map(st=>{
+  await Promise.all(states.map(async st=>{
     const rate=st.transform?.materialized?1:(st.transform?.playback_rate??1);
     let offset=(elapsed*rate+(st.offlineBias??0))%st.span;if(offset<0)offset+=st.span;
+    if(st.source){st.frame=await st.source.frameAt(offset);return;}
     return seekDecoder(st.video,Math.min(st.end-.002,st.start+offset));
   }));
 }
 async function prepareOfflineScene(index){
   if(index===offlineLoadedScene)return;
-  pauseAll();bankState[0]=[];bankState[1]=[];
+  pauseAll();closeBankSources(0);closeBankSources(1);bankState[0]=[];bankState[1]=[];
   if(index<0){activeBank=-1;activeScene=null;offlineLoadedScene=index;resetTemporalFxState(false);return;}
   const current=timeline.scene_plan[index];
-  if(index>0)await loadBank(0,timeline.scene_plan[index-1]);
-  await loadBank(1,current);
+  if(index>0)await loadBank(0,timeline.scene_plan[index-1],index-1);
+  await loadBank(1,current,index);
   activeBank=1;
   const temporalHero=['flow_melt','subject_echo','time_prism','recursive_portal'].includes(current?.direction?.creative?.hero_kind??'');
   resetTemporalFxState(temporalHero);
   activeScene={...current};focusLayer=0;transition=null;offlineLoadedScene=index;resetVectorMotionState();
+  if(offlineSourceDecodeMode==='webcodecs'&&index+1<timeline.scene_plan.length){
+    const next=timeline.scene_plan[index+1];
+    void prewarmWebCodecsScene(index+1,allLayers(next).length,{fps:offlineFps});
+  }
 }
 function processOfflineCues(t){
   while(offlineCueIndex<timeline.cues.length&&timeline.cues[offlineCueIndex].time<=t+1e-9){
@@ -1729,13 +1875,20 @@ async function renderOfflineVideo(t,index){
 }
 window.tubevizOfflineInit=async function(options={}){
   if(!offlineMode)throw new Error('tubeviz offline API requires ?offline=1');
+  if(browserGpuMode==='webgpu'&&!browserGpuActive)throw new Error(`WebGPU requested for offline rendering but unavailable: ${gpuInit.reason||'unknown reason'}`);
   offlineFps=Math.max(1,Number(options.fps??60));
+  const requested=String(options.sourceDecode??'auto').toLowerCase();
+  if(!['auto','webcodecs','video'].includes(requested))throw new Error(`invalid sourceDecode ${requested}`);
+  const decoderProbe=await probeWebCodecsSourceDecoder();
+  offlineSourceStrict=requested==='webcodecs';offlineSourceFallbacks=0;
+  offlineSourceDecodeMode=requested==='video'?'video':(decoderProbe.supported&&status.clips_enabled?'webcodecs':'video');
+  if(offlineSourceStrict&&offlineSourceDecodeMode!=='webcodecs')throw new Error(`WebCodecs source decoding requested but unavailable: ${decoderProbe.reason||'unsupported'}`);
   offlineTime=0;offlineCueIndex=0;offlineLoadedScene=-1;frameCounter=0;phase=0;
   offlineRandState=(Number(options.seed??0x51f15e)>>>0)||0x51f15e;
-  fragments.length=0;motifObjects.clear();pauseAll();
+  fragments.length=0;motifObjects.clear();pauseAll();closeBankSources(0);closeBankSources(1);bankState[0]=[];bankState[1]=[];
   document.querySelector('#hud')?.remove();
   await prepareOfflineScene(sceneIndexAt(0));processOfflineCues(0);
-  return {duration:timeline.track.duration,scenes:timeline.scene_plan.length,fps:offlineFps};
+  return {duration:timeline.track.duration,scenes:timeline.scene_plan.length,fps:offlineFps,gpu:browserGpuActive?'webgpu':'canvas2d',gpu_reason:gpuInit.reason||'',source_decode:offlineSourceDecodeMode,source_decode_reason:decoderProbe.reason||'',source_fallbacks:offlineSourceFallbacks};
 };
 window.tubevizRenderFrame=async function(t,frameIndex){
   if(!offlineMode)throw new Error('tubeviz offline API requires ?offline=1');
@@ -1746,46 +1899,150 @@ window.tubevizRenderFrame=async function(t,frameIndex){
   processOfflineCues(offlineTime);
   advanceDynamics();
   await renderOfflineVideo(offlineTime,index);
+  if(browserGpuFinalizer&&!activeScene)browserGpuFinalizer.render(videoFx,videoFx,{time:clockSeconds()});
+  if(browserGpuFinalizer)await browserGpuFinalizer.sync();
   drawOverlay();
   return {time:offlineTime,frame:Number(frameIndex)};
 };
 
-function exportMime(format){return format==='jpeg'?'image/jpeg':'image/png';}
-window.tubevizExportFrame=async function(format='jpeg',quality=.92){
-  if(!offlineMode)throw new Error('tubeviz offline API requires ?offline=1');
+function composeExportCanvas(){
   exportCtx.globalCompositeOperation='source-over';
   exportCtx.globalAlpha=1;
   exportCtx.fillStyle='#000';
   exportCtx.fillRect(0,0,width,height);
-  exportCtx.drawImage(videoFx,0,0,width,height);
+  exportCtx.drawImage(finalVideoCanvas(),0,0,width,height);
   exportCtx.drawImage(canvas,0,0,width,height);
-
-  const blob=await new Promise((resolve,reject)=>{
-    exportCanvas.toBlob(
-      b=>b?resolve(b):reject(new Error('canvas frame export failed')),
-      exportMime(format),
-      Math.max(0,Math.min(1,Number(quality)))
-    );
-  });
-  const bytes=new Uint8Array(await blob.arrayBuffer());
-  let binary='';
-  const chunk=0x8000;
-  for(let i=0;i<bytes.length;i+=chunk){
-    binary+=String.fromCharCode(...bytes.subarray(i,i+chunk));
-  }
-  return btoa(binary);
-};
-window.tubevizRenderAndExport=async function(t,frameIndex,format='jpeg',quality=.92){
-  const start=window.performance.now();
-  await window.tubevizRenderFrame(t,frameIndex);
-  const rendered=window.performance.now();
-  const data=await window.tubevizExportFrame(format,quality);
-  const exported=window.performance.now();
-  return {
-    data,
-    render_ms:rendered-start,
-    export_ms:exported-rendered
+  return exportCanvas;
+}
+function exportRawRgba(){
+  composeExportCanvas();
+  // Compatibility transport only. The preferred WebCodecs path constructs a
+  // VideoFrame directly from exportCanvas. If WebCodecs encoding is unavailable,
+  // send tightly-packed RGBA instead of paying PNG/JPEG encode + image decode.
+  return exportCtx.getImageData(0,0,width,height).data;
+}
+window.tubevizOfflineCapabilities=async function(options={}){
+  const result={
+    webgpu:browserGpuActive,
+    webgpu_reason:gpuInit.reason||'',
+    webcodecs:typeof VideoEncoder!=='undefined'&&typeof VideoFrame!=='undefined',
+    webcodecs_h264:false,
+    webcodecs_codec:null,
+    webcodecs_error:null,
+    webcodecs_decode:false,
+    webcodecs_decode_codec:null,
+    webcodecs_decode_error:null
   };
+  const sourceProbe=await probeWebCodecsSourceDecoder();
+  result.webcodecs_decode=!!sourceProbe.supported;result.webcodecs_decode_codec=sourceProbe.codec??null;result.webcodecs_decode_error=sourceProbe.reason??null;
+  if(!result.webcodecs){result.webcodecs_error='VideoEncoder or VideoFrame unavailable';return result;}
+  const width=Math.max(2,Number(options.width??innerWidth)|0),height=Math.max(2,Number(options.height??innerHeight)|0);
+  const fps=Math.max(1,Number(options.fps??30)),bitrate=Math.max(250000,Number(options.bitrate??8000000));
+  const codecs=['avc1.640034','avc1.4d0034','avc1.420034'];
+  for(const codec of codecs){
+    const config={codec,width,height,bitrate,framerate:fps,bitrateMode:'variable',latencyMode:'quality',hardwareAcceleration:'prefer-hardware',avc:{format:'annexb'}};
+    try{
+      const support=await VideoEncoder.isConfigSupported(config);
+      if(support?.supported){result.webcodecs_h264=true;result.webcodecs_codec=codec;result.webcodecs_config=support.config??config;break;}
+    }catch(error){result.webcodecs_error=String(error?.message||error);}
+  }
+  if(!result.webcodecs_h264&&!result.webcodecs_error)result.webcodecs_error='no supported H.264 WebCodecs profile';
+  return result;
+};
+function openOfflineRenderSocket(){
+  return new Promise((resolve,reject)=>{
+    const ws=new WebSocket(`${wsProtocol}//${location.host}/ws/offline-render`);
+    ws.binaryType='arraybuffer';
+    const timer=setTimeout(()=>{try{ws.close();}catch(_){}reject(new Error('offline render WebSocket timeout'));},10000);
+    ws.addEventListener('open',()=>{clearTimeout(timer);resolve(ws);},{once:true});
+    ws.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('offline render WebSocket connection failed'));},{once:true});
+  });
+}
+async function waitSocketBelow(ws,limit){
+  while(ws.readyState===WebSocket.OPEN&&ws.bufferedAmount>limit)await new Promise(r=>setTimeout(r,2));
+  if(ws.readyState!==WebSocket.OPEN)throw new Error('offline render WebSocket closed unexpectedly');
+}
+function waitRenderCompleteAck(ws){
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>reject(new Error('offline render completion acknowledgement timeout')),30000);
+    const onMessage=event=>{
+      if(typeof event.data!=='string')return;
+      let payload;try{payload=JSON.parse(event.data);}catch(_){return;}
+      if(payload.type==='complete'){clearTimeout(timer);cleanup();resolve(payload);}
+      else if(payload.type==='error'){clearTimeout(timer);cleanup();reject(new Error(payload.error||'offline render stream failed'));}
+    };
+    const onClose=()=>{clearTimeout(timer);cleanup();reject(new Error('offline render WebSocket closed before completion'));};
+    const cleanup=()=>{ws.removeEventListener('message',onMessage);ws.removeEventListener('close',onClose);};
+    ws.addEventListener('message',onMessage);ws.addEventListener('close',onClose,{once:true});
+  });
+}
+window.tubevizRenderOfflineSequence=async function(options={}){
+  if(!offlineMode)throw new Error('tubeviz offline sequence requires ?offline=1');
+  const fps=Math.max(1,Number(options.fps??offlineFps)),totalFrames=Math.max(1,Number(options.totalFrames??Math.ceil(timeline.track.duration*fps))|0);
+  const transport=String(options.transport??'raw');
+  const reportEvery=Math.max(1,Number(options.reportEvery??Math.round(fps*.5))|0),maxBuffered=Math.max(1024*1024,Number(options.maxBufferedBytes??24*1024*1024));
+  let ws=null,encoder=null,encoderWorker=null,encoderError=null,encodedChunks=0,usedEncoderWorker=false;
+  if(transport==='webcodecs'){
+    const caps=await window.tubevizOfflineCapabilities(options);
+    if(!caps.webcodecs_h264)throw new Error(caps.webcodecs_error||'WebCodecs H.264 unavailable');
+    const config={
+      codec:caps.webcodecs_codec,width:Number(options.width??width),height:Number(options.height??height),
+      bitrate:Math.max(250000,Number(options.bitrate??8000000)),framerate:fps,bitrateMode:'variable',
+      latencyMode:'quality',hardwareAcceleration:'prefer-hardware',avc:{format:'annexb'}
+    };
+    encoderWorker=await createWorkerVideoEncoderTransport({config,wsUrl:`${wsProtocol}//${location.host}/ws/offline-render`,maxBufferedBytes:maxBuffered});
+    usedEncoderWorker=!!encoderWorker;
+    if(!encoderWorker){
+      ws=await openOfflineRenderSocket();
+      encoder=new VideoEncoder({
+        output(chunk){if(ws.readyState!==WebSocket.OPEN)return;const bytes=new Uint8Array(chunk.byteLength);chunk.copyTo(bytes);ws.send(bytes);encodedChunks++;},
+        error(error){encoderError=error;}
+      });
+      encoder.configure(config);
+    }
+  }else ws=await openOfflineRenderSocket();
+
+  const started=performance.now();let exportMs=0,renderMs=0;
+  try{
+    for(let i=0;i<totalFrames;i++){
+      if(encoderError)throw encoderError;if(encoderWorker?.failed)throw new Error(encoderWorker.failureReason);
+      const t=i/fps,r0=performance.now();
+      await window.tubevizRenderFrame(t,i);
+      const r1=performance.now();renderMs+=r1-r0;
+      if(transport==='webcodecs'){
+        composeExportCanvas();
+        const frame=new VideoFrame(exportCanvas,{timestamp:Math.round(i*1000000/fps),duration:Math.round(1000000/fps)}),keyFrame=i===0||i%Math.max(1,Math.round(fps*2))===0;
+        if(encoderWorker){
+          encoderWorker.sendFrame(frame,keyFrame).catch(()=>{});
+          if(encoderWorker.inflight>=6)await encoderWorker.waitForCapacity(4);
+        }else{
+          encoder.encode(frame,{keyFrame});frame.close();
+          while((encoder.encodeQueueSize>5||ws.bufferedAmount>maxBuffered)&&!encoderError)await new Promise(r=>setTimeout(r,1));
+        }
+      }else{
+        const e0=performance.now(),rgba=exportRawRgba();exportMs+=performance.now()-e0;
+        await waitSocketBelow(ws,maxBuffered);ws.send(rgba.buffer);
+      }
+      const done=i+1;
+      if(done===1||done===totalFrames||done%reportEvery===0){
+        const elapsed=(performance.now()-started)/1000,browserFps=done/Math.max(.001,elapsed);
+        const queued=encoderWorker?encoderWorker.lastQueued:(encoder?.encodeQueueSize??0),buffered=encoderWorker?encoderWorker.lastBuffered:(ws?.bufferedAmount??0);
+        if(typeof window.tubevizReportOfflineProgress==='function')await window.tubevizReportOfflineProgress({done,total:totalFrames,browser_fps:browserFps,queued,buffered_bytes:buffered,render_ms:renderMs,export_ms:exportMs,encoder_worker:!!encoderWorker});
+      }
+    }
+    if(encoderWorker){const done=await encoderWorker.complete(totalFrames);encodedChunks=Number(done.encodedChunks??encoderWorker.encodedChunks??0);encoderWorker.close();encoderWorker=null;}
+    else{
+      if(encoder){await encoder.flush();if(encoderError)throw encoderError;encoder.close();encoder=null;}
+      await waitSocketBelow(ws,0);const ackPromise=waitRenderCompleteAck(ws);ws.send(JSON.stringify({type:'complete',frames:totalFrames,transport,encoded_chunks:encodedChunks}));await ackPromise;ws.close();ws=null;
+    }
+    const elapsed=(performance.now()-started)/1000;
+    return{frames:totalFrames,transport,gpu:browserGpuActive?'webgpu':'canvas2d',source_decode:offlineSourceDecodeMode,source_fallbacks:offlineSourceFallbacks,browser_fps:totalFrames/Math.max(.001,elapsed),render_ms:renderMs,export_ms:exportMs,encoded_chunks:encodedChunks,encoder_worker:usedEncoderWorker};
+  }catch(error){
+    try{if(encoder&&encoder.state!=='closed')encoder.close();}catch(_){}
+    try{encoderWorker?.close();}catch(_){}
+    try{ws?.close();}catch(_){}
+    throw error;
+  }
 };
 
-if(!offlineMode)requestAnimationFrame(frame);
+if(!offlineMode)scheduleLiveFrame();

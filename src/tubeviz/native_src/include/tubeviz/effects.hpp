@@ -50,6 +50,19 @@ void apply_creative_effects(
     double phase
 );
 
+// History-dependent subset used when spatial/color work is fused on the GPU.
+// This keeps temporal echo/feedback semantics without repeating the expensive
+// spatial/color CPU passes.
+void apply_creative_temporal_effects(
+    std::vector<std::uint8_t>& rgb,
+    const std::vector<std::uint8_t>* previous,
+    int width,
+    int height,
+    const CreativeEffect& creative,
+    double progress,
+    double phase
+);
+
 // Re-anchor final hue/saturation toward the composed source frame while retaining
 // effect-generated luminance/structure. This is the native equivalent of Canvas
 // 'color' blending and makes source_fidelity a whole-render contract.
