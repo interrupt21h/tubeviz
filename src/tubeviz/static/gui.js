@@ -43,6 +43,7 @@ const STATIC_HELP={
   hfToken:"Optional Hugging Face access token for this Studio session. Leave blank to inherit server-side HF_TOKEN. The environment token value is never sent to the browser.",
   analysisPreset:"Curated starting point for the creative/editing controls below. Presets never choose devices, credentials, models, or paid AI features. Every applied value remains editable.",
   previewMode:"Responsive preview prioritizes smooth interaction by capping live frame rate, adapting resolution, and approximating CPU-heavy effects. Full fidelity preserves exact browser effect paths at higher cost.",
+  previewDecode:"Auto uses HTML video surfaces for direct WebGPU composition and falls back to worker WebCodecs when Canvas rendering is required. Force WebCodecs to test worker decoding explicitly.",
   reapplyAnalysisPreset:"Restore the currently selected preset after manual changes.",
   sectionBars:"Preferred musical section length in bars. Larger values produce broader structural sections; dynamic shots can still cut within them.",
   maxLayers:"Maximum simultaneous video layers available to the composition director.",
@@ -507,7 +508,7 @@ async function startPreview(){
     $("cancelJob").disabled=false;
     updateLiveLog($("jobLog"),job.log,{forceFollow:true});
     renderJobProgress(job);
-    waitForPreview(job.id,job.preview_url,preview,{profile:value("previewMode")||"responsive",quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto"});
+    waitForPreview(job.id,job.preview_url,preview,{profile:value("previewMode")||"responsive",quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto",decode:value("previewDecode")||"auto"});
     pollActiveJob();
   }catch(e){
     $("jobLog").textContent=`Preview error: ${e.message}`;
@@ -529,7 +530,7 @@ async function waitForPreview(jobId,url,previewWindow,previewOptions={}){
       if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
         if(previewWindow&&!previewWindow.closed){
           const sep=url.includes("?")?"&":"?";
-          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&preview_profile=${encodeURIComponent(previewOptions.profile||"responsive")}&preview=${encodeURIComponent(previewOptions.quality||"auto")}&gpu=${encodeURIComponent(previewOptions.gpu||"auto")}&t=${Date.now()}`;
+          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&preview_profile=${encodeURIComponent(previewOptions.profile||"responsive")}&preview=${encodeURIComponent(previewOptions.quality||"auto")}&gpu=${encodeURIComponent(previewOptions.gpu||"auto")}&preview_decode=${encodeURIComponent(previewOptions.decode||"auto")}&t=${Date.now()}`;
         }
         return;
       }

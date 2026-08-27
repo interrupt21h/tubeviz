@@ -99,6 +99,7 @@ class ClipLibrary:
         self.root = Path(root).expanduser().resolve()
         self.originals_dir = self.root / "originals"
         self.normalized_dir = self.root / "normalized"
+        self.preview_dir = self.root / "preview"
         self.thumbnails_dir = self.root / "thumbnails"
         self.metadata_dir = self.root / "metadata"
         self.db_path = self.root / "metadata.sqlite3"
@@ -108,6 +109,7 @@ class ClipLibrary:
             self.root,
             self.originals_dir,
             self.normalized_dir,
+            self.preview_dir,
             self.thumbnails_dir,
             self.metadata_dir,
         ):

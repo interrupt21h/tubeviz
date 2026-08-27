@@ -183,6 +183,89 @@ fn beatWarpUv(uv0:vec2f)->vec2f{
   return vec4f(clamp(c,vec3f(0),vec3f(1)),1);
 }`;
 
+
+export const TUBEVIZ_GPU_LAYER_SHADER = /* wgsl */`
+struct LayerUniforms {
+  g0: vec4f, // mode, time, progress, count
+  g1: vec4f, // transition mix, target aspect, focus layer, reserved
+  l0a: vec4f, l0b: vec4f, l0c: vec4f, l0d: vec4f,
+  l1a: vec4f, l1b: vec4f, l1c: vec4f, l1d: vec4f,
+  l2a: vec4f, l2b: vec4f, l2c: vec4f, l2d: vec4f,
+  l3a: vec4f, l3b: vec4f, l3c: vec4f, l3d: vec4f,
+};
+@group(0) @binding(0) var video0: texture_external;
+@group(0) @binding(1) var video1: texture_external;
+@group(0) @binding(2) var video2: texture_external;
+@group(0) @binding(3) var video3: texture_external;
+@group(0) @binding(4) var<uniform> layers: LayerUniforms;
+
+struct LayerVSOut {@builtin(position) pos: vec4f,@location(0) uv: vec2f};
+@vertex fn layer_vs(@builtin(vertex_index) i:u32)->LayerVSOut{
+  var p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
+  var u=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));
+  var o:LayerVSOut;o.pos=vec4f(p[i],0,1);o.uv=u[i];return o;
+}
+fn layerSatUv(uv:vec2f)->vec2f{return clamp(uv,vec2f(0),vec2f(1));}
+fn layerLuma(c:vec3f)->f32{return dot(c,vec3f(.2126,.7152,.0722));}
+fn layerHueRotate(c:vec3f,a:f32)->vec3f{
+  let y=dot(c,vec3f(.299,.587,.114));let ii=dot(c,vec3f(.596,-.274,-.322));let q=dot(c,vec3f(.211,-.523,.312));
+  let ca=cos(a);let sa=sin(a);let ni=ii*ca-q*sa;let nq=ii*sa+q*ca;
+  return vec3f(y+.956*ni+.621*nq,y-.272*ni-.647*nq,y-1.106*ni+1.703*nq);
+}
+fn layerUv(uv0:vec2f,b:vec4f,c:vec4f,d:vec4f)->vec2f{
+  var uv=uv0-.5;let sourceAspect=max(.01,d.x);let targetAspect=max(.01,layers.g1.y);
+  var aspectScale=vec2f(1.0);
+  if(sourceAspect>targetAspect){aspectScale.x=targetAspect/sourceAspect;}else{aspectScale.y=sourceAspect/targetAspect;}
+  let zoom=max(.35,b.y);uv*=aspectScale/zoom;
+  if(c.y>.5){uv.x=-uv.x;}
+  let cs=cos(-c.x);let sn=sin(-c.x);uv=mat2x2f(cs,-sn,sn,cs)*uv;
+  uv-=b.zw;return layerSatUv(uv+.5);
+}
+fn layerGrade(c0:vec4f,a:vec4f,b:vec4f)->vec4f{
+  var c=layerHueRotate(c0.rgb,b.x);let y=layerLuma(c);c=mix(vec3f(y),c,max(0.0,a.w));
+  c=(c-vec3f(.5))*a.z+vec3f(.5);c*=a.y;return vec4f(clamp(c,vec3f(0),vec3f(1)),clamp(a.x,0.0,1.0));
+}
+fn sample0(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video0,layerUv(uv,layers.l0b,layers.l0c,layers.l0d)),layers.l0a,layers.l0b);}
+fn sample1(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video1,layerUv(uv,layers.l1b,layers.l1c,layers.l1d)),layers.l1a,layers.l1b);}
+fn sample2(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video2,layerUv(uv,layers.l2b,layers.l2c,layers.l2d)),layers.l2a,layers.l2b);}
+fn sample3(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video3,layerUv(uv,layers.l3b,layers.l3c,layers.l3d)),layers.l3a,layers.l3b);}
+fn sampleLayer(i:i32,uv:vec2f)->vec4f{if(i==1){return sample1(uv);}if(i==2){return sample2(uv);}if(i==3){return sample3(uv);}return sample0(uv);}
+fn layerBlend(base:vec3f,over:vec3f,alpha:f32,mode:f32)->vec3f{
+  var mixed=over;
+  if(mode>.5&&mode<1.5){mixed=1.0-(1.0-base)*(1.0-over);}
+  else if(mode>=1.5&&mode<2.5){mixed=base*over;}
+  else if(mode>=2.5&&mode<3.5){mixed=select(2.0*base*over,1.0-2.0*(1.0-base)*(1.0-over),base>vec3f(.5));}
+  else if(mode>=3.5){mixed=max(base,over);}
+  return mix(base,mixed,clamp(alpha,0.0,1.0));
+}
+fn addLayer(base:vec3f,s:vec4f,mode:f32)->vec3f{return layerBlend(base,s.rgb,s.a,mode);}
+fn blendMode(i:i32)->f32{if(i==1){return layers.l1c.z;}if(i==2){return layers.l2c.z;}if(i==3){return layers.l3c.z;}return layers.l0c.z;}
+@fragment fn layer_fs(in:LayerVSOut)->@location(0) vec4f{
+  let uv=layerSatUv(in.uv);let mode=i32(round(layers.g0.x));let time=layers.g0.y;let progress=clamp(layers.g0.z,0.0,1.0);let count=max(1,i32(round(layers.g0.w)));
+  if(mode==7&&count>1){let a=sample0(uv);let b=sample1(uv);return vec4f(mix(a.rgb,b.rgb,clamp(layers.g1.x,0.0,1.0)),1);}
+  if(mode==3&&count>1){
+    let cell=floor(uv*vec2f(3,2));let shift=i32(floor(time*.22));let idx=(i32(cell.x)+i32(cell.y)*3+shift)%count;let s=sampleLayer(idx,uv);return vec4f(s.rgb,1);
+  }
+  if(mode==4&&count>1){let idx=i32(floor(progress*4.0+time*.06))%count;let s=sampleLayer(idx,uv);return vec4f(s.rgb,1);}
+  if(mode==5&&count>1){let idx=(i32(floor(uv.x*10.0))+i32(round(layers.g1.z)))%count;let s=sampleLayer(idx,uv);return vec4f(s.rgb,1);}
+  var base=sample0(uv).rgb;
+  if(mode==2&&count>1){let boundary=.18+.64*progress+sin(time*.45)*.08+(uv.y-.5)*.22;let s=sample1(uv);base=layerBlend(base,s.rgb,s.a*select(0.0,1.0,uv.x<boundary),blendMode(1));return vec4f(base,1);}
+  if(mode==1&&count>1){
+    for(var i=1;i<4;i++){
+      if(i>=count){break;}let fi=f32(i);let cx=.50+.27*sin(time*.55*.73+fi*1.31);let cy=.50+.23*cos(time*.55*.61-fi*.70);
+      let dx=(uv.x-cx)/(.26+.035*fi);let dy=(uv.y-cy)/(.28+.030*fi);let mask=1.0-smoothstep(.72,1.08,dx*dx+dy*dy);
+      let s=sampleLayer(i,uv);base=layerBlend(base,s.rgb,s.a*mask*(.55+.12*sin(time+fi)),blendMode(i));
+    }
+    return vec4f(base,1);
+  }
+  if(mode==6&&count>1){
+    for(var i=1;i<4;i++){if(i>=count){break;}let s=sampleLayer(i,uv);let gate=clamp(.18+.66*layerLuma(s.rgb),0.0,1.0);base=layerBlend(base,s.rgb,s.a*gate,blendMode(i));}
+    return vec4f(base,1);
+  }
+  for(var i=1;i<4;i++){if(i>=count){break;}let s=sampleLayer(i,uv);base=addLayer(base,s,blendMode(i));}
+  return vec4f(base,1);
+}`;
+
 function gpuParams(params,width,height){
   const palette=params.palette??[0,0,0];
   return new Float32Array([
@@ -203,11 +286,33 @@ function gpuParams(params,width,height){
   ]);
 }
 
+
+function layerBlendMode(value){
+  const mode=String(value||'normal').toLowerCase();
+  return mode==='screen'?1:mode==='multiply'?2:mode==='overlay'?3:mode==='lighten'?4:0;
+}
+function layerUniforms(layerList,composition,width,height){
+  const out=new Float32Array(72);const count=Math.max(1,Math.min(4,Number(composition.count??layerList.length)));
+  out.set([Number(composition.mode??0),Number(composition.time??0),Number(composition.progress??0),count,Number(composition.transition??0),width/Math.max(1,height),Number(composition.focus??0),0],0);
+  const first=layerList[0]||{};
+  for(let i=0;i<4;i++){
+    const item=layerList[i]||first,source=item.source;const base=8+i*16;
+    const sw=Number(item.sourceWidth||source?.displayWidth||source?.codedWidth||source?.videoWidth||source?.width||width);
+    const sh=Number(item.sourceHeight||source?.displayHeight||source?.codedHeight||source?.videoHeight||source?.height||height);
+    out.set([Number(item.opacity??(i<count?1:0)),Number(item.brightness??1),Number(item.contrast??1),Number(item.saturation??1)],base);
+    out.set([Number(item.hueRadians||0),Number(item.zoom??1),Number(item.panX||0),Number(item.panY||0)],base+4);
+    out.set([Number(item.rotationRadians||0),item.mirror?1:0,layerBlendMode(item.blendMode),i<count?1:0],base+8);
+    out.set([sw/Math.max(1,sh),0,0,0],base+12);
+  }
+  return out;
+}
+
 export class BrowserGpuRendererCore{
-  constructor(canvas,device,context,format,pipeline){
-    this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
+  constructor(canvas,device,context,format,pipeline,layerPipeline){
+    this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.layerPipeline=layerPipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     this.uniformBuffer=device.createBuffer({size:224,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+    this.layerUniformBuffer=device.createBuffer({size:288,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
     // Device loss is asynchronous. Surface it to the facade so live preview can
     // immediately restore the Canvas2D compositor instead of freezing on the last
     // successfully submitted GPU frame.
@@ -224,13 +329,17 @@ export class BrowserGpuRendererCore{
   resize(width,height){
     width=Math.max(1,Math.floor(width));height=Math.max(1,Math.floor(height));if(width===this.width&&height===this.height)return;
     this.width=width;this.height=height;this.canvas.width=width;this.canvas.height=height;
-    for(const t of [this.effectTexture,this.sourceTexture,this.historyTexture])t?.destroy();
+    for(const t of [this.effectTexture,this.sourceTexture,this.compositionTexture,this.historyTexture])t?.destroy();
     const srcUsage=GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.RENDER_ATTACHMENT;
     this.effectTexture=this.device.createTexture({label:'tubeviz-effect-source',size:[width,height],format:'rgba8unorm',usage:srcUsage});
     this.sourceTexture=this.device.createTexture({label:'tubeviz-source-color',size:[width,height],format:'rgba8unorm',usage:srcUsage});
+    this.compositionTexture=this.device.createTexture({label:'tubeviz-direct-composition',size:[width,height],format:'rgba8unorm',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.RENDER_ATTACHMENT});
     this.historyTexture=this.device.createTexture({label:'tubeviz-history',size:[width,height],format:this.format,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
     this.bindGroup=this.device.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[
       {binding:0,resource:this.sampler},{binding:1,resource:this.effectTexture.createView()},{binding:2,resource:this.sourceTexture.createView()},{binding:3,resource:this.historyTexture.createView()},{binding:4,resource:{buffer:this.uniformBuffer}},
+    ]});
+    this.compositionBindGroup=this.device.createBindGroup({layout:this.pipeline.getBindGroupLayout(0),entries:[
+      {binding:0,resource:this.sampler},{binding:1,resource:this.compositionTexture.createView()},{binding:2,resource:this.compositionTexture.createView()},{binding:3,resource:this.historyTexture.createView()},{binding:4,resource:{buffer:this.uniformBuffer}},
     ]});this.historyReady=false;
   }
   render(effectSource,sourceColorSource,params={}){
@@ -247,6 +356,34 @@ export class BrowserGpuRendererCore{
       encoder.copyTextureToTexture({texture:swapTexture},{texture:this.historyTexture},[this.width,this.height]);
       this.device.queue.submit([encoder.finish()]);this.historyReady=true;return true;
     }catch(error){this.failed=true;this.failureReason=String(error?.message||error);console.warn('tubeviz WebGPU compositor failed',error);return false;}
+  }
+  renderLayers(layerList,params={},composition={}){
+    if(this.failed||!this.layerPipeline||!Array.isArray(layerList)||!layerList.length)return false;
+    try{
+      const usable=layerList.filter(item=>item?.source).slice(0,4);if(!usable.length)return false;
+      const source0=usable[0].source,actualCount=usable.length;
+      const width=Math.max(1,Math.floor(Number(composition.width||this.canvas.width||source0.displayWidth||source0.videoWidth||source0.width||1)));
+      const height=Math.max(1,Math.floor(Number(composition.height||this.canvas.height||source0.displayHeight||source0.videoHeight||source0.height||1)));
+      this.resize(width,height);
+      while(usable.length<4)usable.push(usable[0]);
+      const external=usable.map(item=>this.device.importExternalTexture({source:item.source}));
+      this.device.queue.writeBuffer(this.layerUniformBuffer,0,layerUniforms(usable,{...composition,count:actualCount},width,height));
+      const layerBindGroup=this.device.createBindGroup({layout:this.layerPipeline.getBindGroupLayout(0),entries:[
+        {binding:0,resource:external[0]},{binding:1,resource:external[1]},{binding:2,resource:external[2]},{binding:3,resource:external[3]},{binding:4,resource:{buffer:this.layerUniformBuffer}},
+      ]});
+      const adjusted={...params};if(!this.historyReady){adjusted.feedback=0;adjusted.temporal=0;adjusted.temporalRgb=0;}
+      this.device.queue.writeBuffer(this.uniformBuffer,0,gpuParams(adjusted,width,height));
+      const encoder=this.device.createCommandEncoder({label:'tubeviz-direct-preview-frame'});
+      const compose=encoder.beginRenderPass({label:'tubeviz-direct-layer-pass',colorAttachments:[{view:this.compositionTexture.createView(),clearValue:{r:0,g:0,b:0,a:1},loadOp:'clear',storeOp:'store'}]});
+      compose.setPipeline(this.layerPipeline);compose.setBindGroup(0,layerBindGroup);compose.draw(3);compose.end();
+      const swapTexture=this.context.getCurrentTexture();
+      const post=encoder.beginRenderPass({label:'tubeviz-direct-post-pass',colorAttachments:[{view:swapTexture.createView(),clearValue:{r:0,g:0,b:0,a:1},loadOp:'clear',storeOp:'store'}]});
+      post.setPipeline(this.pipeline);post.setBindGroup(0,this.compositionBindGroup);post.draw(3);post.end();
+      encoder.copyTextureToTexture({texture:swapTexture},{texture:this.historyTexture},[width,height]);
+      this.device.queue.submit([encoder.finish()]);this.historyReady=true;return true;
+    }catch(error){
+      this.failed=true;this.failureReason=String(error?.message||error);console.warn('tubeviz direct WebGPU preview failed',error);return false;
+    }
   }
   resetHistory(){this.historyReady=false;}
   async sync(){try{await this.device.queue.onSubmittedWorkDone();return !this.failed;}catch(error){this.failed=true;this.failureReason=String(error?.message||error);return false;}}
@@ -283,12 +420,25 @@ async function createGpuPipeline(device,format){
   return pipeline;
 }
 
-export async function createGpuRendererCore(canvas,{powerPreference='high-performance'}={}){
+
+async function createLayerPipeline(device){
+  const shader=device.createShaderModule({label:'tubeviz-layer-compositor-wgsl',code:TUBEVIZ_GPU_LAYER_SHADER});
+  if(typeof shader.getCompilationInfo==='function'){
+    const info=await shader.getCompilationInfo();const errorText=compilationErrorText(info);
+    if(errorText)throw new Error(`tubeviz layer WGSL compilation failed: ${errorText}`);
+  }
+  const descriptor={label:'tubeviz-layer-compositor-pipeline',layout:'auto',vertex:{module:shader,entryPoint:'layer_vs'},fragment:{module:shader,entryPoint:'layer_fs',targets:[{format:'rgba8unorm'}]},primitive:{topology:'triangle-list'}};
+  if(typeof device.createRenderPipelineAsync==='function')return await device.createRenderPipelineAsync(descriptor);
+  return device.createRenderPipeline(descriptor);
+}
+
+export async function createGpuRendererCore(canvas,{powerPreference='high-performance',enableExternalLayers=true}={}){
   if(!globalThis.navigator?.gpu)throw new Error('navigator.gpu unavailable');
   const adapter=await navigator.gpu.requestAdapter({powerPreference});if(!adapter)throw new Error('no WebGPU adapter');
   const device=await adapter.requestDevice();const context=canvas.getContext('webgpu');if(!context)throw new Error('WebGPU canvas context unavailable');
   const format=navigator.gpu.getPreferredCanvasFormat();
   const pipeline=await createGpuPipeline(device,format);
+  const layerPipeline=enableExternalLayers?await createLayerPipeline(device):null;
   context.configure({device,format,alphaMode:'opaque',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
-  return new BrowserGpuRendererCore(canvas,device,context,format,pipeline);
+  return new BrowserGpuRendererCore(canvas,device,context,format,pipeline,layerPipeline);
 }

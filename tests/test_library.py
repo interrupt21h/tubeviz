@@ -7,6 +7,7 @@ from tubeviz.library import ClipLibrary
 def test_library_records_terms_and_deduplicates_source_id(tmp_path: Path):
     library = ClipLibrary(tmp_path / "library")
     library.initialize()
+    assert library.preview_dir.is_dir()
 
     clip_id_a = library.upsert_discovery(
         source="youtube",

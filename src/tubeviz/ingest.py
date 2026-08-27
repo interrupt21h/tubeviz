@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .library import ClipLibrary, sha256_file
-from .media import detect_scene_boundaries, make_thumbnail, prepare_media, probe, require_media_tools
+from .media import detect_scene_boundaries, make_thumbnail, prepare_media, prepare_preview_proxy, probe, require_media_tools
 from .youtube import DownloadFailure, SearchResult, YouTubeSource
 from .discovery_ai import DiscoveryAIConfig, discover_candidates, rank_candidates, index_clip_scene_embeddings
 from .semantic import OpenClipEmbedder, SemanticConfig, classify_scene_thumbnails
@@ -832,6 +832,12 @@ def ingest_terms(
                     library.mark_ready_media(
                         clip_id, media, sha256_file(media)
                     )
+                    try:
+                        preview_media = prepare_preview_proxy(media, library.preview_dir, progress=None)
+                        progress(f"  preview media: {hydrated.source_id} -> {preview_media.path.name} ({preview_media.reason})")
+                    except Exception as exc:
+                        # Preview acceleration must never make an otherwise usable clip fail ingest.
+                        progress(f"  preview media warning: {hydrated.source_id}: {exc}")
 
                     if cfg.detect_scenes:
                         scene_count = _index_scenes(
@@ -1011,6 +1017,11 @@ def ingest_urls(
             mode_label = "proxy" if media == proxy else "source"
             progress(f"  media prep: {hydrated.source_id} -> {mode_label} ({prepared.reason})")
             library.mark_ready_media(clip_id, media, sha256_file(media))
+            try:
+                preview_media = prepare_preview_proxy(media, library.preview_dir, progress=None)
+                progress(f"  preview media: {hydrated.source_id} -> {preview_media.path.name} ({preview_media.reason})")
+            except Exception as exc:
+                progress(f"  preview media warning: {hydrated.source_id}: {exc}")
 
             if cfg.detect_scenes:
                 scene_count = _index_scenes(library, clip_id, hydrated.source_id, media,

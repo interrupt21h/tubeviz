@@ -857,9 +857,19 @@ tubeviz serve timelines/song.json \
 
 Studio also provides a managed preview action from the Create interface.
 
-The interactive renderer can use WebGPU when the browser and environment provide a
-working device. If WebGPU is unavailable during normal interactive preview, tubeviz can
-use its Canvas2D compatibility path.
+The interactive preview uses a responsive pipeline by default. Tubeviz prepares a
+lightweight 720p/30fps preview-media cache independently of final-render media, adapts
+its internal render resolution and layer count to the measured frame budget, and caps
+live presentation near 30 fps. When WebGPU is available, source video surfaces are
+composited directly as GPU external textures before the fused post-processing pass,
+avoiding the full-frame Canvas2D composition copy. Canvas2D remains the compatibility
+path.
+
+Studio's **Preview decode** control normally chooses HTML video for the direct WebGPU
+path and can use the worker WebCodecs decoder when Canvas fallback benefits from moving
+decode work off the main thread. **Full fidelity** preview remains available when exact
+browser-effect inspection matters more than interaction speed. Native/final rendering
+never uses these preview-quality reductions.
 
 For best browser GPU support:
 

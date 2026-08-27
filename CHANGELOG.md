@@ -1,3 +1,13 @@
+# 0.41.0 — GPU-native responsive preview
+
+- Add a separate content-addressed preview-media cache capped at 720p/30fps. New ingest prepares it best-effort; existing libraries acquire it lazily when previewed. Final/native media remains untouched.
+- Move responsive WebGPU composition ahead of Canvas2D: up to four live HTML-video or WebCodecs `VideoFrame` sources are imported as GPU external textures and composited directly for single, flow, split, mosaic, swap, strips and luma layouts before the fused GPU post pass.
+- Keep transitions GPU-resident in responsive mode and dynamically reduce the live layer budget under load instead of allowing multi-source scenes to collapse the whole preview frame rate.
+- Expose the existing TVZ2/WebCodecs scene transport to interactive preview, not only offline browser rendering. Live WebCodecs requests run through the worker decoder and drop/reuse frames rather than blocking the presentation loop.
+- Add a Studio Preview decode selector. Auto prefers HTML-video external textures for direct WebGPU composition and worker WebCodecs when Canvas2D fallback is active.
+- Parallelize layer activation and prewarm upcoming proxy/WebCodecs media to reduce scene-transition stalls.
+- Preserve the v0.40.2 responsive governor, low-resolution analysis probes, and cheap effect approximations. Full-fidelity browser mode and native/final output remain unchanged.
+
 # 0.40.2 — Responsive web preview
 
 - Make Studio's browser preview **responsive by default** while leaving deterministic offline/browser rendering and final native output unchanged. A new Preview mode selector keeps full-fidelity live behavior available explicitly when exact browser-effect inspection matters more than interaction speed.

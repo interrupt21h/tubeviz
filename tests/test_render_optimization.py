@@ -41,6 +41,9 @@ def test_browser_webgpu_and_adaptive_preview_are_present():
     assert "createBrowserGpuFinalizer" in js
     assert "navigator.gpu.requestAdapter" in gpu
     assert "copyExternalImageToTexture" in gpu
+    assert "texture_external" in gpu
+    assert "importExternalTexture" in gpu
+    assert "renderLayers" in gpu
     # Common formerly-CPU raster passes are fused in WGSL.
     for token in ("posterize", "solarize", "blockDisplace", "slitScan", "datamosh"):
         assert token in gpu
@@ -54,6 +57,8 @@ def test_studio_defaults_to_responsive_preview_profile():
     assert "auto · adaptive 360p–720p" in html
     assert "preview_profile=" in gui
     assert 'profile:value("previewMode")||"responsive"' in gui
+    assert 'id="previewDecode"' in html
+    assert "preview_decode=" in gui
 
 
 def test_responsive_preview_throttles_expensive_live_paths():
@@ -77,3 +82,15 @@ def test_progress_is_reported_from_in_page_sequence_not_each_frame_rpc():
     assert "tubevizReportOfflineProgress" in js
     assert "page.expose_function" in render_py
     assert "fps-total" in render_py
+
+
+def test_responsive_preview_uses_proxy_media_live_webcodecs_and_direct_gpu_layers():
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    source = Path("src/tubeviz/static/browser_source.js").read_text()
+    server = Path("src/tubeviz/server.py").read_text()
+    assert "/api/preview-media/" in js
+    assert "liveSourceDecodeMode" in js and "updateLiveSourceFrames" in js
+    assert "renderDirectGpuPreview" in js and "previewLayerBudget" in js
+    assert "/api/browser-source/" in source
+    assert '@app.get("/api/browser-source/{scene_index}/{layer_index}")' in server
+    assert '@app.get("/api/preview-media/{scene_index}/{layer_index}")' in server

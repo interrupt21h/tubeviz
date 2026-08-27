@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 
 from .library import ClipLibrary
+from .media import prepare_preview_proxy
 from .models import DirectedTimeline, SceneSelection
 from .scene_selector import SceneSelectorConfig, attach_scene_plan
 from .transforms import TransformConfig, attach_transform_plan
@@ -357,6 +358,9 @@ def create_app(
             "library": str(library.root) if library is not None else None,
             "timeline": str(timeline_path),
             "audio": str(Path(audio_path).expanduser().resolve()) if audio_path is not None else None,
+            "preview_proxy_height": 720 if library is not None else None,
+            "preview_proxy_fps": 30 if library is not None else None,
+            "browser_source_decode": library is not None,
         }
 
     if audio_path is not None:
@@ -366,20 +370,52 @@ def create_app(
         async def audio() -> FileResponse:
             return FileResponse(resolved_audio)
 
-    if offline_render_sink is not None and library is not None:
-        @app.get("/api/offline-source/{scene_index}/{layer_index}")
-        async def offline_source(
-            scene_index: int,
-            layer_index: int,
-            fps: float = Query(60.0, gt=0.0, le=120.0),
-        ) -> Response:
+    if library is not None:
+        def _timeline_layer(scene_index: int, layer_index: int):
             if scene_index < 0 or scene_index >= len(timeline.scene_plan):
                 raise HTTPException(status_code=404, detail="scene index out of range")
             scene = timeline.scene_plan[scene_index]
             layers = [scene, *scene.layers]
             if layer_index < 0 or layer_index >= len(layers):
                 raise HTTPException(status_code=404, detail="layer index out of range")
-            layer = layers[layer_index]
+            return layers[layer_index]
+
+        @app.get("/api/preview-media/{scene_index}/{layer_index}")
+        async def preview_media(
+            scene_index: int,
+            layer_index: int,
+            height: int = Query(720, ge=240, le=1080),
+            fps: int = Query(30, ge=12, le=60),
+        ) -> FileResponse:
+            layer = _timeline_layer(scene_index, layer_index)
+            try:
+                source = _resolve_timeline_media(library, layer.media_file, getattr(layer, "media_url", None))
+                preview = await asyncio.to_thread(
+                    prepare_preview_proxy, source, library.preview_dir,
+                    max_height=int(height), max_fps=int(fps),
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=f"source media unavailable: {exc}") from exc
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            return FileResponse(
+                preview.path,
+                media_type="video/mp4" if preview.path.suffix.lower() == ".mp4" else None,
+                headers={
+                    "Cache-Control": "private, max-age=31536000, immutable",
+                    "X-Tubeviz-Preview-Proxy": "1" if preview.path.parent == library.preview_dir else "0",
+                    "X-Tubeviz-Preview-Encoder": preview.encoder or "source",
+                },
+            )
+
+        @app.get("/api/browser-source/{scene_index}/{layer_index}")
+        @app.get("/api/offline-source/{scene_index}/{layer_index}")
+        async def browser_source(
+            scene_index: int,
+            layer_index: int,
+            fps: float = Query(30.0, gt=0.0, le=120.0),
+        ) -> Response:
+            layer = _timeline_layer(scene_index, layer_index)
             try:
                 source = _resolve_timeline_media(library, layer.media_file, getattr(layer, "media_url", None))
                 cache_file, encoder = await asyncio.to_thread(

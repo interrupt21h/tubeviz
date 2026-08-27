@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import tubeviz.media as media_module
-from tubeviz.media import _parse_ratio, detect_scene_boundaries, make_thumbnail, normalize_video, probe
+from tubeviz.media import _parse_ratio, detect_scene_boundaries, make_thumbnail, normalize_video, prepare_preview_proxy, probe
 
 
 def test_parse_ratio():
@@ -138,3 +138,34 @@ def test_normalize_video_auto_falls_back_to_x264(tmp_path, monkeypatch):
     assert encoders == ["h264_nvenc", "libx264"]
     assert encoder == "libx264"
     assert destination.exists()
+
+
+def test_preview_proxy_reuses_small_browser_source(tmp_path, monkeypatch):
+    from tubeviz.media import MediaInfo
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    info = MediaInfo(10.0, 854, 480, 30.0, codec_name="h264", pixel_format="yuv420p", format_name="mov,mp4")
+    monkeypatch.setattr(media_module, "probe", lambda path: info)
+    monkeypatch.setattr(media_module, "normalize_video", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("no transcode expected")))
+    result = prepare_preview_proxy(source, tmp_path / "preview")
+    assert result.path == source
+    assert result.transcoded is False
+
+
+def test_preview_proxy_caps_height_and_fps_and_caches(tmp_path, monkeypatch):
+    from tubeviz.media import MediaInfo
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    info = MediaInfo(10.0, 1920, 1080, 60.0, codec_name="h264", pixel_format="yuv420p", format_name="mov,mp4")
+    monkeypatch.setattr(media_module, "probe", lambda path: info)
+    calls=[]
+    def fake_normalize(source_path, destination, **kwargs):
+        calls.append(kwargs); destination.write_bytes(b"preview"); return "libx264"
+    monkeypatch.setattr(media_module, "normalize_video", fake_normalize)
+    first=prepare_preview_proxy(source,tmp_path / "preview")
+    second=prepare_preview_proxy(source,tmp_path / "preview")
+    assert first.path == second.path
+    assert first.path.read_bytes() == b"preview"
+    assert calls[0]["height"] == 720
+    assert calls[0]["fps"] == 30
+    assert len(calls) == 1

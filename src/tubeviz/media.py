@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
+import hashlib
 import json
 import re
 import shutil
@@ -26,6 +27,15 @@ class MediaInfo:
 
 @dataclass(frozen=True)
 class PreparedMedia:
+    path: Path
+    transcoded: bool
+    encoder: str | None
+    reason: str
+    info: MediaInfo
+
+
+@dataclass(frozen=True)
+class PreviewMedia:
     path: Path
     transcoded: bool
     encoder: str | None
@@ -350,6 +360,66 @@ def normalize_video(
 
     assert last_error is not None
     raise last_error
+
+
+def prepare_preview_proxy(
+    source: Path,
+    cache_dir: Path,
+    *,
+    max_height: int = 720,
+    max_fps: int = 30,
+    crf: int = 27,
+    force: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> PreviewMedia:
+    """Return a lightweight browser-preview source for ``source``.
+
+    Preview proxies are intentionally independent of normalized/final-render media.
+    They cap decode work at 720p/30fps by default, contain no audio, and use a
+    content-addressed cache so existing libraries gain the optimization lazily while
+    newly ingested clips can prepare it once. Small browser-compatible sources are
+    reused directly instead of being needlessly re-encoded.
+    """
+    source = Path(source).resolve()
+    info = probe(source)
+    compatible, _ = is_browser_compatible(info)
+    max_height = max(0, int(max_height))
+    max_fps = max(0, int(max_fps))
+    height_ok = not max_height or info.height is None or info.height <= max_height
+    fps_ok = not max_fps or info.fps is None or info.fps <= max_fps + 0.01
+    if compatible and height_ok and fps_ok:
+        return PreviewMedia(source, False, None, "source already preview-friendly", info)
+
+    stat = source.stat()
+    key = json.dumps({
+        "path": str(source),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "max_height": max_height,
+        "max_fps": max_fps,
+        "format": 1,
+    }, sort_keys=True).encode()
+    digest = hashlib.sha256(key).hexdigest()
+    cache_dir = Path(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    destination = cache_dir / f"{digest}.mp4"
+    if destination.is_file() and not force:
+        return PreviewMedia(destination, False, None, "cached preview proxy", info)
+
+    target_height = 0
+    if max_height and info.height:
+        target_height = min(max_height, int(info.height))
+        if target_height > 2:
+            target_height -= target_height % 2
+    target_fps = 0
+    if max_fps:
+        target_fps = min(max_fps, max(1, int(round(info.fps or max_fps))))
+    encoder = normalize_video(
+        source, destination,
+        height=target_height, fps=target_fps, crf=crf, preset="veryfast",
+        keep_audio=False, encoder="auto", progress=progress, source_info=info,
+    )
+    return PreviewMedia(destination, True, encoder, "generated bounded preview proxy", info)
 
 
 def prepare_media(

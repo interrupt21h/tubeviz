@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from tubeviz.library import ClipLibrary, sha256_file
 from tubeviz.models import DirectedTimeline, Section, TrackAnalysis
+import tubeviz.server as server_module
+from tubeviz.media import PreviewMedia
 from tubeviz.server import create_app
 
 
@@ -104,3 +106,19 @@ def test_offline_render_websocket_forwards_binary_frames(tmp_path: Path):
     assert ack == {"type": "complete", "frames": 2}
     assert sink.data == [b"frame-one", b"frame-two"]
     assert sink.payload["frames"] == 2
+
+
+def test_live_preview_routes_exist_without_offline_render_sink(tmp_path: Path, monkeypatch):
+    library = ClipLibrary(tmp_path / "library"); library.initialize()
+    clip_id = library.upsert_discovery(source="youtube", source_id="p", source_url="https://youtu.be/p", term="x", rank=1, metadata={"title":"P"})
+    media = library.normalized_dir / "p.mp4"; media.write_bytes(b"preview-source")
+    library.mark_ready_media(clip_id, media, sha256_file(media)); library.replace_scenes(clip_id, [(0.0, 2.0, None)])
+    track = TrackAnalysis(source="/tmp/song.wav", duration=2.0, sample_rate=22050, hop_length=512, tempo_bpm=120.0, beats=[], bars=[], events=[], sections=[Section(index=0,start=0,end=2,energy=.5,label="drive")])
+    timeline_path=tmp_path / "timeline.json"; timeline_path.write_text(DirectedTimeline(track=track,cues=[]).model_dump_json())
+    monkeypatch.setattr(server_module, "prepare_preview_proxy", lambda source, cache_dir, **kwargs: PreviewMedia(Path(source), False, None, "test", None))
+    # Avoid invoking the monkeypatched return metadata; route registration is the invariant here.
+    app=create_app(timeline_path, library_path=library.root)
+    paths={route.path for route in app.routes}
+    assert "/api/preview-media/{scene_index}/{layer_index}" in paths
+    assert "/api/browser-source/{scene_index}/{layer_index}" in paths
+    assert "/api/offline-source/{scene_index}/{layer_index}" in paths

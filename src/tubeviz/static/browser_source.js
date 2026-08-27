@@ -8,6 +8,8 @@
 // for compatibility with v0.37.x libraries.
 
 const DEFAULT_CODEC = 'avc1.64002a';
+const LIVE_SOURCE_PREFIX = '/api/browser-source/';
+const LEGACY_OFFLINE_SOURCE_PREFIX = '/api/offline-source/';
 
 export function parsePackedH264(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -66,7 +68,7 @@ export function prewarmWebCodecsScene(sceneIndex, layerCount, {fps = 60} = {}) {
   prewarmChain = prewarmChain.catch(() => {}).then(async () => {
     for (let i = 0; i < layerCount; i++) {
       try {
-        const response = await fetch(`/api/offline-source/${sceneIndex}/${i}?fps=${encodeURIComponent(fps)}`, {cache: 'force-cache'});
+        const response = await fetch(`${LIVE_SOURCE_PREFIX}${sceneIndex}/${i}?fps=${encodeURIComponent(fps)}`, {cache: 'force-cache'});
         if (response.ok) { try { await response.body?.cancel(); } catch (_) {} }
       } catch (_) {}
     }
@@ -177,7 +179,9 @@ export class WebCodecsSceneSource {
   static async open(sceneIndex, layerIndex, {fps = 60, strict = false} = {}) {
     const probe = await probeWebCodecsSourceDecoder();
     if (!probe.supported) { if (strict) throw new Error(probe.reason); return null; }
-    const url = `/api/offline-source/${sceneIndex}/${layerIndex}?fps=${encodeURIComponent(fps)}`;
+    const url = `${LIVE_SOURCE_PREFIX}${sceneIndex}/${layerIndex}?fps=${encodeURIComponent(fps)}`;
+    // LEGACY_OFFLINE_SOURCE_PREFIX remains documented/served for old offline clients.
+    void LEGACY_OFFLINE_SOURCE_PREFIX;
     const workerSource = await openWorkerSource(url, probe.config);
     if (workerSource) return workerSource;
     const response = await fetch(url, {cache: 'force-cache'});

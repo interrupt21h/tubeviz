@@ -7,7 +7,7 @@ async function probeWebGpu(){
   if(!self.navigator?.gpu)throw new Error('WorkerNavigator.gpu unavailable');
   if(typeof OffscreenCanvas==='undefined')throw new Error('OffscreenCanvas unavailable in worker');
   const target=new OffscreenCanvas(4,4);
-  const test=await createGpuRendererCore(target);test.resize(4,4);
+  const test=await createGpuRendererCore(target,{enableExternalLayers:false});test.resize(4,4);
   const effect=new OffscreenCanvas(4,4),source=new OffscreenCanvas(4,4);
   const ectx=effect.getContext('2d'),sctx=source.getContext('2d');
   if(!ectx||!sctx)throw new Error('worker 2D OffscreenCanvas unavailable for WebGPU probe');
@@ -23,7 +23,7 @@ self.onmessage=async event=>{
       await probeWebGpu();self.postMessage({type:'probe-result',ok:true});return;
     }
     if(m.type==='init'){
-      renderer=await createGpuRendererCore(m.canvas);renderer.resize(m.width||1,m.height||1);
+      renderer=await createGpuRendererCore(m.canvas,{enableExternalLayers:false});renderer.resize(m.width||1,m.height||1);
       renderer.onDeviceLost=reason=>self.postMessage({type:'device-lost',error:reason});
       self.postMessage({type:'ready'});return;
     }

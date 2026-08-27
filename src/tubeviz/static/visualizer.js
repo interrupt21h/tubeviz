@@ -34,10 +34,13 @@ const offlineMode=query.get('offline')==='1';
 const browserGpuMode=(query.get('gpu')||'auto').toLowerCase();
 const previewQuality=(query.get('preview')||'auto').toLowerCase();
 const previewProfile=(query.get('preview_profile')||'responsive').toLowerCase();
+const previewDecodeRequested=(query.get('preview_decode')||'auto').toLowerCase();
+const previewProxyEnabled=(query.get('preview_proxy')||'on').toLowerCase()!=='off';
 const responsivePreview=!offlineMode&&previewProfile!=='full';
 const adaptivePreviewSteps=responsivePreview?[360,480,540,720]:[540,720,1080];
 let adaptivePreviewHeight=responsivePreview?540:720,renderPixelRatio=1,previewFrameEma=0,previewLastResize=0;
 let previewFrameIntervalEma=0,previewMeasuredFps=0,previewLastStatus=0,lastLiveRenderAt=0;
+let liveSourceDecodeMode='video',liveSourceDecodeReason='initializing',previewVisibleLayers=0,previewAvailableLayers=0;
 let gpuInit={finalizer:null,reason:'not initialized'};
 try{
   gpuInit=await createBrowserGpuFinalizer(gpuCanvas,browserGpuMode,{preferWorker:offlineMode});
@@ -61,7 +64,10 @@ function updateRendererStatus(extra=''){
   const size=width>0&&height>0?`${width}×${height}`:'resolving';
   const fps=previewMeasuredFps>0?`${previewMeasuredFps.toFixed(0)} fps`:`≤${previewTargetFps()} fps`;
   const cpu=previewFrameEma>0?` · CPU ${previewFrameEma.toFixed(1)} ms`:'';
-  renderMeta.textContent=`Preview renderer: ${renderer} · ${profile} · ${size} · ${fps}${cpu}${reason?` · ${reason}`:''}`;
+  const direct=responsivePreview&&browserGpuFinalizer?.renderLayers?' · direct GPU layers':'';
+  const decode=!offlineMode?` · decode ${liveSourceDecodeMode}`:'';
+  const layers=previewAvailableLayers>0?` · layers ${previewVisibleLayers}/${previewAvailableLayers}`:'';
+  renderMeta.textContent=`Preview renderer: ${renderer}${direct} · ${profile} · ${size} · ${fps}${cpu}${decode}${layers}${reason?` · ${reason}`:''}`;
 }
 function disableBrowserGpu(reason){
   const old=browserGpuFinalizer;
@@ -187,6 +193,22 @@ function updateAdaptivePreview(frameMs){
 
 const timeline=await fetch('/api/timeline').then(r=>r.json());
 const status=await fetch('/api/status').then(r=>r.json()).catch(()=>({clips_enabled:false,scene_count:0}));
+if(responsivePreview&&status.clips_enabled){
+  const decoderProbe=await probeWebCodecsSourceDecoder().catch(error=>({supported:false,reason:String(error?.message||error)}));
+  const directGpu=!!browserGpuFinalizer?.renderLayers;
+  if(previewDecodeRequested==='webcodecs'){
+    liveSourceDecodeMode=decoderProbe.supported?'webcodecs':'video';
+    liveSourceDecodeReason=decoderProbe.supported?'requested WebCodecs':`WebCodecs unavailable: ${decoderProbe.reason||'unsupported'}`;
+  }else if(previewDecodeRequested==='video'){
+    liveSourceDecodeMode='video';liveSourceDecodeReason='requested video decoder';
+  }else{
+    // HTMLVideoElement is the lowest-copy source for direct WebGPU external textures.
+    // Canvas fallback prefers the worker VideoDecoder when available.
+    liveSourceDecodeMode=directGpu?'video':(decoderProbe.supported?'webcodecs':'video');
+    liveSourceDecodeReason=directGpu?'HTML video → GPU external texture':(decoderProbe.supported?'worker WebCodecs':'HTML video fallback');
+  }
+}else{liveSourceDecodeMode='video';liveSourceDecodeReason='standard media playback';}
+updateRendererStatus(liveSourceDecodeReason);
 const tempoValues=(timeline.track.tempo_curve??[]).map(p=>p.bpm).filter(Number.isFinite).sort((a,b)=>a-b);
 let tempoText=`${timeline.track.tempo_bpm.toFixed(1)} BPM`;
 if(tempoValues.length>4){
@@ -219,13 +241,15 @@ if(!offlineMode){
 
 function waitMetadata(v){if(v.readyState>=1)return Promise.resolve();return new Promise((res,rej)=>{const ok=()=>{clean();res();},bad=()=>{clean();rej(v.error||new Error('metadata load failed'));},clean=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});});}
 function mediaUrl(layer){if(layer.media_url)return layer.media_url;const parts=String(layer.media_file||"").split("/");const root=parts[0]==="originals"?"/originals/":"/media/";if(parts[0]==="originals"||parts[0]==="normalized")parts.shift();return root+parts.map(encodeURIComponent).join("/");}
+function previewMediaUrl(sceneIndex,layerIndex){return `/api/preview-media/${sceneIndex}/${layerIndex}?height=720&fps=30`;}
 function allLayers(scene){return [{...scene,role:'primary',opacity:scene.opacity??.92,blend_mode:scene.transform?.blend_mode??'normal'},...(scene.layers??[])].slice(0,4);}
 
 function closeBankSources(bankIndex){
   for(const st of bankState[bankIndex]??[])try{st.source?.close();}catch(_){}
 }
-async function loadHtmlLayer(v,layer,scene,i){
-  const url=mediaUrl(layer),abs=new URL(url,location.href).href;
+async function loadHtmlLayer(v,layer,scene,i,sceneIndex=null){
+  const useProxy=responsivePreview&&previewProxyEnabled&&status.clips_enabled&&Number.isInteger(sceneIndex);
+  const url=useProxy?previewMediaUrl(sceneIndex,i):mediaUrl(layer),abs=new URL(url,location.href).href;
   if(v.src!==abs){v.src=url;v.load();}
   await waitMetadata(v);
   const start=Number(layer.start??0),end=Number(layer.end??v.duration),span=Math.max(.05,end-start);
@@ -233,31 +257,34 @@ async function loadHtmlLayer(v,layer,scene,i){
   v.currentTime=Math.max(start,Math.min(end-.02,resume));
   const t=layer.transform??{};v.playbackRate=t.materialized?1:(t.playback_rate??1);
   if(!audio.paused&&!offlineMode)v.play().catch(()=>{});
-  return{video:v,source:null,frame:null,layer,start,end,span,transform:t,offlineBias:0};
+  return{video:v,source:null,frame:null,layer,start,end,span,transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,previewProxy:useProxy};
 }
 async function loadBank(bankIndex,scene,sceneIndex=null){
   closeBankSources(bankIndex);
-  const layers=allLayers(scene),vids=banks[bankIndex],states=[];
-  for(let i=0;i<vids.length;i++){
-    const v=vids[i],layer=layers[i];
-    if(!layer){v.pause();v.removeAttribute('src');v.load();continue;}
-    const start=Number(layer.start??0),declaredEnd=Number(layer.end??0),t=layer.transform??{};
-    if(offlineMode&&offlineSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex)){
+  const layers=allLayers(scene),vids=banks[bankIndex];
+  for(let i=layers.length;i<vids.length;i++){const v=vids[i];v.pause();v.removeAttribute('src');v.load();}
+  const useLiveWebCodecs=!offlineMode&&responsivePreview&&liveSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex);
+  const useOfflineWebCodecs=offlineMode&&offlineSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex);
+  const tasks=layers.map(async(layer,i)=>{
+    const v=vids[i],start=Number(layer.start??0),declaredEnd=Number(layer.end??0),t=layer.transform??{};
+    if((useLiveWebCodecs||useOfflineWebCodecs)&&Number.isInteger(sceneIndex)){
       try{
         v.pause();v.removeAttribute('src');v.load();
-        const source=await WebCodecsSceneSource.open(sceneIndex,i,{fps:offlineFps,strict:true});
-        const end=declaredEnd>start?declaredEnd:start+source.frameCount/source.fps;
-        states.push({video:null,source,frame:null,layer,start,end,span:Math.max(.05,end-start),transform:t,offlineBias:0});
-        continue;
+        const fps=useOfflineWebCodecs?offlineFps:Math.min(30,previewTargetFps());
+        const source=await WebCodecsSceneSource.open(sceneIndex,i,{fps,strict:useOfflineWebCodecs&&offlineSourceStrict});
+        const end=declaredEnd>start?declaredEnd:start+source.frameCount/source.fps,span=Math.max(.05,end-start);
+        const resume=i===0&&Number.isFinite(scene.resume_at)?Math.max(0,scene.resume_at-start):0;
+        const frame=await source.frameAt(Math.min(span-.002,resume));
+        return{video:null,source,frame,layer,start,end,span,transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,framePending:null};
       }catch(error){
-        if(offlineSourceStrict)throw error;
-        offlineSourceFallbacks++;
+        if(useOfflineWebCodecs&&offlineSourceStrict)throw error;
+        if(useOfflineWebCodecs)offlineSourceFallbacks++;
         console.warn(`WebCodecs source ${sceneIndex}/${i} unavailable; using HTMLVideoElement`,error);
       }
     }
-    states.push(await loadHtmlLayer(v,layer,scene,i));
-  }
-  bankState[bankIndex]=states;bankMode[bankIndex]=scene.composition_mode??'single';
+    return loadHtmlLayer(v,layer,scene,i,sceneIndex);
+  });
+  bankState[bankIndex]=await Promise.all(tasks);bankMode[bankIndex]=scene.composition_mode??'single';
 }
 
 let activationGeneration=0;
@@ -265,7 +292,8 @@ async function activateScene(scene,{immediate=false}={}){
   if(!scene){activeScene=null;pauseAll();bankState[0]=[];bankState[1]=[];resetTemporalFxState(false);return;}
   const gen=++activationGeneration,next=activeBank<0?0:1-activeBank;
   try{
-    await loadBank(next,scene);if(gen!==activationGeneration)return;
+    const sceneIndex=sceneIndexAt(Number(scene.time??clockSeconds()));
+    await loadBank(next,scene,sceneIndex);if(gen!==activationGeneration)return;
     const duration=immediate?0:Math.max(0,scene.crossfade_seconds??1.25);
     transition=activeBank<0?null:{from:activeBank,to:next,start:clockNowMs(),duration:duration*1000};
     if(activeBank<0||duration===0){if(activeBank>=0)banks[activeBank].forEach(v=>v.pause());activeBank=next;transition=null;}
@@ -275,11 +303,35 @@ async function activateScene(scene,{immediate=false}={}){
     const inheritHistory=Number(scene?.direction?.creative?.history_inherit??0)>.04;
     resetTemporalFxState(temporalHero||inheritHistory);
     activeScene={...scene};focusLayer=0;resetVectorMotionState();
+    if(responsivePreview&&sceneIndex>=0&&sceneIndex+1<timeline.scene_plan.length){
+      const upcoming=timeline.scene_plan[sceneIndex+1];
+      if(liveSourceDecodeMode==='webcodecs')void prewarmWebCodecsScene(sceneIndex+1,allLayers(upcoming).length,{fps:Math.min(30,previewTargetFps())});
+      else if(previewProxyEnabled){for(let i=0;i<allLayers(upcoming).length;i++)void fetch(previewMediaUrl(sceneIndex+1,i),{headers:{Range:'bytes=0-0'},cache:'force-cache'}).then(r=>r.body?.cancel?.()).catch(()=>{});}
+    }
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
     const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';const vectors=d.vector_effects?.length?` · ${d.vector_effects.length} vector fx`:'';
     clipMeta.textContent=`${scene.term}${scene.motif_id?` · ${scene.motif_id} #${scene.occurrence}`:''} · ${scene.composition_mode} · ${1+(scene.layers?.length??0)} video layers${align}${family}${vectors} · ${scene.title??scene.source_id}${fxNames?` · fx ${fxNames}`:''}`;
   }catch(e){console.warn('scene activation failed',e);clipMeta.textContent=`Clip group unavailable: ${scene.title??scene.source_id}`;}
+}
+
+function updateLiveSourceFrames(){
+  if(offlineMode||liveSourceDecodeMode!=='webcodecs'||audio.paused)return;
+  const now=clockSeconds();
+  for(const states of bankState)for(const st of states){
+    if(!st.source||st.framePending)continue;
+    const rate=st.transform?.materialized?1:Number(st.transform?.playback_rate??1);
+    let offset=((now-Number(st.sceneTime??0))*rate+(st.liveBias??0))%st.span;if(offset<0)offset+=st.span;
+    if(st.transform?.reverse)offset=Math.max(0,st.span-offset-.001);
+    st.framePending=st.source.frameAt(offset).then(frame=>{st.frame=frame;}).catch(error=>{console.warn('live WebCodecs frame failed',error);}).finally(()=>{st.framePending=null;});
+  }
+}
+
+function previewLayerBudget(total){
+  if(!responsivePreview)return Math.min(4,total);
+  if(previewFrameEma>48)return Math.min(1,total);
+  if(previewFrameEma>30)return Math.min(2,total);
+  return Math.min(4,total);
 }
 
 function transformedRect(t,rect){
@@ -1704,8 +1756,55 @@ function applyPostFx(){
 
   if(!gpuCommon){historyCtx.globalAlpha=.92;historyCtx.drawImage(videoFx,0,0);historyReady=true;}
 }
+function gpuCompositionMode(mode){
+  return mode==='flow'?1:mode==='split'?2:mode==='mosaic'?3:mode==='swap'?4:mode==='strips'?5:mode==='luma'?6:0;
+}
+function gpuLayerDescriptor(state,alpha=1){
+  const source=state?.frame??state?.video;if(!source)return null;
+  const t=state.transform??{},creative=activeScene?.direction?.creative??{},p=directedProgress();
+  const camera=Math.min(1,creativeValue('camera_energy',creative.camera_energy??0)*liveFx.motion);
+  const cameraZoom=1+camera*(.018+.052*(.5-.5*Math.cos(Math.PI*Math.min(1,p))))+punch*.065;
+  const zoom=Math.max(1,Number(t.zoom??1))*cameraZoom*(1+punch*.055);
+  const targetX=Number(creative.camera_target_x??.5),targetY=Number(creative.camera_target_y??.5);
+  const panX=Number(t.pan_x??0)*.20+(.5-targetX)*Math.max(0,zoom-1)*.34;
+  const panY=Number(t.pan_y??0)*.20+(.5-targetY)*Math.max(0,zoom-1)*.34;
+  const layerHue=legacyTreatment()?0:Math.max(-6,Math.min(6,Number(t.hue_degrees??0)));
+  return{source,opacity:alpha*Number(state.layer?.opacity??.75),brightness:Number(t.brightness??1),contrast:Number(t.contrast??1),saturation:Number(t.saturation??1),hueRadians:layerHue*Math.PI/180,zoom,panX,panY,rotationRadians:Number(t.rotation_degrees??0)*Math.PI/180,mirror:!!t.mirror,blendMode:state.layer?.blend_mode||t.blend_mode||'normal'};
+}
+function gpuDirectPostParams(){
+  const t=activeScene?.transform??{},m=liveFx.master,motion=m*liveFx.motion,trails=m*liveFx.trails,glitchScale=m*liveFx.glitch,strobeScale=m*liveFx.strobe;
+  const codec=codecFallback(),directedFeedback=automationValue('feedback',0),directedGlitch=automationValue('glitch',0),directedWarp=automationValue('spectral_warp',0),directedChroma=automationValue('chromatic',0),directedBloom=automationValue('bloom',0),directedFlow=automationValue('flow',0);
+  const feedback=Math.min(1,((t.feedback??0)+directedFeedback+codec.feedback)*trails),glitch=Math.min(1,((t.glitch??0)+sliceFx+directedGlitch)*glitchScale),pixel=Math.min(1,(t.pixelate??0)*glitchScale),rgb=Math.min(1,((t.rgb_split??0)+codec.rgb)*glitchScale),scan=Math.min(1,(t.scanlines??0)*m),vignette=Math.min(1,(t.vignette??0)*m);
+  const ripple=Math.min(1,((t.ripple??0)+rippleFx+directedFlow*.28+codec.ripple)*motion),kaleido=Math.min(1,((t.kaleidoscope??0)+kaleidoFx)*motion),tunnel=Math.min(1,((t.tunnel??0)+tunnelFx)*motion),posterize=Math.min(1,(t.posterize??0)*m),edge=Math.min(1,((t.edge??0)+edgeFx)*m),strobe=Math.min(1,((t.strobe??0)+strobeFx)*strobeScale);
+  const slitScan=Math.min(1,((t.slit_scan??0)+slitScanFx)*motion),frameEcho=Math.min(1,((t.frame_echo??0)+echoFx)*trails),corridor=Math.min(1,((t.mirror_corridor??0)+corridorFx)*motion),datamosh=Math.min(1,((t.datamosh??0)+datamoshFx+codec.datamosh)*glitchScale),blocks=Math.min(1,((t.block_displace??0)+codec.blocks)*glitchScale),chromaDelay=Math.min(1,((t.chroma_delay??0)+chromaDelayFx+directedChroma*.24)*trails),tracking=Math.min(1,((t.vhs_tracking??0)+codec.tracking)*glitchScale),vortex=Math.min(1,((t.vortex??0)+vortexFx+codec.vortex)*motion),motionTrails=Math.min(1,((t.motion_trails??0)+motionTrailFx)*trails),sliceRecursion=Math.min(1,((t.slice_recursion??0)+sliceRecursionFx)*motion);
+  const creative=activeScene?.direction?.creative??{};
+  const creativeFlow=Math.min(1,creativeValue('flow_warp',creative.flow_warp??0)*motion),creativeFlowRgb=Math.min(1,creativeValue('flow_rgb',creative.flow_rgb??0)*glitchScale),creativeTemporal=Math.min(1,creativeValue('temporal_echo',creative.temporal_echo??0)*trails),creativeTemporalRgb=Math.min(1,creativeValue('temporal_rgb',creative.temporal_rgb??0)*trails),creativeSmear=Math.min(1,creativeValue('temporal_smear',creative.temporal_smear??0)*trails),creativeDepth=Math.min(1,creativeValue('depth_parallax',creative.depth_parallax??0)*motion),creativeBackground=Math.min(1,creativeValue('background_warp',creative.background_warp??0)*motion),creativeFeedback=Math.min(1,creativeValue('feedback',creative.feedback??0)*trails),creativeSymmetry=Math.min(1,creativeValue('local_symmetry',creative.local_symmetry??0)*motion),creativeBloom=Math.min(1,creativeValue('texture_bloom',creative.texture_bloom??0)*m),creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion),creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m);
+  const dc=directedColorValues(),room=Math.max(0,1-sourceFidelity()),colorMix=Math.min(.24,.015+room*.36),palette=(activeScene?.direction?.color?.palette??[])[0],target=creativeTarget(),heroA=heroEnvelope(),heroKind=creative.hero_kind??'';
+  const heroTemporal=['subject_echo','flow_melt','time_prism'].includes(heroKind)?heroA:0,heroFlow=heroKind==='flow_melt'?heroA:0,heroDepth=heroKind==='depth_burst'?heroA:0,heroFeedback=['depth_burst','recursive_portal'].includes(heroKind)?heroA:0,heroChroma=heroKind==='time_prism'?heroA:0;
+  const structural=Math.min(1,kaleido*.35+vortex*.45+tunnel*.35+sliceRecursion*.30+corridor*.20+creativeSymmetry*.24),beatState=currentBeatWarpState();
+  return{fidelity:sourceFidelityAlpha(),vignette,scanlines:scan,strobe,time:clockSeconds(),warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42+structural*.42),chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82+structural*.12),bloom:Math.min(1,directedBloom+creativeBloom*.75),paletteStrength:creativePalette,palette:colorToRgb01(palette),feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62+structural*.12),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65+structural*.18),flow:Math.min(1,creativeFlow+heroFlow*.85+structural*.18),targetX:target.x/Math.max(1,width),targetY:target.y/Math.max(1,height),hueRadians:dc.hue*Math.PI/180*colorMix,saturation:1+(dc.sat-1)*colorMix,contrast:1+(dc.contrast-1)*colorMix,brightness:1+(dc.brightness-1)*colorMix,streaks:creativeStreaks,backgroundWarp:creativeBackground,flowRgb:creativeFlowRgb,temporalRgb:creativeTemporalRgb,pixel,posterize,solarize:Math.min(1,((t.solarize??0)+solarizeFx)*m),edge,glitch,blockDisplace:Math.min(1,blocks+(heroKind==='time_prism'?heroA*.30:0)),tracking,ripple,tempoWarp:tempoWarpFx,slitScan,datamosh,motionTrails,frameEcho,beatAmount:beatState.amount,beatLow:beatState.low,beatMid:beatState.mid,beatHigh:beatState.high,beatCenterX:beatState.centerX,beatCenterY:beatState.centerY,beatDirection:beatState.direction,beatFrequency:beatState.frequency,beatMode:beatState.mode,beatPhase:beatState.phase,beatPolarity:beatState.polarity,beatVariant:beatState.variant};
+}
+function renderDirectGpuPreview(){
+  if(!responsivePreview||offlineMode||!browserGpuFinalizer?.renderLayers||activeBank<0||!activeScene)return false;
+  let descriptors=[],composition={mode:0,time:clockSeconds(),progress:directedProgress(),focus:focusLayer,width,height,transition:0};
+  if(transition){
+    const p=transition.duration<=0?1:Math.min(1,(clockNowMs()-transition.start)/transition.duration),from=bankState[transition.from]?.[0],to=bankState[transition.to]?.[0];
+    const a=gpuLayerDescriptor(from,1),b=gpuLayerDescriptor(to,1);descriptors=[a,b].filter(Boolean);composition.mode=7;composition.transition=p;
+    previewAvailableLayers=(bankState[transition.from]?.length??0)+(bankState[transition.to]?.length??0);previewVisibleLayers=descriptors.length;
+    if(p>=1){banks[transition.from].forEach(v=>v.pause());activeBank=transition.to;transition=null;}
+  }else{
+    const states=bankState[activeBank]??[],budget=previewLayerBudget(states.length);previewAvailableLayers=states.length;previewVisibleLayers=budget;
+    descriptors=states.slice(0,budget).map(st=>gpuLayerDescriptor(st,1)).filter(Boolean);composition.mode=gpuCompositionMode(bankMode[activeBank]??'single');
+  }
+  if(!descriptors.length)return false;
+  const ok=browserGpuFinalizer.renderLayers(descriptors,gpuDirectPostParams(),composition);
+  if(!ok)disableBrowserGpu(browserGpuFinalizer?.failureReason||'direct GPU layer submission failed');
+  return ok;
+}
 function renderVideo(){
-  if(clockNowMs()<freezeUntil){fx.drawImage(freezeCanvas,0,0);return;}
+  if(clockNowMs()<freezeUntil){if(responsivePreview&&browserGpuFinalizer?.renderLayers)return;fx.drawImage(freezeCanvas,0,0);return;}
+  if(renderDirectGpuPreview())return;
+  previewAvailableLayers=activeBank>=0?(bankState[activeBank]?.length??0):0;previewVisibleLayers=previewAvailableLayers;
   fx.fillStyle='#000';fx.fillRect(0,0,width,height);if(activeBank<0)return;
   if(transition){const p=transition.duration<=0?1:Math.min(1,(clockNowMs()-transition.start)/transition.duration);drawBank(transition.from,1-p);const saved=activeBank;activeBank=transition.to;drawBank(transition.to,p);activeBank=saved;if(p>=1){banks[transition.from].forEach(v=>v.pause());activeBank=transition.to;transition=null;}}
   else drawBank(activeBank,1);applyPostFx();
@@ -1726,6 +1825,10 @@ function seekActive(delta=null,fraction=null){
       let wrapped=desired%st.span;if(wrapped<0)wrapped+=st.span;
       st.offlineBias=wrapped-base;
       continue;
+    }
+    if(st.source){
+      const rate=st.transform?.materialized?1:Number(st.transform?.playback_rate??1),elapsed=Math.max(0,clockSeconds()-Number(st.sceneTime??0)),base=(elapsed*rate)%st.span;
+      let current=(base+(st.liveBias??0))%st.span;if(current<0)current+=st.span;const desired=fraction==null?current+(delta??0):st.span*Math.max(0,Math.min(.95,fraction));let wrapped=desired%st.span;if(wrapped<0)wrapped+=st.span;st.liveBias=wrapped-base;continue;
     }
     let target=fraction==null?st.video.currentTime+(delta??0):st.start+st.span*Math.max(0,Math.min(.95,fraction));
     while(target<st.start)target+=st.span;while(target>=st.end)target-=st.span;st.video.currentTime=target;
@@ -1926,6 +2029,7 @@ function frame(){
   }
   lastLiveRenderAt=started;
   advanceDynamics();
+  updateLiveSourceFrames();
   renderVideo();
   if(browserGpuFinalizer&&!activeScene)browserGpuFinalizer.render(videoFx,videoFx,{time:clockSeconds()});
   drawOverlay();maintainRanges();
