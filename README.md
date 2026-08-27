@@ -2,6 +2,8 @@
 
 # tubeviz
 
+[![CI](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml)
+
 **tubeviz** turns a music track and a library of source footage into a beat-aligned,
 AI-directed music video. It can acquire and curate footage, detect scenes, analyze music,
 plan an edit, apply visual treatments, preview the result interactively, and render a
