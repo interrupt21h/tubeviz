@@ -211,7 +211,7 @@ not depend on the native renderer.
 Clone the repository and install the base package:
 
 ```bash
-git clone <repo-url> tubeviz
+git clone https://github.com/interrupt21h/tubeviz.git tubeviz
 cd tubeviz
 python -m venv .venv
 source .venv/bin/activate
