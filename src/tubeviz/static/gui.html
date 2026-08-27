@@ -5,8 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>tubeviz studio</title>
-<link rel="stylesheet" href="/static/gui.css?v=0.38.1">
-<link rel="stylesheet" href="/static/ai-metadata.css?v=0.38.1">
+<link rel="stylesheet" href="/static/gui.css?v=0.39.0">
+<link rel="stylesheet" href="/static/ai-metadata.css?v=0.39.0">
 </head>
 <body>
 <header>
@@ -52,6 +52,16 @@
 
     <article class="card workflow-card analyze-card">
       <div class="card-kicker">02 · DIRECT</div><h2>Analyze & Cut</h2>
+      <div class="analysis-preset-panel">
+        <label>Analysis preset
+          <select id="analysisPreset"><option value="balanced">Balanced</option><option value="custom">Custom / current settings</option></select>
+        </label>
+        <div class="analysis-preset-copy">
+          <div><b id="analysisPresetTitle">Balanced</b><span id="analysisPresetState" class="preset-state">preset</span></div>
+          <p id="analysisPresetDescription">General-purpose musical edit with moderate motion, layering, variety, and phrase-aware pacing.</p>
+        </div>
+        <button id="reapplyAnalysisPreset" class="quiet-button" type="button">Reapply preset</button>
+      </div>
       <div class="grid two tight">
         <label>Section bars <input id="sectionBars" type="number" value="8"></label>
         <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
@@ -401,6 +411,6 @@ https://youtu.be/..."></textarea>
   </div>
 </div>
 
-<script src="/static/gui.js?v=0.38.1"></script>
+<script src="/static/gui.js?v=0.39.0"></script>
 </body>
 </html>

@@ -8,6 +8,26 @@ let commandJobId=null;
 let commandPollTimer=null;
 let libraryClips=[];
 let aiSettings={ai_enabled:true,vision_enabled:false};
+let analysisPresets=[];
+let applyingAnalysisPreset=false;
+
+const ANALYSIS_PRESET_CONTROLS={
+  section_bars:["sectionBars","number"],max_video_layers:["maxLayers","number"],
+  transform_intensity:["transformIntensity","number"],creative_intensity:["creativeIntensity","number"],
+  composition_intensity:["compositionIntensity","number"],target_unique_clips:["targetUnique","number"],
+  novelty_weight:["noveltyWeight","number"],visual_match_weight:["visualMatchWeight","number"],
+  transition_weight:["transitionWeight","number"],trajectory_strength:["trajectoryStrength","number"],
+  anticipation_seconds:["anticipationSeconds","number"],sequence_lookahead:["sequenceLookahead","number"],
+  sequence_beam_width:["sequenceBeamWidth","number"],effect_compatibility_weight:["effectCompatibilityWeight","number"],
+  preference_weight:["preferenceWeight","number"],vector_intensity:["vectorIntensity","number"],
+  codec_glitch:["codecGlitch","value"],codec_glitch_intensity:["codecGlitchIntensity","number"],
+  min_shot_seconds:["minShot","number"],max_shot_seconds:["maxShot","number"],
+  source_excerpt_max_seconds:["maxExcerpt","number"],audio_visual_match_weight:["audioVisualWeight","number"],
+  audio_ai_window:["audioAiWindow","number"],audio_ai_hop:["audioAiHop","number"],
+  choreography:["choreography","checked"],dynamic_shots:["dynamicShots","checked"],
+  rhythm_alignment:["rhythmAlignment","checked"],creative_effects:["creativeEffects","checked"],
+  vector_effects:["vectorEffects","checked"]
+};
 
 function value(id){return $(id).value.trim()}
 function number(id){return Number($(id).value)}
@@ -20,6 +40,8 @@ const STATIC_HELP={
   timelinePath:"Directed timeline JSON produced by Analyze. Preview and Render use the currently selected timeline.",
   outputPath:"Destination video path for final rendering.",
   hfToken:"Optional Hugging Face access token for this Studio session. Leave blank to inherit server-side HF_TOKEN. The environment token value is never sent to the browser.",
+  analysisPreset:"Curated starting point for the creative/editing controls below. Presets never choose devices, credentials, models, or paid AI features. Every applied value remains editable.",
+  reapplyAnalysisPreset:"Restore the currently selected preset after manual changes.",
   sectionBars:"Preferred musical section length in bars. Larger values produce broader structural sections; dynamic shots can still cut within them.",
   maxLayers:"Maximum simultaneous video layers available to the composition director.",
   transformIntensity:"Strength of the legacy per-shot transform plan. This remains separate from the semantic creative renderer so either vocabulary can be reduced independently.",
@@ -186,6 +208,8 @@ function setStats(el,data){
 
 async function init(){
   const cfg=await api("/api/gui/config");
+  analysisPresets=Array.isArray(cfg.analysis_presets)?cfg.analysis_presets:[];
+  configureAnalysisPresets();
   $("libraryPath").value=cfg.library;
   if($("studioVersion")) $("studioVersion").textContent=`v${cfg.studio_version}`;
   const n=cfg.native;
@@ -198,6 +222,82 @@ async function init(){
   loadClips();
   refreshJobs();
   loadCliSchema();
+}
+
+function selectedAnalysisPreset(){
+  const id=$("analysisPreset")?.value||"custom";
+  return analysisPresets.find(p=>p.id===id)||null;
+}
+
+function readPresetControl(key){
+  const spec=ANALYSIS_PRESET_CONTROLS[key];
+  if(!spec)return undefined;
+  const [id,type]=spec,el=$(id);
+  if(!el)return undefined;
+  if(type==="checked")return !!el.checked;
+  if(type==="number")return Number(el.value);
+  return el.value;
+}
+
+function writePresetControl(key,val){
+  const spec=ANALYSIS_PRESET_CONTROLS[key];
+  if(!spec)return;
+  const [id,type]=spec,el=$(id);
+  if(!el)return;
+  if(type==="checked")el.checked=!!val;
+  else el.value=String(val);
+  el.dispatchEvent(new Event("input",{bubbles:true}));
+  el.dispatchEvent(new Event("change",{bubbles:true}));
+}
+
+function presetValueEqual(actual,expected){
+  if(typeof expected==="number")return Number.isFinite(Number(actual))&&Math.abs(Number(actual)-expected)<1e-7;
+  return actual===expected;
+}
+
+function updateAnalysisPresetState(){
+  if(applyingAnalysisPreset)return;
+  const preset=selectedAnalysisPreset(),title=$("analysisPresetTitle"),state=$("analysisPresetState"),description=$("analysisPresetDescription");
+  if(!title||!state||!description)return;
+  if(!preset){
+    title.textContent="Custom";state.textContent="manual";state.classList.add("modified");
+    description.textContent="Current controls are being used directly; no preset values will be restored unless you select one.";
+    return;
+  }
+  const modified=Object.entries(preset.parameters||{}).some(([key,expected])=>!presetValueEqual(readPresetControl(key),expected));
+  title.textContent=preset.label;
+  state.textContent=modified?"modified":"preset";
+  state.classList.toggle("modified",modified);
+  description.textContent=modified?`${preset.description} Manual adjustments are currently layered on top.`:preset.description;
+}
+
+function applySelectedAnalysisPreset(){
+  const preset=selectedAnalysisPreset();
+  if(!preset){updateAnalysisPresetState();return}
+  applyingAnalysisPreset=true;
+  try{Object.entries(preset.parameters||{}).forEach(([key,val])=>writePresetControl(key,val));}
+  finally{applyingAnalysisPreset=false;}
+  updateAnalysisPresetState();
+}
+
+function configureAnalysisPresets(){
+  const select=$("analysisPreset");
+  if(!select)return;
+  const previous=select.value||"balanced";
+  select.innerHTML="";
+  for(const preset of analysisPresets){
+    const option=document.createElement("option");option.value=preset.id;option.textContent=preset.label;select.appendChild(option);
+  }
+  const custom=document.createElement("option");custom.value="custom";custom.textContent="Custom / current settings";select.appendChild(custom);
+  select.value=analysisPresets.some(p=>p.id===previous)?previous:(analysisPresets.some(p=>p.id==="balanced")?"balanced":"custom");
+  select.onchange=()=>{if(select.value!=="custom")applySelectedAnalysisPreset();else updateAnalysisPresetState();};
+  $("reapplyAnalysisPreset").onclick=applySelectedAnalysisPreset;
+  for(const [,spec] of Object.entries(ANALYSIS_PRESET_CONTROLS)){
+    const el=$(spec[0]);if(!el)continue;
+    el.addEventListener("input",updateAnalysisPresetState);
+    el.addEventListener("change",updateAnalysisPresetState);
+  }
+  if(select.value!=="custom")applySelectedAnalysisPreset();else updateAnalysisPresetState();
 }
 
 async function loadAiSettings(){
@@ -287,6 +387,7 @@ $("analyzeBtn").onclick=()=>{
   audio:value("audioPath")||null,
   output:value("timelinePath")||"timeline.json",
   options:{
+    analysis_preset:value("analysisPreset")||"custom",
     semantic:aiSettings.ai_enabled&&checked("semantic"),semantic_device:value("semanticDevice"),
     audio_ai:aiSettings.ai_enabled&&checked("audioAi"),audio_ai_device:value("audioAiDevice"),
     music_ai:aiSettings.ai_enabled&&checked("musicAi"),music_ai_device:value("musicAiDevice"),music_ai_model:value("musicAiModel"),

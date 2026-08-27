@@ -130,6 +130,16 @@ struct Cue {
     double low{0.0};
     double mid{0.0};
     double high{0.0};
+    int warp_mode{4};
+    int warp_variant{0};
+    double center_x{0.5};
+    double center_y{0.5};
+    double direction{0.0};
+    double frequency{1.0};
+    double polarity{1.0};
+    double duration{0.18};
+    double attack{0.07};
+    double overshoot{0.15};
 };
 
 struct Manifest {

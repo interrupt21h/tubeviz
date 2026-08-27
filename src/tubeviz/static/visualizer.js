@@ -23,6 +23,7 @@ let strobeFx=0,tunnelFx=0,kaleidoFx=0,rippleFx=0,edgeFx=0;
 let slitScanFx=0,echoFx=0,corridorFx=0,maskFx=0,solarizeFx=0;
 let datamoshFx=0,chromaDelayFx=0,vortexFx=0,motionTrailFx=0,sliceRecursionFx=0;
 let beatWarpFx=0,beatLow=0,beatMid=0,beatHigh=0,tempoWarpFx=0;
+let beatWarpEvent=null;
 let currentVibe='neutral',currentLocalBpm=120,currentBass=0,currentPercussive=0,currentTonal=0;
 let shutterNext=0,frameCounter=0;
 const liveFx={master:1,motion:1,trails:1,glitch:1,strobe:1};
@@ -755,45 +756,69 @@ function applySliceRecursion(amount){
   fx.restore();
 }
 
-function applyBeatWarp(amount,low,mid,high){
-  if(amount<=.025)return;
-  snapshot();
-  const bass=Math.min(1,amount*low),mids=Math.min(1,amount*mid),treble=Math.min(1,amount*high);
-  const cx=width*(.50+.10*Math.sin(phase*.37));
-  const cy=height*(.52+.08*Math.cos(phase*.31));
-
-  if(bass>.02){
-    // Bass impact is a borderless full-frame breathing/push transform. Older
-    // versions clipped several scaled passes to concentric circles, which made a
-    // circular mask feel like the default visual language on every strong beat.
-    fx.save();
-    fx.globalCompositeOperation='source-over';
-    fx.globalAlpha=.045+.14*bass;
-    const sx=1+.030*bass,sy=1+.018*bass;
-    const dx=Math.sin(phase*.73)*width*.006*bass;
-    const dy=Math.cos(phase*.61)*height*.005*bass;
-    fx.translate(cx+dx,cy+dy);fx.scale(sx,sy);fx.translate(-cx,-cy);
-    fx.drawImage(scratch,0,0,width,height);
-    fx.restore();
-  }
-
-  if(mids>.02){
-    fx.save();fx.globalAlpha=.08+.22*mids;
-    const slices=13,sh=height/slices;
-    for(let i=0;i<slices;i++){
-      const y=i*sh;
-      const dx=Math.sin(i*.8+phase*10)*width*.016*mids;
-      const skew=Math.cos(i*.43+phase*6)*sh*.22*mids;
-      fx.drawImage(scratch,0,y,width,sh+1,dx,y+skew,width,sh+1);
+function currentBeatWarpState(){
+  if(beatWarpEvent){
+    const duration=Math.max(.04,Number(beatWarpEvent.duration||.18));
+    const elapsed=clockSeconds()-Number(beatWarpEvent.start||0);
+    if(elapsed>=-.002&&elapsed<=duration*1.15){
+      const q=Math.max(0,Math.min(1,elapsed/duration));
+      const attack=Math.max(.02,Math.min(.20,Number(beatWarpEvent.attack??.07)));
+      let envelope;
+      if(q<attack){const x=q/attack;envelope=x*x*(3-2*x);}
+      else{
+        const x=(q-attack)/Math.max(.001,1-attack);
+        const rebound=1+Number(beatWarpEvent.overshoot??.15)*Math.sin(x*Math.PI*2)*Math.exp(-2.2*x);
+        envelope=Math.max(0,Math.exp(-3.35*x)*rebound);
+      }
+      return {...beatWarpEvent,phase:q,envelope,amount:Math.min(1,Number(beatWarpEvent.amount||0)*envelope)};
     }
-    fx.restore();
   }
+  return {amount:beatWarpFx,low:beatLow,mid:beatMid,high:beatHigh,mode:4,variant:0,centerX:.5,centerY:.5,direction:0,frequency:1,polarity:1,phase:0,envelope:beatWarpFx>0?1:0};
+}
+function applyBeatWarp(state){
+  const amount=Number(state?.amount||0);if(amount<=.025)return;
+  snapshot();
+  const low=Math.min(1,Number(state.low||0)),mid=Math.min(1,Number(state.mid||0)),high=Math.min(1,Number(state.high||0));
+  const bass=Math.min(1,amount*(.55+.45*low)),mids=Math.min(1,amount*(.45+.55*mid)),treble=Math.min(1,amount*high);
+  const cx=width*Math.max(.08,Math.min(.92,Number(state.centerX??.5)));
+  const cy=height*Math.max(.08,Math.min(.92,Number(state.centerY??.5)));
+  const mode=Math.max(0,Math.min(7,Math.round(Number(state.mode??4))));
+  const direction=Number(state.direction||0),freq=Math.max(.5,Number(state.frequency||1)),polarity=Number(state.polarity||1)>=0?1:-1;
+  const localPhase=Number(state.phase||0),variant=Number(state.variant||0);
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.055+.18*amount;
 
+  if(mode===0||mode===1||mode===6){
+    const sign=(mode===1?-1:1)*polarity;
+    const strength=(mode===6?.060:.045)*bass*sign;
+    const sx=Math.max(.90,1+strength),sy=Math.max(.92,1+strength*(.68+.18*mid));
+    fx.translate(cx,cy);fx.scale(sx,sy);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);
+  }else if(mode===2||mode===4){
+    const slices=14+Math.floor(freq*4),sh=height/slices;
+    const dx0=Math.cos(direction),dy0=Math.sin(direction);
+    for(let i=0;i<slices;i++){
+      const y=i*sh,q=i/Math.max(1,slices-1);
+      const osc=Math.sin(q*Math.PI*2*freq+localPhase*Math.PI*2*(1.6+.25*variant));
+      const displacement=osc*width*(mode===2?.020:.014)*mids*polarity;
+      fx.drawImage(scratch,0,y,width,sh+1,dx0*displacement,y+dy0*displacement*.35,width,sh+1);
+    }
+  }else if(mode===3||mode===7){
+    const angle=(mode===7?.11:.065)*mids*polarity*(.55+.45*Math.sin(localPhase*Math.PI));
+    const scale=1+.018*bass*Math.sin(localPhase*Math.PI);
+    fx.translate(cx,cy);fx.rotate(angle);fx.scale(scale,scale);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);
+  }else if(mode===5){
+    const hw=width/2,hh=height/2,d=width*.014*amount*polarity;
+    fx.drawImage(scratch,0,0,hw,hh,-d,-d,hw+d,hh+d);
+    fx.drawImage(scratch,hw,0,hw,hh,hw+d,-d,hw-d,hh+d);
+    fx.drawImage(scratch,0,hh,hw,hh,-d,hh+d,hw+d,hh-d);
+    fx.drawImage(scratch,hw,hh,hw,hh,hw+d,hh+d,hw-d,hh-d);
+  }
+  fx.restore();
   if(treble>.02){
-    const shift=width*(.001+.009*treble);
-    applyTrueRgbChannels(scratch,scratch,scratch,shift,0,-shift,0,.06+.18*treble);
+    const shift=width*(.001+.010*treble*(.75+.25*freq));
+    applyTrueRgbChannels(scratch,scratch,scratch,shift*Math.cos(direction),shift*Math.sin(direction),-shift*Math.cos(direction),-shift*Math.sin(direction),.05+.17*treble);
   }
 }
+
 function applyTempoWarp(amount){
   if(amount<=.025)return;
   snapshot();
@@ -1543,7 +1568,8 @@ function applyPostFx(){
   applyHeroCreative(gpuCommon);
 
   applyShutter(shutter);
-  if(!gpuCommon)applyBeatWarp(beatWarpFx,beatLow,beatMid,beatHigh);
+  const beatState=currentBeatWarpState();
+  if(!gpuCommon)applyBeatWarp(beatState);
   if(!gpuCommon)applyTempoWarp(tempoWarpFx);
   if(!gpuCommon)applySlitScan(slitScan);
   if(!gpuCommon)applyMotionTrails(motionTrails);
@@ -1582,7 +1608,7 @@ function applyPostFx(){
     const heroFeedback=['depth_burst','recursive_portal'].includes(heroKind)?heroA:0,heroChroma=heroKind==='time_prism'?heroA:0;
     gpuFinished=browserGpuFinalizer.render(videoFx,sourceColorAnchor,{
       fidelity:sourceFidelityAlpha(),vignette,scanlines:scan,strobe,time:clockSeconds(),
-      warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42+beatWarpFx*.36),
+      warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42),
       chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82),
       bloom:Math.min(1,directedBloom+creativeBloom*.75),paletteStrength:creativePalette,palette:colorToRgb01(palette),
       feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65),
@@ -1590,7 +1616,10 @@ function applyPostFx(){
       hueRadians:dc.hue*Math.PI/180*colorMix,saturation:1+(dc.sat-1)*colorMix,contrast:1+(dc.contrast-1)*colorMix,brightness:1+(dc.brightness-1)*colorMix,
       streaks:creativeStreaks,backgroundWarp:creativeBackground,flowRgb:creativeFlowRgb,temporalRgb:creativeTemporalRgb,
       pixel,posterize,solarize,edge,glitch,blockDisplace:Math.min(1,blocks+(heroKind==='time_prism'?heroA*.30:0)),tracking,ripple,tempoWarp:tempoWarpFx,
-      slitScan,datamosh,motionTrails,frameEcho
+      slitScan,datamosh,motionTrails,frameEcho,
+      beatAmount:beatState.amount,beatLow:beatState.low,beatMid:beatState.mid,beatHigh:beatState.high,
+      beatCenterX:beatState.centerX,beatCenterY:beatState.centerY,beatDirection:beatState.direction,beatFrequency:beatState.frequency,
+      beatMode:beatState.mode,beatPhase:beatState.phase,beatPolarity:beatState.polarity,beatVariant:beatState.variant
     });
     if(!gpuFinished)disableBrowserGpu(browserGpuFinalizer?.failureReason||'GPU frame submission failed');
   }
@@ -1643,6 +1672,12 @@ function cue(c){const p=c.parameters||{};switch(c.action){
   case'beat_warp':
     beatWarpFx=Math.max(beatWarpFx,p.amount??.35);
     beatLow=Math.max(beatLow,p.low??0);beatMid=Math.max(beatMid,p.mid??0);beatHigh=Math.max(beatHigh,p.high??0);
+    beatWarpEvent={
+      start:Number(c.time??clockSeconds()),amount:Number(p.amount??.35),low:Number(p.low??0),mid:Number(p.mid??0),high:Number(p.high??0),
+      mode:Number(p.warp_mode_id??4),variant:Number(p.warp_variant??0),centerX:Number(p.center_x??.5),centerY:Number(p.center_y??.5),
+      direction:Number(p.direction??0),frequency:Number(p.frequency??1),polarity:Number(p.polarity??1),duration:Number(p.duration??.18),
+      attack:Number(p.attack??.07),overshoot:Number(p.overshoot??.15)
+    };
     break;
   case'video_edit_tempo_warp':
   case'tempo_shift':tempoWarpFx=Math.max(tempoWarpFx,p.amount??.4);break;

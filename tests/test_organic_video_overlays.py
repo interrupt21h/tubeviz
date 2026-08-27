@@ -35,6 +35,8 @@ def test_legacy_tiles_are_organic_lenses():
 
 def test_beat_warp_is_frequency_aware():
     js = Path("src/tubeviz/static/visualizer.js").read_text()
-    assert "function applyBeatWarp(amount,low,mid,high)" in js
+    assert "function applyBeatWarp(state)" in js
+    assert "currentBeatWarpState" in js
+    assert "beatWarpEvent" in js
     assert "video_edit_beat_warp" in js
     assert "tempoWarpFx" in js

@@ -159,6 +159,46 @@ constexpr std::string_view kShader = R"SHADER(
 //!MINIMUM 0.0
 //!MAXIMUM 2.0
 0.0
+//!PARAM beat_mode
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 7.0
+4.0
+//!PARAM beat_variant
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 16.0
+0.0
+//!PARAM beat_center_x
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.5
+//!PARAM beat_center_y
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.5
+//!PARAM beat_direction
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 6.4
+0.0
+//!PARAM beat_frequency
+//!TYPE DYNAMIC float
+//!MINIMUM 0.5
+//!MAXIMUM 3.0
+1.0
+//!PARAM beat_phase
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.0
+//!PARAM beat_polarity
+//!TYPE DYNAMIC float
+//!MINIMUM -1.0
+//!MAXIMUM 1.0
+1.0
 //!PARAM ripple
 //!TYPE DYNAMIC float
 //!MINIMUM 0.0
@@ -218,16 +258,53 @@ vec4 hook() {
                       sin(progress*4.0 + phase*.07)*drift_y*.008) * camera;
     uv = center + (uv - center - drift) / max(zoom, 0.2);
 
-    // Flow/harmonic warp. Unlike the old beat warp this has no radial/circle edge.
-    // Reactive vortex is a subtle full-frame rotation around the semantic focal
-    // point, not a circular mask/ring.
+    // Beat-local deformation topology. The timeline chooses the mode and geometry
+    // for each hit; this shader only evaluates the deterministic descriptor.
+    if (beat_warp > .0001) {
+        vec2 bc = clamp(vec2(beat_center_x, beat_center_y), vec2(.08), vec2(.92));
+        vec2 bp = uv - bc;
+        float br = length(bp);
+        float pol = beat_polarity >= 0.0 ? 1.0 : -1.0;
+        vec2 dir = vec2(cos(beat_direction), sin(beat_direction));
+        vec2 nrm = vec2(-dir.y, dir.x);
+        float ba = beat_warp * (.72 + .20*beat_low + .13*beat_mid + .08*beat_high);
+        if (beat_mode < .5) {
+            float g = ba*.070*pol*(.72+.28*(1.0-smoothstep(.15,.82,br)));
+            uv -= bp*g;
+        } else if (beat_mode < 1.5) {
+            float g = ba*.060*pol*(.72+.28*(1.0-smoothstep(.12,.86,br)));
+            uv += bp*g;
+        } else if (beat_mode < 2.5) {
+            float osc = sin(dot(bp,nrm)*28.0*beat_frequency + beat_phase*10.0 + beat_variant*.57);
+            uv += dir*osc*ba*.035*pol*(.65+.35*beat_mid);
+        } else if (beat_mode < 3.5) {
+            float a = ba*.20*pol*(1.0-smoothstep(.10,.78,br))*(.65+.35*sin(beat_phase*3.14159265));
+            float cs=cos(a), sn=sin(a); uv=bc+mat2(cs,-sn,sn,cs)*bp;
+        } else if (beat_mode < 4.5) {
+            float osc = sin(dot(bp,nrm)*24.0*beat_frequency + beat_phase*12.0 + beat_variant*.83);
+            float osc2 = cos(dot(bp,dir)*17.0*beat_frequency - beat_phase*8.0);
+            uv += dir*osc*ba*.027*pol + nrm*osc2*ba*.011;
+        } else if (beat_mode < 5.5) {
+            uv += vec2(bp.x*bp.y, (bp.x*bp.x-bp.y*bp.y)*.58)*ba*.34*pol;
+        } else if (beat_mode < 6.5) {
+            float lens=1.0-smoothstep(.04,.72,br); uv -= bp*ba*.095*pol*lens;
+        } else {
+            float a=ba*.24*pol*(1.0-smoothstep(.05,.88,br));
+            a += sin(br*34.0*beat_frequency-beat_phase*11.0+beat_variant)*ba*.035;
+            float cs=cos(a), sn=sin(a); uv=bc+mat2(cs,-sn,sn,cs)*bp;
+        }
+        uv=clamp(uv,vec2(.001),vec2(.999));
+    }
+
+    // Slower shot-level flow remains continuous underneath the event-local beat
+    // grammar. Reactive vortex is a subtle full-frame rotation around the focal point.
     float va = vortex * .018;
     if (abs(va) > .00001) {
         vec2 vv = uv - center;
         float vcs = cos(va), vsn = sin(va);
         uv = center + mat2(vcs, -vsn, vsn, vcs) * vv;
     }
-    float wave = flow*.010 + ripple*.006 + harmonic*.005 + beat_warp*.004;
+    float wave = flow*.010 + ripple*.006 + harmonic*.005;
     uv.x += sin(uv.y*24.0 + phase*3.7 + uv.x*5.0) * wave;
     uv.y += cos(uv.x*19.0 - phase*3.1 + uv.y*4.0) * wave*.72;
 
@@ -466,10 +543,18 @@ bool GpuPostProcessor::apply_spatial(
     set_param(impl_->hook, "palette_r", c.palette_r / 255.0f);
     set_param(impl_->hook, "palette_g", c.palette_g / 255.0f);
     set_param(impl_->hook, "palette_b", c.palette_b / 255.0f);
-    set_param(impl_->hook, "beat_warp", static_cast<float>(r.beat_warp));
+    set_param(impl_->hook, "beat_warp", static_cast<float>(r.beat_amount()));
     set_param(impl_->hook, "beat_low", static_cast<float>(r.beat_low));
     set_param(impl_->hook, "beat_mid", static_cast<float>(r.beat_mid));
     set_param(impl_->hook, "beat_high", static_cast<float>(r.beat_high));
+    set_param(impl_->hook, "beat_mode", static_cast<float>(r.beat_mode));
+    set_param(impl_->hook, "beat_variant", static_cast<float>(r.beat_variant));
+    set_param(impl_->hook, "beat_center_x", static_cast<float>(r.beat_center_x));
+    set_param(impl_->hook, "beat_center_y", static_cast<float>(r.beat_center_y));
+    set_param(impl_->hook, "beat_direction", static_cast<float>(r.beat_direction));
+    set_param(impl_->hook, "beat_frequency", static_cast<float>(r.beat_frequency));
+    set_param(impl_->hook, "beat_phase", static_cast<float>(r.beat_phase()));
+    set_param(impl_->hook, "beat_polarity", static_cast<float>(r.beat_polarity));
     set_param(impl_->hook, "ripple", static_cast<float>(r.ripple));
     set_param(impl_->hook, "chroma", static_cast<float>(r.chroma));
     set_param(impl_->hook, "vortex", static_cast<float>(r.vortex));

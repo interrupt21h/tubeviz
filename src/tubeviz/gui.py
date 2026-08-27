@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .analysis_presets import analysis_presets_payload, apply_analysis_preset
 from .library import ClipLibrary
 from .native_render import native_doctor
 from .codec_glitch import codec_doctor
@@ -456,6 +457,7 @@ def _job_command(request: JobRequest) -> list[str]:
     if kind == "analyze":
         if not request.audio:
             raise ValueError("audio is required")
+        o = apply_analysis_preset(o)
         command = _tubeviz_command("analyze", request.audio)
         _flag(command, "--library", library)
         _flag(command, "--output", request.output or "timeline.json")
@@ -751,6 +753,7 @@ def create_gui_app(
             "library": str(default_library),
             "native": native_doctor(),
             "codec": codec_doctor(),
+            "analysis_presets": analysis_presets_payload(),
             "huggingface": {
                 "token_from_env": bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")),
                 "source": "environment" if (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")) else None,

@@ -1,3 +1,21 @@
+# 0.39.0 — Analysis presets
+
+- Add a centralized analysis-preset catalog with **Balanced**, **High Energy**, **EDM**, **Relaxed**, **Vibrant**, **Cinematic**, **Dreamy / Atmospheric**, and **Experimental / Glitch** treatments. Presets coordinate phrase size, shot duration, clip novelty, visual matching, transition continuity, build/drop trajectory, compositing, transforms, creative/vector effects, CLAP temporal resolution, and audio↔visual matching as one coherent editing style.
+- Add an Analysis preset selector at the top of Studio's **Analyze & Cut** panel. Choosing a preset visibly updates the existing controls instead of hiding behavior behind an opaque mode, so every parameter remains inspectable and editable before analysis starts.
+- Track manual changes after a preset is applied and show a **modified** state while retaining the selected preset as the conceptual starting point. Add a one-click **Reapply preset** action to restore the curated values.
+- Keep hardware devices, model choices, credentials, and paid/optional AI enablement outside the preset system. Presets affect creative/editing behavior only and therefore cannot unexpectedly enable remote AI calls or change compute backends.
+- Serve preset definitions from the Studio configuration API and apply an explicitly requested preset server-side beneath request-specific overrides. Existing API callers that do not request a preset retain historical defaults.
+- Add regression coverage for preset catalog integrity, server-side override precedence, Studio configuration exposure, GUI controls/state wiring, and preset propagation into generated analyze commands.
+
+# 0.38.2 — Beat-local deformation choreography
+
+- Replace the single amplitude-modulated beat warp with deterministic beat-local deformation descriptors. Each beat can select push, pinch, shear, twist, wave, saddle, lens, or spiral topology from spectral balance, beat position, phrase family, accent, and section context.
+- Give every beat its own center, direction, frequency, polarity, variant, duration, attack, and rebound envelope. This prevents successive hits from collapsing into one continuously decaying global wobble while keeping the result deterministic for a given timeline.
+- Carry the same descriptor through browser preview, WebGPU uniforms, Canvas2D fallback, native manifests, native CPU rendering, and the libplacebo/Vulkan fused shader so preview and final render share the same beat grammar.
+- Separate event-local beat deformation from slower shot-level flow/ripple/tempo motion. High-frequency energy also continues to drive directional RGB displacement while low and mid energy influence the spatial deformation vocabulary.
+- Extend native cue manifests append-only with beat geometry/envelope fields while retaining defaults for older manifests, and preserve equal-time cue ordering with stable sorting.
+- Add regression coverage for deterministic-but-varied beat descriptors, spectral mode selection, WebGPU beat uniforms, Canvas fallback wiring, and native manifest propagation.
+
 # 0.38.1 — WebGPU preview validation fixes
 
 - Fix the fused WGSL compositor failing to compile in current Chrome/Dawn because `target` is a reserved WGSL keyword; rename the local depth focal-point variable without changing the shader behavior.

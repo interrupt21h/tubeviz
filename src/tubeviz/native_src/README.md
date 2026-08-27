@@ -10,7 +10,7 @@ It intentionally moves media scheduling/decode out of Chrome first:
 - multiple simultaneous source layers
 - screen/multiply/overlay/lighten software blending
 - source-level mirror/color/grayscale/noise/scanline/vignette transforms
-- music-reactive beat warp, ripple, chromatic displacement, bloom and harmonic response
+- beat-local deformation modes (push, pinch, shear, twist, wave, saddle, lens, spiral), ripple, chromatic displacement, bloom and harmonic response
 - raw RGB24 stdout for direct FFmpeg encoding; no PNG/JPEG or browser screenshot stage
 
 libplacebo is detected at build time and linked when available, but the Phase-1

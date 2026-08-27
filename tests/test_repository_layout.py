@@ -53,4 +53,4 @@ def test_screenshot_helper_supports_library_item_details():
     assert 'dimensions["clientHeight"] + 2 < dimensions["scrollHeight"]' in script
     assert "screenshots/screenshot-library-detail.png" in readme
     assert "--tab library-details" in readme
-    assert "full-height capture is now the default" in readme
+    assert "complete Library item inspector" in readme

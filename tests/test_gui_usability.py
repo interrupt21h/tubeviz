@@ -91,3 +91,18 @@ def test_library_card_actions_do_not_embed_clip_text_in_inline_handlers():
     assert 'onclick="restoreClip(' not in js
     assert 'onclick="editClipTags(' not in js
     assert 'onclick="deleteClip(' not in js
+
+
+def test_analysis_preset_selector_is_visible_and_preserves_manual_tuning():
+    html = _static("gui.html")
+    js = _static("gui.js")
+    css = _static("gui.css")
+    assert 'id="analysisPreset"' in html
+    assert 'id="reapplyAnalysisPreset"' in html
+    assert 'id="analysisPresetState"' in html
+    assert 'analysis_preset:value("analysisPreset")' in js
+    assert 'function applySelectedAnalysisPreset()' in js
+    assert 'function updateAnalysisPresetState()' in js
+    assert 'Manual adjustments are currently layered on top.' in js
+    assert '.analysis-preset-panel{' in css
+    assert '.preset-state.modified{' in css

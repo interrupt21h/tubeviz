@@ -35,10 +35,7 @@ inline double hash_noise(std::uint64_t x) {
 } // namespace
 
 void ReactiveState::decay(double fps) {
-    beat_warp *= decay_for(0.76, fps);
-    beat_low *= decay_for(0.82, fps);
-    beat_mid *= decay_for(0.80, fps);
-    beat_high *= decay_for(0.76, fps);
+    beat_elapsed += 1.0 / std::max(1.0, fps);
     ripple *= decay_for(0.90, fps);
     chroma *= decay_for(0.90, fps);
     vortex *= decay_for(0.91, fps);
@@ -48,10 +45,24 @@ void ReactiveState::decay(double fps) {
 
 void ReactiveState::apply(const Cue& cue) {
     if (cue.action == "beat_warp" || cue.action == "video_edit_beat_warp") {
-        beat_warp = std::max(beat_warp, cue.amount);
-        beat_low = std::max(beat_low, cue.low);
-        beat_mid = std::max(beat_mid, cue.mid);
-        beat_high = std::max(beat_high, cue.high);
+        // A beat is an event, not another contribution to one permanently
+        // decaying scalar. Retrigger the local envelope and replace the spatial
+        // descriptor so successive hits can change topology.
+        beat_warp = std::clamp(cue.amount, 0.0, 1.0);
+        beat_low = std::clamp(cue.low, 0.0, 1.0);
+        beat_mid = std::clamp(cue.mid, 0.0, 1.0);
+        beat_high = std::clamp(cue.high, 0.0, 1.0);
+        beat_mode = std::clamp(cue.warp_mode, 0, 7);
+        beat_variant = std::max(0, cue.warp_variant);
+        beat_center_x = std::clamp(cue.center_x, 0.08, 0.92);
+        beat_center_y = std::clamp(cue.center_y, 0.08, 0.92);
+        beat_direction = cue.direction;
+        beat_frequency = std::clamp(cue.frequency, 0.5, 3.0);
+        beat_polarity = cue.polarity >= 0.0 ? 1.0 : -1.0;
+        beat_duration = std::clamp(cue.duration, 0.04, 0.60);
+        beat_attack = std::clamp(cue.attack, 0.02, 0.20);
+        beat_overshoot = std::clamp(cue.overshoot, 0.0, 0.40);
+        beat_elapsed = 0.0;
     } else if (cue.action == "video_edit_ripple") {
         ripple = std::max(ripple, cue.amount);
     } else if (cue.action == "video_edit_chroma_delay") {
@@ -63,6 +74,27 @@ void ReactiveState::apply(const Cue& cue) {
     } else if (cue.action == "harmonic_warp") {
         harmonic = std::max(harmonic, cue.amount);
     }
+}
+
+double ReactiveState::beat_phase() const {
+    if (beat_duration <= 1e-6) return 1.0;
+    return std::clamp(beat_elapsed / beat_duration, 0.0, 1.0);
+}
+
+double ReactiveState::beat_envelope() const {
+    if (beat_warp <= 1e-6 || beat_elapsed < 0.0 || beat_elapsed > beat_duration * 1.15) return 0.0;
+    const double q = beat_phase();
+    if (q < beat_attack) {
+        const double x = q / std::max(1e-6, beat_attack);
+        return x * x * (3.0 - 2.0 * x);
+    }
+    const double x = (q - beat_attack) / std::max(1e-6, 1.0 - beat_attack);
+    const double rebound = 1.0 + beat_overshoot * std::sin(x * 6.28318530717958647692) * std::exp(-2.2 * x);
+    return std::max(0.0, std::exp(-3.35 * x) * rebound);
+}
+
+double ReactiveState::beat_amount() const {
+    return std::clamp(beat_warp * beat_envelope(), 0.0, 1.0);
 }
 
 void apply_transform(
@@ -172,44 +204,102 @@ void apply_reactive_effects(
     double phase
 ) {
     if (rgb.empty()) return;
-    const double ripple = std::clamp(
-        state.ripple + state.beat_warp * state.beat_mid * 0.35, 0.0, 1.0
-    );
-    const double bass_push = std::clamp(
-        state.beat_warp * state.beat_low + state.vortex * 0.18, 0.0, 1.0
-    );
-    if (ripple > 0.015 || bass_push > 0.015) {
+    const double beat = state.beat_amount();
+    const double beat_phase = state.beat_phase();
+    const double ripple = std::clamp(state.ripple + beat * state.beat_mid * 0.22, 0.0, 1.0);
+    const double vortex = std::clamp(state.vortex, 0.0, 1.0);
+    if (beat > 0.015 || ripple > 0.015 || vortex > 0.015) {
         const auto src = rgb;
-        const double cx = width * (0.5 + 0.05 * std::sin(phase * 0.7));
-        const double cy = height * (0.5 + 0.04 * std::cos(phase * 0.6));
-        const double zoom_x = 1.0 + .030 * bass_push;
-        const double zoom_y = 1.0 + .018 * bass_push;
-        const double drift_x = std::sin(phase*.73) * width * .006 * bass_push;
-        const double drift_y = std::cos(phase*.61) * height * .005 * bass_push;
+        const double cx = std::clamp(state.beat_center_x, 0.08, 0.92);
+        const double cy = std::clamp(state.beat_center_y, 0.08, 0.92);
+        const double direction = state.beat_direction;
+        const double dir_x = std::cos(direction), dir_y = std::sin(direction);
+        const double nrm_x = -dir_y, nrm_y = dir_x;
+        const double frequency = std::clamp(state.beat_frequency, 0.5, 3.0);
+        const double polarity = state.beat_polarity >= 0.0 ? 1.0 : -1.0;
+        const double spectral = 0.72 + 0.20 * state.beat_low + 0.13 * state.beat_mid + 0.08 * state.beat_high;
+        const double amount = beat * spectral;
 #ifdef TUBEVIZ_HAVE_OPENMP
 #pragma omp parallel for schedule(static)
 #endif
         for (int y = 0; y < height; ++y) {
-            const double wave =
-                std::sin(y * 0.055 + phase * 11.0) * width * 0.012 * ripple;
             for (int x = 0; x < width; ++x) {
-                // Borderless anisotropic breathing/push. There is deliberately no
-                // radial ring envelope or circular clipping boundary here.
-                double sx = cx + (x - cx - drift_x) / zoom_x - wave;
-                double sy = cy + (y - cy - drift_y) / zoom_y;
-                const int ix = std::clamp(static_cast<int>(sx + 0.5), 0, width - 1);
-                const int iy = std::clamp(static_cast<int>(sy + 0.5), 0, height - 1);
+                double u = static_cast<double>(x) / std::max(1, width - 1);
+                double v = static_cast<double>(y) / std::max(1, height - 1);
+                double px = u - cx, py = v - cy;
+                const double radius = std::sqrt(px * px + py * py);
+                auto smooth = [](double a, double b, double value) {
+                    const double q = std::clamp((value - a) / std::max(1e-9, b - a), 0.0, 1.0);
+                    return q * q * (3.0 - 2.0 * q);
+                };
+                if (amount > 1e-6) {
+                    switch (state.beat_mode) {
+                        case 0: {
+                            const double gain = amount * .070 * polarity * (.72 + .28 * (1.0 - smooth(.15, .82, radius)));
+                            u -= px * gain; v -= py * gain; break;
+                        }
+                        case 1: {
+                            const double gain = amount * .060 * polarity * (.72 + .28 * (1.0 - smooth(.12, .86, radius)));
+                            u += px * gain; v += py * gain; break;
+                        }
+                        case 2: {
+                            const double osc = std::sin((px * nrm_x + py * nrm_y) * 28.0 * frequency + beat_phase * 10.0 + state.beat_variant * .57);
+                            const double disp = osc * amount * .035 * polarity * (.65 + .35 * state.beat_mid);
+                            u += dir_x * disp; v += dir_y * disp; break;
+                        }
+                        case 3: {
+                            const double angle = amount * .20 * polarity * (1.0 - smooth(.10, .78, radius)) * (.65 + .35 * std::sin(beat_phase * 3.141592653589793));
+                            const double cs = std::cos(angle), sn = std::sin(angle);
+                            u = cx + cs * px - sn * py; v = cy + sn * px + cs * py; break;
+                        }
+                        case 4: {
+                            const double osc = std::sin((px * nrm_x + py * nrm_y) * 24.0 * frequency + beat_phase * 12.0 + state.beat_variant * .83);
+                            const double osc2 = std::cos((px * dir_x + py * dir_y) * 17.0 * frequency - beat_phase * 8.0);
+                            u += dir_x * osc * amount * .027 * polarity + nrm_x * osc2 * amount * .011;
+                            v += dir_y * osc * amount * .027 * polarity + nrm_y * osc2 * amount * .011;
+                            break;
+                        }
+                        case 5: {
+                            u += px * py * amount * .34 * polarity;
+                            v += (px * px - py * py) * .58 * amount * .34 * polarity;
+                            break;
+                        }
+                        case 6: {
+                            const double lens = 1.0 - smooth(.04, .72, radius);
+                            u -= px * amount * .095 * polarity * lens;
+                            v -= py * amount * .095 * polarity * lens;
+                            break;
+                        }
+                        default: {
+                            double angle = amount * .24 * polarity * (1.0 - smooth(.05, .88, radius));
+                            angle += std::sin(radius * 34.0 * frequency - beat_phase * 11.0 + state.beat_variant) * amount * .035;
+                            const double cs = std::cos(angle), sn = std::sin(angle);
+                            u = cx + cs * px - sn * py; v = cy + sn * px + cs * py; break;
+                        }
+                    }
+                }
+                if (vortex > .015) {
+                    px = u - cx; py = v - cy;
+                    const double angle = vortex * .018;
+                    const double cs = std::cos(angle), sn = std::sin(angle);
+                    u = cx + cs * px - sn * py; v = cy + sn * px + cs * py;
+                }
+                if (ripple > .015) {
+                    u += std::sin(v * 24.0 + phase * 3.7 + u * 5.0) * ripple * .006;
+                    v += std::cos(u * 19.0 - phase * 3.1 + v * 4.0) * ripple * .0043;
+                }
+                u = std::clamp(u, 0.0, 1.0); v = std::clamp(v, 0.0, 1.0);
+                const int ix = std::clamp(static_cast<int>(u * (width - 1) + 0.5), 0, width - 1);
+                const int iy = std::clamp(static_cast<int>(v * (height - 1) + 0.5), 0, height - 1);
                 const auto di = static_cast<std::size_t>((y * width + x) * 3);
                 const auto si = static_cast<std::size_t>((iy * width + ix) * 3);
-                rgb[di] = src[si];
-                rgb[di + 1] = src[si + 1];
-                rgb[di + 2] = src[si + 2];
+                rgb[di] = src[si]; rgb[di + 1] = src[si + 1]; rgb[di + 2] = src[si + 2];
             }
         }
     }
 
     const double chroma = std::clamp(
-        state.chroma + state.beat_warp * state.beat_high * 0.55, 0.0, 1.0
+        state.chroma + beat * state.beat_high * 0.55, 0.0, 1.0
     );
     if (chroma > 0.015) {
         const auto src = rgb;

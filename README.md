@@ -720,7 +720,7 @@ Typical source treatments include:
 - RGB displacement;
 - bloom, streaks, scanlines, noise, and vignette;
 - palette and contrast direction;
-- beat-reactive push and motion;
+- beat-local deformation with musically selected push, pinch, shear, twist, wave, saddle, lens, and spiral motion;
 - multi-source composition and crossfades.
 
 The goal is to preserve source identity while creating motion and continuity that follow
@@ -1368,6 +1368,12 @@ tubeviz native doctor
 tubeviz codec doctor
 tubeviz audio-ai doctor
 tubeviz music-ai doctor
+```
+
+Studio screenshots can be generated with the Playwright helper. For example, to capture the complete Library item inspector:
+
+```bash
+python scripts/screenshot_studio.py --tab library-details --full-details
 ```
 
 Release history and implementation-specific changes are documented in

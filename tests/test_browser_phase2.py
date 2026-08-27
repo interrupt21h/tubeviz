@@ -73,6 +73,12 @@ def test_webgpu_shader_and_texture_contract_matches_current_validation_rules():
     assert "createRenderPipelineAsync" in core
     assert "getCompilationInfo" in core
     assert "uncapturederror" in core
+    assert "beatWarpUv" in core
+    assert "p13: vec4f" in core
+    assert "size:224" in core
+    visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
+    assert "currentBeatWarpState" in visualizer
+    assert "beatMode:beatState.mode" in visualizer
 
 
 def test_browser_source_decode_config_validation():

@@ -72,7 +72,7 @@ def _timeline(tmp_path: Path) -> DirectedTimeline:
         VisualCue(
             time=.5,
             action="beat_warp",
-            parameters={"amount": .8, "low": .9, "mid": .2, "high": .1},
+            parameters={"amount": .8, "low": .9, "mid": .2, "high": .1, "warp_mode_id": 6, "warp_variant": 3, "center_x": .62, "center_y": .41, "direction": 1.2, "frequency": 1.7, "polarity": -1, "duration": .2, "attack": .05, "overshoot": .25},
         ),
         VisualCue(time=1.0, action="video_edit_ripple", parameters={"amount": .5}),
         VisualCue(time=1.5, action="unsupported_browser_only", parameters={"amount": 1}),
@@ -93,6 +93,11 @@ def test_native_manifest_contains_shot_layers_and_supported_music_cues(tmp_path:
     assert "normalized/a.mp4" in text
     assert "LAYER" in text and "screen" in text
     assert "CUE\t0.500000000\tbeat_warp" in text
+    beat_line = next(line for line in text.splitlines() if line.startswith("CUE\t0.500000000\tbeat_warp"))
+    fields = beat_line.split("\t")
+    assert fields[7:9] == ["6", "3"]
+    assert fields[9:11] == ["0.620000000", "0.410000000"]
+    assert fields[13] == "-1.000000000"
     assert "CUE\t1.000000000\tvideo_edit_ripple" in text
     assert "unsupported_browser_only" not in text
 

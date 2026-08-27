@@ -14,6 +14,9 @@ struct Params {
   p8: vec4f, // glitch, block displacement, tracking, ripple
   p9: vec4f, // tempo warp, slit scan, datamosh, motion trails
   p10: vec4f, // frame echo, reserved, reserved, reserved
+  p11: vec4f, // beat amount, low, mid, high
+  p12: vec4f, // beat center x/y, direction, frequency
+  p13: vec4f, // beat mode, local phase, polarity, variant
 };
 @group(0) @binding(0) var samp: sampler;
 @group(0) @binding(1) var effectTex: texture_2d<f32>;
@@ -35,6 +38,44 @@ fn hueRotate(c:vec3f,a:f32)->vec3f{
   let q=dot(c,vec3f(.211,-.523,.312));
   let ca=cos(a);let sa=sin(a);let ni=ii*ca-q*sa;let nq=ii*sa+q*ca;
   return vec3f(y+.956*ni+.621*nq,y-.272*ni-.647*nq,y-1.106*ni+1.703*nq);
+}
+fn beatWarpUv(uv0:vec2f)->vec2f{
+  let amount=clamp(params.p11.x,0.0,1.0);
+  if(amount<=.001){return uv0;}
+  let center=clamp(params.p12.xy,vec2f(.08),vec2f(.92));
+  let direction=params.p12.z;let frequency=max(.5,params.p12.w);
+  let mode=params.p13.x;let localPhase=clamp(params.p13.y,0.0,1.0);
+  let polarity=select(-1.0,1.0,params.p13.z>=0.0);let variant=params.p13.w;
+  let low=clamp(params.p11.y,0.0,1.0);let mid=clamp(params.p11.z,0.0,1.0);let high=clamp(params.p11.w,0.0,1.0);
+  var p=uv0-center;var out=uv0;let r=length(p);
+  let dir=vec2f(cos(direction),sin(direction));let normal=vec2f(-dir.y,dir.x);
+  let spectral=.72+.20*low+.13*mid+.08*high;let a=amount*spectral;
+  if(mode<.5){
+    out-=p*a*.070*polarity*(.72+.28*(1.0-smoothstep(.15,.82,r)));
+  }else if(mode<1.5){
+    out+=p*a*.060*polarity*(.72+.28*(1.0-smoothstep(.12,.86,r)));
+  }else if(mode<2.5){
+    let osc=sin(dot(p,normal)*28.0*frequency+localPhase*10.0+variant*.57);
+    out+=dir*osc*a*.035*polarity*(.65+.35*mid);
+  }else if(mode<3.5){
+    let angle=a*.20*polarity*(1.0-smoothstep(.10,.78,r))*(.65+.35*sin(localPhase*3.14159265));
+    let cs=cos(angle);let sn=sin(angle);out=center+mat2x2f(cs,-sn,sn,cs)*p;
+  }else if(mode<4.5){
+    let osc=sin(dot(p,normal)*24.0*frequency+localPhase*12.0+variant*.83);
+    out+=dir*osc*a*.027*polarity;
+    out+=normal*cos(dot(p,dir)*17.0*frequency-localPhase*8.0)*a*.011;
+  }else if(mode<5.5){
+    let saddle=vec2f(p.x*p.y,(p.x*p.x-p.y*p.y)*.58);
+    out+=saddle*a*.34*polarity;
+  }else if(mode<6.5){
+    let lens=(1.0-smoothstep(.04,.72,r));
+    out-=p*a*.095*polarity*lens;
+  }else{
+    let angle=a*.24*polarity*(1.0-smoothstep(.05,.88,r));
+    angle+=sin(r*34.0*frequency-localPhase*11.0+variant)*a*.035;
+    let cs=cos(angle);let sn=sin(angle);out=center+mat2x2f(cs,-sn,sn,cs)*p;
+  }
+  return satUv(out);
 }
 @fragment fn fs_main(in:VSOut)->@location(0) vec4f{
   var uv=satUv(in.uv);let time=params.p1.x;
@@ -58,7 +99,10 @@ fn hueRotate(c:vec3f,a:f32)->vec3f{
     let cell=floor(uv*vec2f(14.0,9.0));let h=fract(sin(dot(cell,vec2f(12.9898,78.233))+floor(time*11.0))*43758.5453);
     let gate=step(1.0-clamp(params.p8.y,0.0,1.0)*.22,h);uv+=vec2f(h-.5,.5-h)*gate*params.p8.y*.035;
   }
-  // Full-frame wave/flow/ripple/tempo deformation: no hard circular boundaries.
+  // Continuous scene flow remains separate from beat-local topology. Each musical
+  // hit first applies its own deterministic deformation event, then the slower
+  // shot-level flow/ripple/tempo field is layered underneath it.
+  uv=beatWarpUv(uv);
   let wave=vec2f(sin(uv.y*13.0+time*1.7),cos(uv.x*11.0-time*1.3));
   let ripple=vec2f(sin(uv.y*24.0-time*3.1),cos(uv.x*21.0+time*2.4))*params.p8.w*.0045;
   let tempo=vec2f(sin((uv.y+time*.08)*18.0),cos((uv.x-time*.06)*16.0))*params.p9.x*.0035;
@@ -153,6 +197,9 @@ function gpuParams(params,width,height){
     Number(params.glitch||0),Number(params.blockDisplace||0),Number(params.tracking||0),Number(params.ripple||0),
     Number(params.tempoWarp||0),Number(params.slitScan||0),Number(params.datamosh||0),Number(params.motionTrails||0),
     Number(params.frameEcho||0),0,0,0,
+    Number(params.beatAmount||0),Number(params.beatLow||0),Number(params.beatMid||0),Number(params.beatHigh||0),
+    Number(params.beatCenterX??.5),Number(params.beatCenterY??.5),Number(params.beatDirection||0),Number(params.beatFrequency||1),
+    Number(params.beatMode??4),Number(params.beatPhase||0),Number(params.beatPolarity??1),Number(params.beatVariant||0),
   ]);
 }
 
@@ -160,7 +207,7 @@ export class BrowserGpuRendererCore{
   constructor(canvas,device,context,format,pipeline){
     this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
-    this.uniformBuffer=device.createBuffer({size:176,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+    this.uniformBuffer=device.createBuffer({size:224,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
     // Device loss is asynchronous. Surface it to the facade so live preview can
     // immediately restore the Canvas2D compositor instead of freezing on the last
     // successfully submitted GPU frame.

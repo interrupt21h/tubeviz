@@ -14,6 +14,17 @@ struct ReactiveState {
     double beat_low{0.0};
     double beat_mid{0.0};
     double beat_high{0.0};
+    int beat_mode{4};
+    int beat_variant{0};
+    double beat_center_x{0.5};
+    double beat_center_y{0.5};
+    double beat_direction{0.0};
+    double beat_frequency{1.0};
+    double beat_polarity{1.0};
+    double beat_duration{0.18};
+    double beat_attack{0.07};
+    double beat_overshoot{0.15};
+    double beat_elapsed{1.0};
     double ripple{0.0};
     double chroma{0.0};
     double vortex{0.0};
@@ -22,6 +33,9 @@ struct ReactiveState {
 
     void decay(double fps);
     void apply(const Cue& cue);
+    double beat_phase() const;
+    double beat_envelope() const;
+    double beat_amount() const;
 };
 
 void apply_transform(

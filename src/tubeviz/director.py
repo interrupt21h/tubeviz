@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from .beat_warp import beat_warp_parameters
 from .lookahead import LookaheadConfig, plan_lookahead_cues
 from .memory import WorldStateBuilder, create_visual_memory
 from .models import DirectedTimeline, EventType, TrackAnalysis, VisualCue
@@ -12,13 +13,19 @@ from .motifs import MotifConfig, discover_motifs
 def _reactive_cues(track: TrackAnalysis) -> list[VisualCue]:
     cues: list[VisualCue] = []
     section_world = 0
+    beat_index = 0
+    sections = sorted(track.sections, key=lambda section: section.start)
+
+    def section_at(time: float):
+        for section in reversed(sections):
+            if section.start <= time < section.end:
+                return section
+        return sections[-1] if sections and time >= sections[-1].start else None
 
     for event in track.events:
         if event.type == EventType.BEAT:
+            beat_index += 1
             accent = float(event.payload.get("accent", event.strength))
-            low = float(event.payload.get("low", 0.0))
-            mid = float(event.payload.get("mid", 0.0))
-            high = float(event.payload.get("high", 0.0))
             cues.append(
                 VisualCue(
                     time=event.time,
@@ -34,15 +41,12 @@ def _reactive_cues(track: TrackAnalysis) -> list[VisualCue]:
                     VisualCue(
                         time=event.time,
                         action="beat_warp",
-                        parameters={
-                            "amount": min(1.0, 0.18 + 0.68 * accent),
-                            "low": low,
-                            "mid": mid,
-                            "high": high,
-                            "pulse": float(event.payload.get("pulse", 0.0)),
-                            "local_bpm": float(event.payload.get("local_bpm", track.tempo_bpm)),
-                            "dominant_band": event.payload.get("dominant_band", "mid"),
-                        },
+                        parameters=beat_warp_parameters(
+                            event,
+                            beat_index=beat_index,
+                            tempo_bpm=track.tempo_bpm,
+                            section=section_at(event.time),
+                        ),
                     )
                 )
 

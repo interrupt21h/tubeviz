@@ -315,7 +315,8 @@ def test_bass_beat_warp_has_no_concentric_ring_mask():
     assert "rr2" not in reactive_block
     assert "0.0484" not in reactive_block
     assert "125.0 * distance" not in reactive_block
-    assert "bass_push" in reactive_block
+    assert "state.beat_mode" in reactive_block
+    assert "state.beat_amount()" in reactive_block
 
 
 def test_clean_color_shots_are_neutral_more_than_eighty_percent_of_time():

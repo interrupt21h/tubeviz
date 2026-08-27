@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .beat_warp import beat_warp_parameters
 from .models import DirectedTimeline, EventType, VisualCue
 
 
@@ -37,13 +38,14 @@ def attach_edit_plan(timeline: DirectedTimeline, config: EditConfig | None = Non
 
     beat_ord = 0
     for event in timeline.track.events:
+        if event.type == EventType.BEAT:
+            beat_ord += 1
         section = section_at(event.time)
         if section is None or section.index not in scene_sections:
             continue
         energy = max(0.0, min(1.0, section.energy))
 
         if event.type == EventType.BEAT:
-            beat_ord += 1
             accent = max(0.0, min(1.0, float(event.payload.get("accent", event.strength))))
             low = max(0.0, min(1.0, float(event.payload.get("low", 0.0))))
             mid = max(0.0, min(1.0, float(event.payload.get("mid", 0.0))))
@@ -52,21 +54,16 @@ def attach_edit_plan(timeline: DirectedTimeline, config: EditConfig | None = Non
             bpm = max(1.0, float(event.payload.get("local_bpm", section.local_tempo_bpm)))
             beat_seconds = 60.0 / bpm
 
-            # One frequency-aware beat warp replaces the old generic "everything
-            # punches the same way" behavior. Low transients act radially, mids
-            # shear, highs split/chromatic-shimmer.
             cues.append(VisualCue(
                 time=event.time,
                 action="video_edit_beat_warp",
-                parameters={
-                    "amount": min(1.0, intensity * (0.18 + 0.58 * accent)),
-                    "low": low,
-                    "mid": mid,
-                    "high": high,
-                    "pulse": pulse,
-                    "duration": min(0.30, max(0.05, beat_seconds * 0.32)),
-                    "local_bpm": bpm,
-                },
+                parameters=beat_warp_parameters(
+                    event,
+                    beat_index=beat_ord,
+                    tempo_bpm=timeline.track.tempo_bpm,
+                    section=section,
+                    amount=min(1.0, intensity * (0.18 + 0.58 * accent)),
+                ),
             ))
 
             if low + mid + high <= 1e-9:

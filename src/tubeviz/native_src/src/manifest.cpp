@@ -243,6 +243,16 @@ Manifest load_manifest(const std::string& path) {
             cue.low = as_double(f, 4);
             cue.mid = as_double(f, 5);
             cue.high = as_double(f, 6);
+            cue.warp_mode = static_cast<int>(as_double(f, 7, 4));
+            cue.warp_variant = static_cast<int>(as_double(f, 8, 0));
+            cue.center_x = as_double(f, 9, 0.5);
+            cue.center_y = as_double(f, 10, 0.5);
+            cue.direction = as_double(f, 11, 0.0);
+            cue.frequency = as_double(f, 12, 1.0);
+            cue.polarity = as_double(f, 13, 1.0);
+            cue.duration = as_double(f, 14, 0.18);
+            cue.attack = as_double(f, 15, 0.07);
+            cue.overshoot = as_double(f, 16, 0.15);
             manifest.cues.push_back(std::move(cue));
         } else {
             throw std::runtime_error("unknown manifest record at line " + std::to_string(line_no) + ": " + f[0]);
@@ -252,7 +262,7 @@ Manifest load_manifest(const std::string& path) {
     std::sort(manifest.shots.begin(), manifest.shots.end(), [](const Shot& a, const Shot& b) {
         return a.time < b.time;
     });
-    std::sort(manifest.cues.begin(), manifest.cues.end(), [](const Cue& a, const Cue& b) {
+    std::stable_sort(manifest.cues.begin(), manifest.cues.end(), [](const Cue& a, const Cue& b) {
         return a.time < b.time;
     });
     if (manifest.duration <= 0.0) throw std::runtime_error("manifest duration must be positive");

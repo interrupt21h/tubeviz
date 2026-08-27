@@ -171,7 +171,7 @@ def _media_resolution_candidates(
     return result
 
 
-def _cue_fields(cue) -> tuple[float, str, float, float, float, float] | None:
+def _cue_fields(cue) -> tuple[float, str, float, float, float, float, int, int, float, float, float, float, float, float, float, float] | None:
     supported = {
         "beat_warp",
         "video_edit_beat_warp",
@@ -191,6 +191,16 @@ def _cue_fields(cue) -> tuple[float, str, float, float, float, float] | None:
         float(p.get("low", 0.0)),
         float(p.get("mid", 0.0)),
         float(p.get("high", 0.0)),
+        int(p.get("warp_mode_id", 4)),
+        int(p.get("warp_variant", 0)),
+        float(p.get("center_x", 0.5)),
+        float(p.get("center_y", 0.5)),
+        float(p.get("direction", 0.0)),
+        float(p.get("frequency", 1.0)),
+        float(p.get("polarity", 1.0)),
+        float(p.get("duration", 0.18)),
+        float(p.get("attack", 0.07)),
+        float(p.get("overshoot", 0.15)),
     )
 
 
@@ -446,7 +456,10 @@ def write_native_manifest(
         fields = _cue_fields(cue)
         if fields is None:
             continue
-        t, action, amount, low, mid, high = fields
+        (
+            t, action, amount, low, mid, high, mode, variant, center_x, center_y,
+            direction, frequency, polarity, duration, attack, overshoot,
+        ) = fields
         lines.append(
             "\t".join(
                 [
@@ -457,6 +470,16 @@ def write_native_manifest(
                     f"{low:.9f}",
                     f"{mid:.9f}",
                     f"{high:.9f}",
+                    str(mode),
+                    str(variant),
+                    f"{center_x:.9f}",
+                    f"{center_y:.9f}",
+                    f"{direction:.9f}",
+                    f"{frequency:.9f}",
+                    f"{polarity:.9f}",
+                    f"{duration:.9f}",
+                    f"{attack:.9f}",
+                    f"{overshoot:.9f}",
                 ]
             )
         )
