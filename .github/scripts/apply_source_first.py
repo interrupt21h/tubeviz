@@ -16,14 +16,24 @@ def apply_embedded_source_patch() -> None:
 def update_stale_transform_test() -> None:
     path = Path('tests/test_transforms.py')
     text = path.read_text()
-    old = '    assert a.glitch > 0\n'
+    old = (
+        '    assert a.glitch > 0\n'
+        '    assert a.ripple > 0\n'
+        '    assert a.posterize > 0\n'
+        '    assert a.edge > 0\n'
+        '    assert a.strobe > 0\n'
+        '    assert a.shutter > 0\n'
+    )
     new = (
-        '    # Destructive accents may be intentionally absent on ordinary '
-        'source-first shots.\n'
+        '    # Source-first scheduling keeps subtle motion available while destructive\n'
+        '    # accents are deliberately absent on many ordinary shots.\n'
         '    assert a.vignette > 0\n'
+        '    assert 0.0 <= a.ripple <= 1.0\n'
+        '    destructive = (a.glitch, a.posterize, a.edge, a.strobe, a.shutter)\n'
+        '    assert not all(value > 0.0 for value in destructive)\n'
     )
     if old not in text:
-        raise RuntimeError('stale transform assertion not found')
+        raise RuntimeError('stale destructive-effect assertion block not found')
     path.write_text(text.replace(old, new, 1))
 
 
