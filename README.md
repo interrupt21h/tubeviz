@@ -11,9 +11,10 @@ rendering a final encoded video.
 ## Sample videos
 
 Complete videos produced with tubeviz:
+
+- [Tubeviz - Moby - God Moving Over the Face of the Waters](https://www.youtube.com/watch?v=wKmsWvEj3No)
 - [Tubeviz - Fred Again - Delilah (Pull Me Out of This)](https://www.youtube.com/watch?v=EWGSQ80k_uY)
 - [Tubevis - Fred Again - Delilah (Pull Me Out of This) - v2](https://www.youtube.com/watch?v=x9o7jhfRlUw)
-- [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
 - [Tubeviz - Night Tapes - Drifting](https://youtu.be/Z5qFih1OKeo)
 - [Tubeviz — Andrew Bayer feat. Alison May — Open End Resource (OCULA Remix)](https://youtu.be/8eqdMmgcG_4)
 - [Tubeviz — Step It Up — Stereo MC's](https://youtu.be/nrYzxJzPYbE)
