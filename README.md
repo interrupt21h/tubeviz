@@ -1,8 +1,10 @@
-![tubeviz Studio — Create](screenshots/screenshot-create.png)
-
 # tubeviz
 
 [![CI](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/interrupt21h/tubeviz/actions/workflows/ci.yml)
+
+> AI-directed, beat-synchronized music video generation from a curated video library.
+
+![tubeviz demo — Dream](dream.webp)
 
 **tubeviz** turns a music track and a library of source footage into a beat-aligned,
 AI-directed music video. It can acquire and curate footage, detect scenes, analyze music,
@@ -17,7 +19,6 @@ timeline format.
 
 Complete videos produced with tubeviz:
 
-![tubeviz sample video — Dream](dream.webp)
 
 - [Tubeviz - Empire of the Sun - Walking on a Dream](https://youtu.be/ST6Ei9oyc7w)
 - [Tubeviz - ZHU - Good Life](https://youtu.be/7VG3kWzJvZI)
