@@ -138,9 +138,7 @@ jobs:
             libavformat-dev \
             libavcodec-dev \
             libavutil-dev \
-            libswscale-dev \
-            libplacebo-dev \
-            libvulkan-dev
+            libswscale-dev
 
       - name: Configure native renderer
         run: |
@@ -148,7 +146,7 @@ jobs:
             -S src/tubeviz/native_src \
             -B build/native \
             -DCMAKE_BUILD_TYPE=Release \
-            -DTUBEVIZ_WITH_PLACEBO=ON
+            -DTUBEVIZ_WITH_PLACEBO=OFF
 
       - name: Build native renderer
         run: cmake --build build/native --parallel 2
