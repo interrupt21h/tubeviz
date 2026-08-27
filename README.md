@@ -15,6 +15,13 @@ The project supports both a browser-based **Studio** workflow and a full command
 interface. Both operate on the same persistent media library and the same directed
 timeline format.
 
+> [!NOTE]
+> **A hack that got out of hand**
+>
+> Tubeviz started as a small experiment in automatically cutting video to music. It has since grown into a full video-analysis, composition, and rendering system. The project is still experimental and evolving quickly, so interfaces, configuration, and behavior may change between releases.
+
+
+
 ## Sample videos
 
 Complete videos produced with tubeviz:
