@@ -35,39 +35,100 @@ replanned, materialized, or rendered without repeating the complete ingest and a
 workflow.
 
 ```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "#0b1020",
+    "primaryColor": "#151b2f",
+    "primaryTextColor": "#e8edf7",
+    "primaryBorderColor": "#5ee7df",
+    "lineColor": "#71809f",
+    "secondaryColor": "#1a2036",
+    "tertiaryColor": "#11172a",
+    "clusterBkg": "#0d1325",
+    "clusterBorder": "#34405f",
+    "fontFamily": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "fontSize": "15px"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "htmlLabels": true,
+    "nodeSpacing": 48,
+    "rankSpacing": 58,
+    "diagramPadding": 18
+  }
+}}%%
+
 flowchart TB
-    subgraph Inputs
-        BRIEF["Visual brief or search terms"]
-        URLS["Curated YouTube URLs"]
-        AUDIO["Music track"]
+
+    subgraph INPUTS["INPUTS"]
+        BRIEF["✦ Visual brief<br/>or search terms"]
+        URLS["▶ Curated<br/>YouTube URLs"]
+        AUDIO["♫ Music track"]
     end
 
-    subgraph Tubeviz
-        STUDIO["Studio and CLI"]
-        INGEST["Acquisition and ingest"]
-        LIB[("Persistent clip library")]
-        PLAN["Music analysis and visual direction"]
-        TL[("Directed timeline JSON")]
-        PREVIEW["Interactive preview"]
-        RENDER["Browser or native renderer"]
+    subgraph TV["TUBEVIZ"]
+        STUDIO["Studio + CLI"]
+
+        INGEST["Acquisition<br/>& ingest"]
+        LIB[("Persistent<br/>clip library")]
+
+        PLAN["Music analysis<br/>& visual direction"]
+        TL[("Directed<br/>timeline JSON")]
+
+        PREVIEW["Interactive<br/>preview"]
+        RENDER["Browser or<br/>native renderer"]
+
+        AUDIOPATH["♫ Audio source"]
     end
+
+    OUTPUT["◆ Encoded music video"]
 
     BRIEF --> STUDIO
     URLS --> STUDIO
     AUDIO --> STUDIO
+
     STUDIO --> INGEST
     INGEST --> LIB
-    AUDIO --> PLAN
-    LIB --> PLAN
+
     STUDIO --> PLAN
+    LIB --> PLAN
+
     PLAN --> TL
+
     TL --> PREVIEW
     TL --> RENDER
-    LIB --> PREVIEW
-    LIB --> RENDER
-    AUDIO --> PREVIEW
-    AUDIO --> RENDER
-    RENDER --> OUTPUT["Encoded music video"]
+
+    LIB -.-> PREVIEW
+    LIB -.-> RENDER
+
+    AUDIO --> AUDIOPATH
+    AUDIOPATH -.-> PLAN
+    AUDIOPATH -.-> PREVIEW
+    AUDIOPATH -.-> RENDER
+
+    RENDER --> OUTPUT
+
+    classDef input fill:#131a2d,stroke:#6878a5,stroke-width:1.5px,color:#e7ebf5;
+    classDef process fill:#172036,stroke:#5ee7df,stroke-width:1.8px,color:#f4f8ff;
+    classDef intelligence fill:#221b3d,stroke:#b794f6,stroke-width:2px,color:#f5efff;
+    classDef storage fill:#101d29,stroke:#38bdf8,stroke-width:2px,color:#eaf9ff;
+    classDef render fill:#252035,stroke:#f0abfc,stroke-width:2px,color:#fff1ff;
+    classDef output fill:#103026,stroke:#6ee7b7,stroke-width:2.5px,color:#eafff5;
+    classDef auxiliary fill:#111827,stroke:#64748b,stroke-width:1.3px,color:#cbd5e1;
+
+    class BRIEF,URLS,AUDIO input;
+    class STUDIO,INGEST,PREVIEW process;
+    class PLAN intelligence;
+    class LIB,TL storage;
+    class RENDER render;
+    class OUTPUT output;
+    class AUDIOPATH auxiliary;
+
+    style INPUTS fill:#0d1325,stroke:#34405f,stroke-width:1px,color:#94a3b8;
+    style TV fill:#0d1325,stroke:#435170,stroke-width:1.5px,color:#cbd5e1;
+
+    linkStyle default stroke:#71809f,stroke-width:1.5px;
 ```
 
 Tubeviz combines several kinds of information when constructing an edit:
