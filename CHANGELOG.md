@@ -6,7 +6,8 @@
 - Skip the hidden vector-deformation stack during responsive preview, render at most one visible vector family, cache edge/flow probes longer, and suspend vector work completely while frame cost remains high. Full/offline rendering retains the complete vector graph.
 - Approximate CPU-only local symmetry, hero/structural, temporal and deformation treatments through the fused WebGPU parameters (or cheap Canvas beat/ripple/glitch punctuation when WebGPU is unavailable) instead of executing every full-resolution Canvas path on every live frame.
 - Mark readback-heavy probe canvases with `willReadFrequently`, use smaller responsive vector/flow/RGB/posterization probes, and request desynchronized display Canvas contexts to reduce GPU↔CPU synchronization stalls.
-- Bound live overlay refractions to three onset fragments and two motif refractions per displayed frame while still updating the complete logical overlay state.
+- Bound live overlay refractions adaptively and source them from the pre-WebGPU composition to avoid synchronizing the GPU swapchain back into Canvas2D; overlay copies disappear entirely while the preview is over budget.
+- Degrade expensive multi-source compositions gracefully under load: responsive flow/default compositions cap companion layers, mosaic/strip grammars use cheaper live approximations, and an overloaded preview temporarily displays the primary layer only. Full/offline rendering retains the exact composition graph.
 - Expand the preview HUD with the active renderer, responsive/full profile, current internal resolution, measured display fps and main-thread frame cost so preview degradation is visible instead of mysterious.
 
 # 0.40.1 — Source-first effect scheduling

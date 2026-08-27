@@ -343,10 +343,18 @@ function drawBank(bankIndex,alpha){
   const states=bankState[bankIndex];if(!states.length)return;let mode=bankMode[bankIndex]??'single';
   if(mode==='pip')mode='flow';
   const order=states.map((_,i)=>(i+focusLayer)%states.length);
+  // A live preview that is already missing its frame budget should stop paying
+  // for secondary full-frame video draws. The timeline/compositor state remains
+  // intact and secondary layers return automatically once the EMA recovers.
+  if(responsivePreview&&previewFrameEma>30){
+    drawLayer(fx,states[order[0]],{x:0,y:0,w:width,h:height},alpha,'source-over');
+    return;
+  }
 
   if(mode==='flow'&&states.length>1){
-    drawLayer(fx,states[order[0]],{x:0,y:0,w:width,h:height},alpha,'source-over');
-    for(let oi=1;oi<order.length;oi++)drawFlowLayer(states[order[oi]],oi,alpha);
+    const flowOrder=responsivePreview?order.slice(0,2):order;
+    drawLayer(fx,states[flowOrder[0]],{x:0,y:0,w:width,h:height},alpha,'source-over');
+    for(let oi=1;oi<flowOrder.length;oi++)drawFlowLayer(states[flowOrder[oi]],oi,alpha);
     return;
   }
 
@@ -357,9 +365,10 @@ function drawBank(bankIndex,alpha){
     drawLayer(fx,state,{x:0,y:0,w:width,h:height},alpha*.82,state.layer.blend_mode||'source-over');fx.restore();return;
   }
   if(mode==='mosaic'&&states.length>1){
-    const cols=3,rows=2,cw=width/cols,ch=height/rows,shift=Math.floor(phase*.22);
+    const cols=responsivePreview?2:3,rows=2,cw=width/cols,ch=height/rows,shift=Math.floor(phase*.22);
     for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
-      const cell=row*cols+col,idx=order[(cell+shift)%order.length]; if(cell%3===0)continue;
+      const cell=row*cols+col,idx=order[(cell+shift)%order.length];
+      if((responsivePreview&&cell===0)||(!responsivePreview&&cell%3===0))continue;
       fx.save();fx.beginPath();fx.rect(col*cw,row*ch,cw+.5,ch+.5);fx.clip();drawLayer(fx,states[idx],{x:0,y:0,w:width,h:height},alpha*.86,states[idx].layer.blend_mode||'source-over');fx.restore();
     }return;
   }
@@ -368,7 +377,7 @@ function drawBank(bankIndex,alpha){
   }
 
   if(mode==='strips'&&states.length>1){
-    const strips=10;
+    const strips=responsivePreview?6:10;
     for(let n=0;n<strips;n++){
       const idx=(n+focusLayer)%states.length,base=width/strips;
       const x=n*base+Math.sin(phase*.8+n*.7)*base*.18;
@@ -378,8 +387,9 @@ function drawBank(bankIndex,alpha){
     return;
   }
 
-  for(let oi=0;oi<order.length;oi++){
-    const idx=order[oi],state=states[idx];
+  const drawOrder=responsivePreview?order.slice(0,2):order;
+  for(let oi=0;oi<drawOrder.length;oi++){
+    const idx=drawOrder[oi],state=states[idx];
     let blend=oi===0?'source-over':state.layer.blend_mode,a=alpha;
     if(mode==='luma'&&oi>0){blend=oi%2?'screen':'multiply';a*=.58;}
     drawLayer(fx,state,{x:0,y:0,w:width,h:height},a,blend);
@@ -1799,6 +1809,11 @@ function drawOverlay(){
   if(activeBank<0)return;
   ctx.save();ctx.globalCompositeOperation='screen';
 
+  // Responsive preview samples the pre-WebGPU 2D composition for overlays.
+  // Pulling the WebGPU swapchain back into Canvas2D can serialize GPU/CPU work.
+  const overlaySource=responsivePreview?videoFx:finalVideoCanvas();
+  const fragmentBudget=responsivePreview?(previewFrameEma>30?0:(previewFrameEma>22?1:2)):Number.POSITIVE_INFINITY;
+  const motifBudget=responsivePreview?(previewFrameEma>26?0:1):Number.POSITIVE_INFINITY;
   // Onset fragments are now fluid refraction droplets. They never draw a
   // rectangular video patch, which eliminates the intermittent square overlays.
   let fragmentDrawn=0;
@@ -1806,7 +1821,7 @@ function drawOverlay(){
     const f=fragments[i];
     f.x+=f.vx*.006;f.y+=f.vy*.006;f.life*=.962;
     if(f.life<.03){fragments.splice(i,1);continue;}
-    if(responsivePreview&&fragmentDrawn>=3)continue;
+    if(fragmentDrawn>=fragmentBudget)continue;
     fragmentDrawn++;
 
     const cx=f.x*width,cy=f.y*height;
@@ -1824,7 +1839,7 @@ function drawOverlay(){
 
     const zoom=1.02+f.life*.07;
     ctx.translate(cx,cy);ctx.rotate((f.vx-f.vy)*.08);ctx.scale(zoom,zoom);ctx.translate(-cx,-cy);
-    ctx.drawImage(finalVideoCanvas(),f.vx*55,f.vy*55,width,height);
+    ctx.drawImage(overlaySource,f.vx*55,f.vy*55,width,height);
     ctx.restore();
   }
 
@@ -1833,7 +1848,7 @@ function drawOverlay(){
     m.pulse=(m.pulse??0)*.93;
     m.visualStrength=(m.visualStrength??0)*.94;
     if(m.visualStrength<=.025){mi++;continue;}
-    if(responsivePreview&&motifDrawn>=2){mi++;continue;}
+    if(motifDrawn>=motifBudget){mi++;continue;}
     motifDrawn++;
 
     const strength=Math.min(1,m.visualStrength);
@@ -1857,7 +1872,7 @@ function drawOverlay(){
 
     const zoom=1.04+.10*strength;
     ctx.translate(x,y);ctx.rotate(Math.sin(drift*.43)*.12*strength);ctx.scale(zoom,zoom);ctx.translate(-x,-y);
-    ctx.drawImage(finalVideoCanvas(),0,0,width,height);
+    ctx.drawImage(overlaySource,0,0,width,height);
     ctx.restore();
     mi++;
   }

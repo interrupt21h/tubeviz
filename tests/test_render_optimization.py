@@ -63,8 +63,12 @@ def test_responsive_preview_throttles_expensive_live_paths():
     assert "if(responsivePreview&&previewFrameEma>36)return" in js
     assert "const effects=responsivePreview?visible.slice(0,budget)" in js
     assert "if(!gpuCommon&&!previewLite)" in js
-    assert "fragmentDrawn>=3" in js
-    assert "motifDrawn>=2" in js
+    assert "fragmentBudget=responsivePreview" in js
+    assert "motifBudget=responsivePreview" in js
+    assert "overlaySource=responsivePreview?videoFx:finalVideoCanvas()" in js
+    assert "previewFrameEma>30" in js
+    assert "flowOrder=responsivePreview?order.slice(0,2):order" in js
+    assert "const strips=responsivePreview?6:10" in js
 
 
 def test_progress_is_reported_from_in_page_sequence_not_each_frame_rpc():
