@@ -3,9 +3,9 @@ import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene
 import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js';
 // SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
-const ctx = canvas.getContext('2d', {alpha:true});
+const ctx = canvas.getContext('2d', {alpha:true,desynchronized:true});
 const videoFx = document.querySelector('#video-fx');
-const fx = videoFx.getContext('2d', {alpha:false});
+const fx = videoFx.getContext('2d', {alpha:false,desynchronized:true});
 const gpuCanvas = document.querySelector('#gpu-fx');
 const audio = document.querySelector('#audio');
 const meta = document.querySelector('#meta');
@@ -33,7 +33,11 @@ const query=new URLSearchParams(location.search);
 const offlineMode=query.get('offline')==='1';
 const browserGpuMode=(query.get('gpu')||'auto').toLowerCase();
 const previewQuality=(query.get('preview')||'auto').toLowerCase();
-let adaptivePreviewHeight=720,renderPixelRatio=1,previewFrameEma=0,previewLastResize=0;
+const previewProfile=(query.get('preview_profile')||'responsive').toLowerCase();
+const responsivePreview=!offlineMode&&previewProfile!=='full';
+const adaptivePreviewSteps=responsivePreview?[360,480,540,720]:[540,720,1080];
+let adaptivePreviewHeight=responsivePreview?540:720,renderPixelRatio=1,previewFrameEma=0,previewLastResize=0;
+let previewFrameIntervalEma=0,previewMeasuredFps=0,previewLastStatus=0,lastLiveRenderAt=0;
 let gpuInit={finalizer:null,reason:'not initialized'};
 try{
   gpuInit=await createBrowserGpuFinalizer(gpuCanvas,browserGpuMode,{preferWorker:offlineMode});
@@ -43,11 +47,21 @@ try{
 }
 let browserGpuFinalizer=gpuInit.finalizer;
 let browserGpuActive=!!browserGpuFinalizer;
+function previewTargetFps(){
+  if(offlineMode||!responsivePreview)return 60;
+  if(previewFrameEma>52)return 20;
+  if(previewFrameEma>34)return 24;
+  return 30;
+}
 function updateRendererStatus(extra=''){
   if(!renderMeta)return;
   const renderer=browserGpuActive?'WebGPU':'Canvas2D';
   const reason=String(extra||gpuInit.reason||'');
-  renderMeta.textContent=`Preview renderer: ${renderer}${reason?` · ${reason}`:''}`;
+  const profile=responsivePreview?'responsive':'full';
+  const size=width>0&&height>0?`${width}×${height}`:'resolving';
+  const fps=previewMeasuredFps>0?`${previewMeasuredFps.toFixed(0)} fps`:`≤${previewTargetFps()} fps`;
+  const cpu=previewFrameEma>0?` · CPU ${previewFrameEma.toFixed(1)} ms`:'';
+  renderMeta.textContent=`Preview renderer: ${renderer} · ${profile} · ${size} · ${fps}${cpu}${reason?` · ${reason}`:''}`;
 }
 function disableBrowserGpu(reason){
   const old=browserGpuFinalizer;
@@ -73,7 +87,10 @@ function rand(){
   return offlineRandState/4294967296;
 }
 
-function offscreen(alpha=false){const c=document.createElement('canvas');return [c,c.getContext('2d',{alpha})];}
+function offscreen(alpha=false,readFrequently=false){
+  const c=document.createElement('canvas');
+  return[c,c.getContext('2d',{alpha,desynchronized:true,willReadFrequently:readFrequently})];
+}
 const [history,historyCtx]=offscreen(false);
 const [scratch,scratchCtx]=offscreen(true);
 // Full-resolution pre-FX color reference. Effects may reshape luminance/geometry,
@@ -83,24 +100,24 @@ const [sourceColorAnchor,sourceColorAnchorCtx]=offscreen(false);
 const [freezeCanvas,freezeCtx]=offscreen(false);
 const [holdCanvas,holdCtx]=offscreen(false);
 const [edgeCanvas,edgeCtx]=offscreen(true);
-const [posterCanvas,posterCtx]=offscreen(false);
+const [posterCanvas,posterCtx]=offscreen(false,true);
 const [delayA,delayACtx]=offscreen(false);
 const [delayB,delayBCtx]=offscreen(false);
 const [delayC,delayCCtx]=offscreen(false);
 const [exportCanvas,exportCtx]=offscreen(false);
-const [vectorSample,vectorSampleCtx]=offscreen(false);
+const [vectorSample,vectorSampleCtx]=offscreen(false,true);
 const [vectorScratch,vectorScratchCtx]=offscreen(true);
-const [motionProbe,motionProbeCtx]=offscreen(false);
-const [motionPrev,motionPrevCtx]=offscreen(false);
-const [flowProbe,flowProbeCtx]=offscreen(false);
-const [flowPrev,flowPrevCtx]=offscreen(false);
-const [depthProbe,depthProbeCtx]=offscreen(false);
+const [motionProbe,motionProbeCtx]=offscreen(false,true);
+const [motionPrev,motionPrevCtx]=offscreen(false,true);
+const [flowProbe,flowProbeCtx]=offscreen(false,true);
+const [flowPrev,flowPrevCtx]=offscreen(false,true);
+const [depthProbe,depthProbeCtx]=offscreen(false,true);
 const [subjectMask,subjectMaskCtx]=offscreen(true);
 const [subjectLayer,subjectLayerCtx]=offscreen(true);
 // Low-resolution true RGB channel compositor.  Channel separation is deliberately
 // performed on real R/G/B samples instead of hue-rotated full-frame copies, which
 // previously pushed many unrelated clips toward fluorescent magenta.
-const [channelSample,channelSampleCtx]=offscreen(false);
+const [channelSample,channelSampleCtx]=offscreen(false,true);
 const [channelOut,channelOutCtx]=offscreen(false);
 const delayBuffers=[delayA,delayB,delayC];
 const vectorGeometryCache=new Map();
@@ -115,7 +132,8 @@ let delayWrite=0,delayCount=0,historyReady=false;
 function desiredRenderSize(){
   if(offlineMode)return{width:Math.max(1,Math.floor(innerWidth)),height:Math.max(1,Math.floor(innerHeight)),ratio:1};
   let targetHeight=adaptivePreviewHeight;
-  if(previewQuality==='540p')targetHeight=540;
+  if(previewQuality==='360p')targetHeight=360;
+  else if(previewQuality==='540p')targetHeight=540;
   else if(previewQuality==='720p')targetHeight=720;
   else if(previewQuality==='1080p')targetHeight=1080;
   else if(previewQuality==='native')targetHeight=Math.max(1,Math.floor(innerHeight*Math.min(1.5,globalThis.devicePixelRatio||1)));
@@ -130,32 +148,41 @@ function resize(){
   for(const c of [history,scratch,sourceColorAnchor,freezeCanvas,holdCanvas,edgeCanvas,subjectLayer]){c.width=width;c.height=height;}
   for(const c of delayBuffers){c.width=Math.max(1,Math.floor(width/2));c.height=Math.max(1,Math.floor(height/2));}
   exportCanvas.width=width;exportCanvas.height=height;
-  vectorSample.width=128;vectorSample.height=72;
+  vectorSample.width=responsivePreview?96:128;vectorSample.height=responsivePreview?54:72;
   vectorScratch.width=width;vectorScratch.height=height;
-  motionProbe.width=64;motionProbe.height=36;motionPrev.width=64;motionPrev.height=36;
-  motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,64,36);
-  flowProbe.width=64;flowProbe.height=36;flowPrev.width=64;flowPrev.height=36;
-  flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,64,36);
+  const probeW=responsivePreview?48:64,probeH=responsivePreview?27:36;
+  motionProbe.width=probeW;motionProbe.height=probeH;motionPrev.width=probeW;motionPrev.height=probeH;
+  motionPrevCtx.fillStyle='#000';motionPrevCtx.fillRect(0,0,probeW,probeH);
+  flowProbe.width=probeW;flowProbe.height=probeH;flowPrev.width=probeW;flowPrev.height=probeH;
+  flowPrevCtx.fillStyle='#000';flowPrevCtx.fillRect(0,0,probeW,probeH);
   depthProbe.width=16;depthProbe.height=9;subjectMask.width=16;subjectMask.height=9;creativeDepthCache={frame:-1,cells:[],cols:16,rows:9};
-  channelSample.width=channelOut.width=Math.max(120,Math.min(280,Math.floor(width/6)));
-  channelSample.height=channelOut.height=Math.max(68,Math.round(channelSample.width*height/Math.max(1,width)));
+  const channelMax=responsivePreview?200:280;
+  channelSample.width=channelOut.width=Math.max(100,Math.min(channelMax,Math.floor(width/6)));
+  channelSample.height=channelOut.height=Math.max(56,Math.round(channelSample.width*height/Math.max(1,width)));
   vectorGeometryCache.clear();vectorEchoHistory.length=0;
   vectorEdgeCache={frame:-1,paths:[],salientPaths:[],points:[],salient:[]};
   vectorFlowCache={frame:-1,field:[],cols:0,rows:0,ready:false};
-  posterCanvas.width=Math.max(96,Math.min(320,Math.floor(width/5)));
-  posterCanvas.height=Math.max(54,Math.min(180,Math.floor(height/5)));
+  const posterMaxW=responsivePreview?240:320,posterMaxH=responsivePreview?135:180;
+  posterCanvas.width=Math.max(96,Math.min(posterMaxW,Math.floor(width/5)));
+  posterCanvas.height=Math.max(54,Math.min(posterMaxH,Math.floor(height/5)));
   delayWrite=0;delayCount=0;historyReady=false;
   historyCtx.fillStyle='#000';historyCtx.fillRect(0,0,width,height);
+  updateRendererStatus();
 }
 addEventListener('resize',resize); resize();
 function updateAdaptivePreview(frameMs){
-  if(offlineMode||previewQuality!=='auto'||!Number.isFinite(frameMs))return;
-  previewFrameEma=previewFrameEma?previewFrameEma*.92+frameMs*.08:frameMs;
-  const now=performance.now();if(now-previewLastResize<2500)return;
-  let next=adaptivePreviewHeight;
-  if(previewFrameEma>37&&adaptivePreviewHeight>540)next=adaptivePreviewHeight>=1080?720:540;
-  else if(previewFrameEma<18&&adaptivePreviewHeight<1080)next=adaptivePreviewHeight<=540?720:1080;
-  if(next!==adaptivePreviewHeight){adaptivePreviewHeight=next;previewLastResize=now;resize();}
+  if(offlineMode||!Number.isFinite(frameMs))return;
+  previewFrameEma=previewFrameEma?previewFrameEma*.86+frameMs*.14:frameMs;
+  const now=performance.now();
+  if(previewQuality!=='auto')return;
+  const minimumWait=responsivePreview?900:2500;
+  if(now-previewLastResize<minimumWait)return;
+  let index=Math.max(0,adaptivePreviewSteps.indexOf(adaptivePreviewHeight));
+  let next=index;
+  if(previewFrameEma>52)next=Math.max(0,index-2);
+  else if(previewFrameEma>30)next=Math.max(0,index-1);
+  else if(previewFrameEma<15&&now-previewLastResize>6000)next=Math.min(adaptivePreviewSteps.length-1,index+1);
+  if(next!==index){adaptivePreviewHeight=adaptivePreviewSteps[next];previewLastResize=now;resize();}
 }
 
 const timeline=await fetch('/api/timeline').then(r=>r.json());
@@ -1189,7 +1216,8 @@ function orderedComponentPaths(binary,mags,w,h){
   return paths;
 }
 function extractVectorEdges(force=false){
-  if(!force&&vectorEdgeCache.frame>=0&&frameCounter-vectorEdgeCache.frame<4)return vectorEdgeCache;
+  const cacheFrames=responsivePreview?8:4;
+  if(!force&&vectorEdgeCache.frame>=0&&frameCounter-vectorEdgeCache.frame<cacheFrames)return vectorEdgeCache;
   const w=vectorSample.width,h=vectorSample.height;
   vectorSampleCtx.drawImage(videoFx,0,0,w,h);
   let data;try{data=vectorSampleCtx.getImageData(0,0,w,h).data;}catch{return vectorEdgeCache;}
@@ -1249,7 +1277,8 @@ function drawContours(effect,semantic=false){
 }
 function luminanceImage(imageData){const d=imageData.data,out=new Float32Array(imageData.width*imageData.height);for(let i=0,p=0;i<out.length;i++,p+=4)out[i]=.2126*d[p]+.7152*d[p+1]+.0722*d[p+2];return out;}
 function updateOpticalFlow(force=false){
-  if(!force&&vectorFlowCache.frame>=0&&frameCounter-vectorFlowCache.frame<2)return vectorFlowCache;
+  const cacheFrames=responsivePreview?4:2;
+  if(!force&&vectorFlowCache.frame>=0&&frameCounter-vectorFlowCache.frame<cacheFrames)return vectorFlowCache;
   const w=flowProbe.width,h=flowProbe.height;flowProbeCtx.drawImage(videoFx,0,0,w,h);
   let curImg,prevImg;try{curImg=flowProbeCtx.getImageData(0,0,w,h);prevImg=flowPrevCtx.getImageData(0,0,w,h);}catch{return vectorFlowCache;}
   if(!vectorFlowInitialized){flowPrevCtx.putImageData(curImg,0,0);vectorFlowInitialized=true;vectorFlowCache={frame:frameCounter,field:[],cols:0,rows:0,ready:false};return vectorFlowCache;}
@@ -1438,6 +1467,7 @@ function applyVectorDisplacement(effect){
 }
 function renderVectorSceneGraph(){
   const allEffects=activeScene?.direction?.vector_effects;if(!Array.isArray(allEffects)||!allEffects.length)return;
+  if(responsivePreview&&previewFrameEma>36)return;
   // Compatibility guard for v0.22/v0.23 timelines: older plans scheduled many
   // visible vector families simultaneously. Keep all invisible deformation,
   // but select only the strongest family vocabulary at render time.
@@ -1445,7 +1475,11 @@ function renderVectorSceneGraph(){
   const priority={dream:['vector_echo','contours','semantic_outline','portal'],liquid:['flow_ribbons','vector_echo','flow_particles','portal'],analog:['perspective_grid','contours','semantic_outline'],fracture:['delaunay_fracture','voronoi','portal'],hyper:['flow_ribbons','delaunay_fracture','flow_particles','perspective_grid'],prismatic:['voronoi','flow_ribbons','portal'],cinematic:['semantic_outline','contours','perspective_grid','portal']}[family]??['contours'];
   const hidden=allEffects.filter(e=>e.visible===false),visible=allEffects.filter(e=>e.visible!==false&&!(legacyTreatment()&&e.kind==='portal'&&vectorRand(e.seed,71)<.90));
   visible.sort((a,b)=>{const ai=priority.indexOf(a.kind),bi=priority.indexOf(b.kind);return(ai<0?99:ai)-(bi<0?99:bi);});
-  const budget=(role==='payoff'&&sectionEnergy>.76)?2:1,effects=[...visible.slice(0,budget),...hidden];
+  const budget=responsivePreview?1:((role==='payoff'&&sectionEnergy>.76)?2:1);
+  // Hidden vector deformations are valuable for final fidelity but are the most
+  // expensive part of live Canvas geometry. Responsive preview renders only the
+  // strongest visible family and leaves the full hidden stack to full/offline mode.
+  const effects=responsivePreview?visible.slice(0,budget):[...visible.slice(0,budget),...hidden];
   // Edge extraction is shared by all geometry derived from the current frame.
   if(effects.some(e=>['contours','semantic_outline','vector_echo','delaunay_fracture','voronoi'].includes(e.kind)))extractVectorEdges();
   for(const effect of effects){
@@ -1551,24 +1585,27 @@ function applyPostFx(){
   const creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion);
   const creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m)*(legacy&&sceneSparseGate(89)<.70?0:1);
   const gpuCommon=!!browserGpuFinalizer;
+  const previewLite=responsivePreview;
 
   // Directed color happens on the composed video, then temporal processing
   // evolves continuously over the shot rather than toggling static filters.
   if(!gpuCommon){
     applyDirectedColor();
-    applySpectralDisplacement(Math.min(1,directedWarp+beatWarpFx*.20));
-    applyPrismaticShift(Math.min(1,directedChroma+(activeScene?.direction?.color?.chromatic_aberration??0)*.25));
-    if(directedBloom>.02){snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.08+.28*directedBloom;if('filter'in fx)fx.filter=`brightness(${1+.45*directedBloom}) saturate(${1+.35*directedBloom})`;fx.drawImage(scratch,0,0,width,height);fx.restore();}
+    if(!previewLite){
+      applySpectralDisplacement(Math.min(1,directedWarp+beatWarpFx*.20));
+      applyPrismaticShift(Math.min(1,directedChroma+(activeScene?.direction?.color?.chromatic_aberration??0)*.25));
+      if(directedBloom>.02){snapshot();fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.08+.28*directedBloom;if('filter'in fx)fx.filter=`brightness(${1+.45*directedBloom}) saturate(${1+.35*directedBloom})`;fx.drawImage(scratch,0,0,width,height);fx.restore();}
+    }
   }
 
-  // WebGPU keeps temporal history resident on the GPU. Only the rare Canvas2D
-  // mask path still needs the half-resolution CPU delay ring when GPU is active.
-  const needsCpuDelay=!gpuCommon||mask>.025;
+  // Responsive live preview avoids CPU delay/history readback entirely. Full
+  // preview and offline rendering retain the exact compatibility paths.
+  const needsCpuDelay=!previewLite&&(!gpuCommon||mask>.025);
   if(needsCpuDelay)captureDelayFrame();
 
   // v0.33 creative-state pipeline: source-derived and semantic-aware effects run
   // before legacy punctuation FX, so later glitches can accent rather than erase them.
-  if(!gpuCommon){
+  if(!gpuCommon&&!previewLite){
     applyPaletteCreative(creativePalette);
     applySourceTextureCreative(creativeBloom,creativeStreaks);
     applyDepthParallaxCreative(creativeDepth);
@@ -1581,33 +1618,43 @@ function applyPostFx(){
     applyFrameEcho(creativeTemporal*.70);
     applyRecursiveFeedbackCreative(creativeFeedback);
   }
-  // Local symmetry and hero effects are intentionally rare and remain on the
-  // compatibility compositor until their semantics can be expressed exactly.
-  applyLocalSymmetryCreative(creativeSymmetry);
-  applyHeroCreative(gpuCommon);
+  // Full/offline mode keeps exact CPU-local semantics. Responsive mode expresses
+  // their musical energy through the fused GPU/cheap Canvas approximation below.
+  if(!previewLite){
+    applyLocalSymmetryCreative(creativeSymmetry);
+    applyHeroCreative(gpuCommon);
+    applyShutter(shutter);
+  }
 
-  applyShutter(shutter);
   const beatState=currentBeatWarpState();
-  if(!gpuCommon)applyBeatWarp(beatState);
-  if(!gpuCommon)applyTempoWarp(tempoWarpFx);
-  if(!gpuCommon)applySlitScan(slitScan);
-  if(!gpuCommon)applyMotionTrails(motionTrails);
-  if(!gpuCommon)applyFrameEcho(frameEcho);
-  if(!gpuCommon)applyRipple(ripple);
-  if(!gpuCommon)applyBlockDisplace(blocks);
-  if(!gpuCommon)applyDatamosh(datamosh);
-  if(!gpuCommon)applyVhsTracking(tracking);
-  applyTiles(tiles);
-  applyMirrorCorridor(corridor);
-  applyKaleidoscope(kaleido);
-  applyVortex(vortex);
-  applyTunnel(tunnel);
-  applySliceRecursion(sliceRecursion);
-  applyMaskWipe(mask);
-  if(!gpuCommon){applyPosterize(posterize);applySolarize(solarize);applyEdge(edge);applyPixel(pixel);}
-  if(!gpuCommon){applyChromaDelay(chromaDelay);applyRgbSplit(rgb);}
-  if(!gpuCommon)applyGlitch(glitch);
-  if(!gpuCommon)applyFeedback(feedback);
+  if(!gpuCommon){
+    const liveBeat=previewLite?{...beatState,amount:beatState.amount*.72}:beatState;
+    applyBeatWarp(liveBeat);
+  }
+  if(!gpuCommon&&!previewLite)applyTempoWarp(tempoWarpFx);
+  if(!gpuCommon&&!previewLite)applySlitScan(slitScan);
+  if(!gpuCommon&&!previewLite)applyMotionTrails(motionTrails);
+  if(!gpuCommon&&!previewLite)applyFrameEcho(frameEcho);
+  if(!gpuCommon){
+    const liveRipple=previewLite?Math.min(1,ripple+.18*kaleido+.22*vortex+.18*tunnel+.14*sliceRecursion):ripple;
+    applyRipple(liveRipple);
+  }
+  if(!gpuCommon&&!previewLite)applyBlockDisplace(blocks);
+  if(!gpuCommon&&!previewLite)applyDatamosh(datamosh);
+  if(!gpuCommon&&!previewLite)applyVhsTracking(tracking);
+  if(!previewLite){
+    applyTiles(tiles);
+    applyMirrorCorridor(corridor);
+    applyKaleidoscope(kaleido);
+    applyVortex(vortex);
+    applyTunnel(tunnel);
+    applySliceRecursion(sliceRecursion);
+    applyMaskWipe(mask);
+  }
+  if(!gpuCommon&&!previewLite){applyPosterize(posterize);applySolarize(solarize);applyEdge(edge);applyPixel(pixel);}
+  if(!gpuCommon&&!previewLite){applyChromaDelay(chromaDelay);applyRgbSplit(rgb);}
+  if(!gpuCommon)applyGlitch(previewLite?glitch*.70:glitch);
+  if(!gpuCommon)applyFeedback(previewLite?feedback*.65:feedback);
 
   // Final raster color guard remains before vector accents so their designed
   // colors survive. WebGPU, when available, handles the simple full-frame
@@ -1625,13 +1672,14 @@ function applyPostFx(){
     const heroTemporal=['subject_echo','flow_melt','time_prism'].includes(heroKind)?heroA:0;
     const heroFlow=heroKind==='flow_melt'?heroA:0,heroDepth=heroKind==='depth_burst'?heroA:0;
     const heroFeedback=['depth_burst','recursive_portal'].includes(heroKind)?heroA:0,heroChroma=heroKind==='time_prism'?heroA:0;
+    const previewStructural=previewLite?Math.min(1,kaleido*.35+vortex*.45+tunnel*.35+sliceRecursion*.30+corridor*.20+creativeSymmetry*.24):0;
     gpuFinished=browserGpuFinalizer.render(videoFx,sourceColorAnchor,{
       fidelity:sourceFidelityAlpha(),vignette,scanlines:scan,strobe,time:clockSeconds(),
-      warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42),
-      chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82),
+      warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42+previewStructural*.42),
+      chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82+previewStructural*.12),
       bloom:Math.min(1,directedBloom+creativeBloom*.75),paletteStrength:creativePalette,palette:colorToRgb01(palette),
-      feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65),
-      flow:Math.min(1,creativeFlow+heroFlow*.85),targetX:target.x/Math.max(1,width),targetY:target.y/Math.max(1,height),
+      feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62+previewStructural*.12),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65+previewStructural*.18),
+      flow:Math.min(1,creativeFlow+heroFlow*.85+previewStructural*.18),targetX:target.x/Math.max(1,width),targetY:target.y/Math.max(1,height),
       hueRadians:dc.hue*Math.PI/180*colorMix,saturation:1+(dc.sat-1)*colorMix,contrast:1+(dc.contrast-1)*colorMix,brightness:1+(dc.brightness-1)*colorMix,
       streaks:creativeStreaks,backgroundWarp:creativeBackground,flowRgb:creativeFlowRgb,temporalRgb:creativeTemporalRgb,
       pixel,posterize,solarize,edge,glitch,blockDisplace:Math.min(1,blocks+(heroKind==='time_prism'?heroA*.30:0)),tracking,ripple,tempoWarp:tempoWarpFx,
@@ -1753,10 +1801,13 @@ function drawOverlay(){
 
   // Onset fragments are now fluid refraction droplets. They never draw a
   // rectangular video patch, which eliminates the intermittent square overlays.
+  let fragmentDrawn=0;
   for(let i=fragments.length-1;i>=0;i--){
     const f=fragments[i];
     f.x+=f.vx*.006;f.y+=f.vy*.006;f.life*=.962;
     if(f.life<.03){fragments.splice(i,1);continue;}
+    if(responsivePreview&&fragmentDrawn>=3)continue;
+    fragmentDrawn++;
 
     const cx=f.x*width,cy=f.y*height;
     const radius=(.018+f.size*.55)*Math.min(width,height)*(0.7+f.life*.3);
@@ -1777,11 +1828,13 @@ function drawOverlay(){
     ctx.restore();
   }
 
-  let mi=0;
+  let mi=0,motifDrawn=0;
   for(const m of motifObjects.values()){
     m.pulse=(m.pulse??0)*.93;
     m.visualStrength=(m.visualStrength??0)*.94;
     if(m.visualStrength<=.025){mi++;continue;}
+    if(responsivePreview&&motifDrawn>=2){mi++;continue;}
+    motifDrawn++;
 
     const strength=Math.min(1,m.visualStrength);
     const size=(.08+.04*(m.mutation??0)+.025*m.pulse)*Math.min(width,height);
@@ -1827,25 +1880,43 @@ function primaryLiveVideo(){
   if(activeBank<0)return null;
   return bankState[activeBank]?.[0]?.video??null;
 }
+function runLiveFrame(now=performance.now()){
+  const targetMs=1000/previewTargetFps();
+  const elapsed=lastLiveRenderAt>0?now-lastLiveRenderAt:targetMs;
+  const delay=responsivePreview?Math.max(0,targetMs-elapsed):0;
+  if(delay>1){
+    setTimeout(()=>{liveFrameScheduled=false;frame();},delay);
+  }else{
+    liveFrameScheduled=false;frame();
+  }
+}
 function scheduleLiveFrame(){
   if(offlineMode||liveFrameScheduled)return;
   liveFrameScheduled=true;
   const v=primaryLiveVideo();
   if(v&&!v.paused&&typeof v.requestVideoFrameCallback==='function'){
-    v.requestVideoFrameCallback(()=>{liveFrameScheduled=false;frame();});
+    v.requestVideoFrameCallback(now=>runLiveFrame(now));
   }else if(audio.paused){
     setTimeout(()=>{liveFrameScheduled=false;frame();},100);
   }else{
-    requestAnimationFrame(()=>{liveFrameScheduled=false;frame();});
+    requestAnimationFrame(now=>runLiveFrame(now));
   }
 }
 function frame(){
   const started=performance.now();
+  if(lastLiveRenderAt>0){
+    const interval=Math.max(1,started-lastLiveRenderAt);
+    previewFrameIntervalEma=previewFrameIntervalEma?previewFrameIntervalEma*.88+interval*.12:interval;
+    previewMeasuredFps=1000/previewFrameIntervalEma;
+  }
+  lastLiveRenderAt=started;
   advanceDynamics();
   renderVideo();
   if(browserGpuFinalizer&&!activeScene)browserGpuFinalizer.render(videoFx,videoFx,{time:clockSeconds()});
   drawOverlay();maintainRanges();
   updateAdaptivePreview(performance.now()-started);
+  const now=performance.now();
+  if(now-previewLastStatus>600){previewLastStatus=now;updateRendererStatus();}
   scheduleLiveFrame();
 }
 

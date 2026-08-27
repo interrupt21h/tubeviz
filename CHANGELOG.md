@@ -1,3 +1,14 @@
+# 0.40.2 — Responsive web preview
+
+- Make Studio's browser preview **responsive by default** while leaving deterministic offline/browser rendering and final native output unchanged. A new Preview mode selector keeps full-fidelity live behavior available explicitly when exact browser-effect inspection matters more than interaction speed.
+- Cap responsive live preview at roughly 30 fps, with automatic 24/20 fps backoff when the main-thread compositor is overloaded. `requestVideoFrameCallback()` remains the source clock, but 60 fps footage no longer forces tubeviz to run the entire preview compositor 60 times per second.
+- Start adaptive preview at 540p and use a 360p/480p/540p/720p ladder. Slow frames downshift quickly and recovery upshifts conservatively; the previous automatic path could climb to 1080p and never fall below 540p.
+- Skip the hidden vector-deformation stack during responsive preview, render at most one visible vector family, cache edge/flow probes longer, and suspend vector work completely while frame cost remains high. Full/offline rendering retains the complete vector graph.
+- Approximate CPU-only local symmetry, hero/structural, temporal and deformation treatments through the fused WebGPU parameters (or cheap Canvas beat/ripple/glitch punctuation when WebGPU is unavailable) instead of executing every full-resolution Canvas path on every live frame.
+- Mark readback-heavy probe canvases with `willReadFrequently`, use smaller responsive vector/flow/RGB/posterization probes, and request desynchronized display Canvas contexts to reduce GPU↔CPU synchronization stalls.
+- Bound live overlay refractions to three onset fragments and two motif refractions per displayed frame while still updating the complete logical overlay state.
+- Expand the preview HUD with the active renderer, responsive/full profile, current internal resolution, measured display fps and main-thread frame cost so preview degradation is visible instead of mysterious.
+
 # 0.40.1 — Source-first effect scheduling
 
 - Restore the pre-v0.40 source-first visual balance by making destructive/stylized `VideoTransform` effects true scheduled accents instead of non-zero treatments on nearly every shot. Native/WebGPU parity remains intact; ordinary shots now serialize near-zero/off values and selected accent/hero shots serialize the full effect values.

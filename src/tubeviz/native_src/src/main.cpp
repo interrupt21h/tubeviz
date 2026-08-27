@@ -44,9 +44,9 @@ Args parse_args(int argc, char** argv) {
         else if (key == "--hwdecode") args.hwdecode = value();
         else if (key == "--version") {
 #ifdef TUBEVIZ_HAVE_PLACEBO
-            std::cout << "tubeviz-native-render 0.40.1 ffmpeg+vulkan/libplacebo";
+            std::cout << "tubeviz-native-render 0.40.2 ffmpeg+vulkan/libplacebo";
 #else
-            std::cout << "tubeviz-native-render 0.40.1 ffmpeg";
+            std::cout << "tubeviz-native-render 0.40.2 ffmpeg";
 #endif
 #ifdef TUBEVIZ_HAVE_OPENMP
             std::cout << "+openmp";

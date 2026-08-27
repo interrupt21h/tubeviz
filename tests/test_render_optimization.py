@@ -32,14 +32,39 @@ def test_browser_webgpu_and_adaptive_preview_are_present():
     js = Path("src/tubeviz/static/visualizer.js").read_text()
     gpu = Path("src/tubeviz/static/browser_gpu.js").read_text() + Path("src/tubeviz/static/browser_gpu_core.js").read_text()
     assert "requestVideoFrameCallback" in js
-    assert "adaptivePreviewHeight=720" in js
+    assert "adaptivePreviewHeight=responsivePreview?540:720" in js
     assert "updateAdaptivePreview" in js
+    assert "adaptivePreviewSteps=responsivePreview?[360,480,540,720]" in js
+    assert "previewTargetFps" in js
+    assert "preview_profile" in js
+    assert "willReadFrequently:readFrequently" in js
     assert "createBrowserGpuFinalizer" in js
     assert "navigator.gpu.requestAdapter" in gpu
     assert "copyExternalImageToTexture" in gpu
     # Common formerly-CPU raster passes are fused in WGSL.
     for token in ("posterize", "solarize", "blockDisplace", "slitScan", "datamosh"):
         assert token in gpu
+
+
+def test_studio_defaults_to_responsive_preview_profile():
+    html = Path("src/tubeviz/static/gui.html").read_text()
+    gui = Path("src/tubeviz/static/gui.js").read_text()
+    assert 'id="previewMode"' in html
+    assert '<option value="responsive">responsive · optimized live FX</option>' in html
+    assert "auto · adaptive 360p–720p" in html
+    assert "preview_profile=" in gui
+    assert 'profile:value("previewMode")||"responsive"' in gui
+
+
+def test_responsive_preview_throttles_expensive_live_paths():
+    js = Path("src/tubeviz/static/visualizer.js").read_text()
+    assert "const responsivePreview=!offlineMode&&previewProfile!=='full'" in js
+    assert "const targetMs=1000/previewTargetFps()" in js
+    assert "if(responsivePreview&&previewFrameEma>36)return" in js
+    assert "const effects=responsivePreview?visible.slice(0,budget)" in js
+    assert "if(!gpuCommon&&!previewLite)" in js
+    assert "fragmentDrawn>=3" in js
+    assert "motifDrawn>=2" in js
 
 
 def test_progress_is_reported_from_in_page_sequence_not_each_frame_rpc():
