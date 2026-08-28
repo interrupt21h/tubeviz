@@ -1,0 +1,55 @@
+name: Fix WebGPU external sampler
+
+on:
+  push:
+    branches: [fix-webgpu-external-sampler]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Apply WGSL sampler fix
+        run: python .github/scripts/fix_webgpu_external_sampler.py
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Validate
+        run: |
+          python -m compileall -q src/tubeviz
+          for f in src/tubeviz/static/*.js; do node --check "$f"; done
+          python -m pytest -ra --strict-config --strict-markers
+          grep -F "@group(0) @binding(4) var layerSampler: sampler;" src/tubeviz/static/browser_gpu_core.js
+          grep -F "textureSampleBaseClampToEdge(video0,layerSampler,layerUv(" src/tubeviz/static/browser_gpu_core.js
+
+      - name: Commit validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Scott Muller"
+          git config user.email "scott@21h.io"
+          git add CHANGELOG.md pyproject.toml src/tubeviz tests/test_browser_phase2.py
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "Fix WebGPU external texture sampler binding"
+          git push origin HEAD:fix-webgpu-external-sampler
