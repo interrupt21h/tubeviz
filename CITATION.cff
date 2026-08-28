@@ -8,6 +8,8 @@ authors:
   - family-names: "Muller"
     given-names: "Scott"
 
+orcid: "https://orcid.org/0009-0001-2561-3255"
+
 abstract: >
   Tubeviz is an AI-directed, beat-synchronized music video generation system
   that combines music analysis, semantic video retrieval, scene planning,
