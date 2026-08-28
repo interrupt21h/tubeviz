@@ -6,6 +6,10 @@ build-backend = "hatchling.build"
 name = "tubeviz"
 version = "0.44.0"
 description = "AI-directed music visualizer with a searchable local video clip library"
+readme = "README.md"
+authors = [
+    { name = "Scott Muller", email = "scott@21h.io" },
+]
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
