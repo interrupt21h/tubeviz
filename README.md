@@ -16,10 +16,9 @@ interface. Both operate on the same persistent media library and the same direct
 timeline format.
 
 > [!NOTE]
-> **A hack that got out of hand**
+> **A hack that got out of hand** 🛠️
 >
-> Tubeviz started as a small experiment in automatically cutting video to music. It has since grown into a full video-analysis, composition, and rendering system. The project is still experimental and evolving quickly, so interfaces, configuration, and behavior may change between releases.
-
+> Tubeviz started as a quick experiment to see whether video could be automatically cut to music. Then things escalated. It’s now a full video-analysis, composition, and rendering system—and it’s still very much a work in progress, so beware of rough edges and sudden changes.
 
 
 ## Sample videos
