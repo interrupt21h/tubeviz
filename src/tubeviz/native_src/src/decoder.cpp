@@ -22,20 +22,13 @@ std::string av_error(int code) {
     return buffer;
 }
 
-// All cached clip decoders use the same FFmpeg CUDA device wrapper. The
-// wrapper itself retains NVIDIA's process-wide primary CUDA context, avoiding
-// repeated av_hwdevice_ctx_create work as the LRU opens many source clips.
-// The function-local static owns one reference until renderer process exit;
-// individual Decoder instances take ordinary AVBufferRef references from it.
 struct SharedCudaDevice {
     AVBufferRef* ref{nullptr};
 
     SharedCudaDevice() {
         AVDictionary* options = nullptr;
         av_dict_set(&options, "primary_ctx", "1", 0);
-        const int rc = av_hwdevice_ctx_create(
-            &ref, AV_HWDEVICE_TYPE_CUDA, nullptr, options, 0
-        );
+        const int rc = av_hwdevice_ctx_create(&ref, AV_HWDEVICE_TYPE_CUDA, nullptr, options, 0);
         av_dict_free(&options);
         if (rc < 0) ref = nullptr;
     }
@@ -56,10 +49,6 @@ AVPixelFormat Decoder::select_hw_format(AVCodecContext* context, const AVPixelFo
     for (const AVPixelFormat* fmt = formats; *fmt != AV_PIX_FMT_NONE; ++fmt) {
         if (*fmt == self->hw_pixel_format_) return *fmt;
     }
-    // Hardware format was advertised by the codec but is not available for
-    // this stream/device. Select an actual software pixel format rather than
-    // merely "anything other than CUDA"; codecs may advertise several other
-    // hardware formats that would require their own unconfigured hwcontext.
     for (const AVPixelFormat* fmt = formats; *fmt != AV_PIX_FMT_NONE; ++fmt) {
         const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(*fmt);
         if (!desc || !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL)) return *fmt;
@@ -85,7 +74,7 @@ Decoder::Decoder(std::string path, int output_width, int output_height, std::str
     auto alloc_codec = [&]() {
         codec_ = avcodec_alloc_context3(decoder);
         if (!codec_) throw std::bad_alloc();
-        int copy_rc = avcodec_parameters_to_context(codec_, stream->codecpar);
+        const int copy_rc = avcodec_parameters_to_context(codec_, stream->codecpar);
         if (copy_rc < 0) throw std::runtime_error("avcodec_parameters_to_context: " + av_error(copy_rc));
         codec_->thread_count = 0;
         codec_->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
@@ -119,8 +108,6 @@ Decoder::Decoder(std::string path, int output_width, int output_height, std::str
 
     rc = avcodec_open2(codec_, decoder, nullptr);
     if (rc < 0 && hardware_decode_) {
-        // A driver/codec combination may advertise CUDA but reject this
-        // particular stream. Auto mode must stay reliable, so reopen software.
         avcodec_free_context(&codec_);
         av_buffer_unref(&hw_device_ctx_);
         hw_pixel_format_ = AV_PIX_FMT_NONE;
@@ -132,9 +119,10 @@ Decoder::Decoder(std::string path, int output_width, int output_height, std::str
     if (rc < 0) throw std::runtime_error("avcodec_open2(" + path_ + "): " + av_error(rc));
 
     frame_ = av_frame_alloc();
+    held_frame_ = av_frame_alloc();
     software_frame_ = av_frame_alloc();
     packet_ = av_packet_alloc();
-    if (!frame_ || !software_frame_ || !packet_) throw std::bad_alloc();
+    if (!frame_ || !held_frame_ || !software_frame_ || !packet_) throw std::bad_alloc();
     rgb_.resize(static_cast<std::size_t>(output_width_) * output_height_ * 3);
 }
 
@@ -142,6 +130,7 @@ Decoder::~Decoder() {
     sws_freeContext(sws_);
     av_packet_free(&packet_);
     av_frame_free(&software_frame_);
+    av_frame_free(&held_frame_);
     av_frame_free(&frame_);
     avcodec_free_context(&codec_);
     av_buffer_unref(&hw_device_ctx_);
@@ -153,7 +142,11 @@ void Decoder::seek(double seconds) {
     const int rc = av_seek_frame(format_, stream_index_, timestamp, AVSEEK_FLAG_BACKWARD);
     if (rc < 0) throw std::runtime_error("av_seek_frame(" + path_ + "): " + av_error(rc));
     avcodec_flush_buffers(codec_);
+    av_frame_unref(frame_);
+    av_frame_unref(held_frame_);
+    av_frame_unref(software_frame_);
     current_seconds_ = -1.0;
+    rgb_valid_ = false;
     eof_ = false;
 }
 
@@ -164,11 +157,23 @@ double Decoder::frame_seconds(const AVFrame* frame) const {
     return static_cast<double>(pts) * av_q2d(time_base_);
 }
 
-void Decoder::convert_frame(AVFrame* frame) {
-    AVFrame* source = frame;
-    if (hardware_decode_ && static_cast<AVPixelFormat>(frame->format) == hw_pixel_format_) {
+void Decoder::hold_frame(AVFrame* frame) {
+    const double seconds = frame_seconds(frame);
+    av_frame_unref(held_frame_);
+    const int rc = av_frame_ref(held_frame_, frame);
+    if (rc < 0) throw std::runtime_error("av_frame_ref(" + path_ + "): " + av_error(rc));
+    current_seconds_ = seconds;
+    rgb_valid_ = false;
+}
+
+void Decoder::convert_held_frame() {
+    if (!held_frame_ || held_frame_->format == AV_PIX_FMT_NONE)
+        throw std::runtime_error("no decoded frame available for " + path_);
+
+    AVFrame* source = held_frame_;
+    if (hardware_decode_ && static_cast<AVPixelFormat>(held_frame_->format) == hw_pixel_format_) {
         av_frame_unref(software_frame_);
-        const int rc = av_hwframe_transfer_data(software_frame_, frame, 0);
+        const int rc = av_hwframe_transfer_data(software_frame_, held_frame_, 0);
         if (rc < 0) throw std::runtime_error("av_hwframe_transfer_data(" + path_ + "): " + av_error(rc));
         source = software_frame_;
     }
@@ -184,21 +189,21 @@ void Decoder::convert_frame(AVFrame* frame) {
     std::uint8_t* dst_data[4] = {rgb_.data(), nullptr, nullptr, nullptr};
     int dst_linesize[4] = {output_width_ * 3, 0, 0, 0};
     sws_scale(sws_, source->data, source->linesize, 0, source->height, dst_data, dst_linesize);
+    rgb_valid_ = true;
 }
 
 bool Decoder::decode_until(double target_seconds) {
     while (true) {
         int rc = avcodec_receive_frame(codec_, frame_);
         if (rc == 0) {
-            current_seconds_ = frame_seconds(frame_);
-            convert_frame(frame_);
+            hold_frame(frame_);
             av_frame_unref(frame_);
             if (current_seconds_ + 1e-4 >= target_seconds) return true;
             continue;
         }
         if (rc != AVERROR(EAGAIN) && rc != AVERROR_EOF)
             throw std::runtime_error("avcodec_receive_frame(" + path_ + "): " + av_error(rc));
-        if (rc == AVERROR_EOF) return false;
+        if (rc == AVERROR_EOF) return current_seconds_ >= 0.0;
 
         while (true) {
             rc = av_read_frame(format_, packet_);
@@ -220,28 +225,33 @@ bool Decoder::decode_until(double target_seconds) {
             break;
         }
         if (eof_) {
-            const int drain = avcodec_receive_frame(codec_, frame_);
-            if (drain == 0) {
-                current_seconds_ = frame_seconds(frame_);
-                convert_frame(frame_);
+            while (true) {
+                const int drain = avcodec_receive_frame(codec_, frame_);
+                if (drain != 0) return current_seconds_ >= 0.0;
+                hold_frame(frame_);
                 av_frame_unref(frame_);
                 if (current_seconds_ + 1e-4 >= target_seconds) return true;
-                continue;
             }
-            return current_seconds_ >= 0.0;
         }
     }
 }
 
-const std::vector<std::uint8_t>& Decoder::frame_at(double seconds) {
-    if (seconds < 0.0) seconds = 0.0;
-    // Fast path: the already-decoded frame covers this requested time.
-    if (current_seconds_ >= 0.0 && seconds <= current_seconds_ + 1e-4 && seconds + 0.04 >= current_seconds_)
-        return rgb_;
+const AVFrame* Decoder::avframe_at(double seconds) {
+    seconds = std::max(0.0, seconds);
+    if (current_seconds_ >= 0.0 && held_frame_->format != AV_PIX_FMT_NONE &&
+        seconds <= current_seconds_ + 1e-4 && seconds + 0.04 >= current_seconds_) {
+        return held_frame_;
+    }
     if (current_seconds_ < 0.0 || seconds + 0.04 < current_seconds_ || seconds - current_seconds_ > 2.0)
         seek(seconds);
-    if (!decode_until(seconds) && rgb_.empty())
+    if (!decode_until(seconds) || held_frame_->format == AV_PIX_FMT_NONE)
         throw std::runtime_error("failed to decode frame from " + path_);
+    return held_frame_;
+}
+
+const std::vector<std::uint8_t>& Decoder::frame_at(double seconds) {
+    avframe_at(seconds);
+    if (!rgb_valid_) convert_held_frame();
     return rgb_;
 }
 
