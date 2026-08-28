@@ -28,10 +28,17 @@ replace_once(
     '            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .95))\n',
 )
 
+changelog_path = ROOT / "CHANGELOG.md"
+changelog = changelog_path.read_text()
+entry = '''# 0.43.0 — AI director authority and visible creative intent\n\n- Promote the whole-song LLM from a mostly invisible scalar bias to a bounded creative director that can author section strategies and 1–4 normalized director beats per section.\n- Director beats can steer a concrete source query, composition, effect vocabulary, temporal-history behavior, clean holds and hero treatments while deterministic beat timing and valid media selection remain authoritative.\n- Preserve explicit LLM creative moments instead of blending them back into CLAP; numeric direction now retains at least 70% of the requested authority when the director is enabled, with a director-led default strength of 0.95.\n- Make broad section composition preferences periodic/soft so a single AI `mosaic` recommendation cannot turn into mosaic wallpaper across an entire section.\n- Record whole-song director provenance on every final shot and show the current AI strategy/moment directly in the browser preview HUD.\n- Report LLM-directed section and authored-moment counts in analyze progress/summary output and invalidate old whole-song director caches with the new schema.\n- Normalize canonical effect names consistently so hyphenated catalog names remain valid in AI-authored plans.\n\n'''
+if changelog.startswith("# 0.43.0"):
+    raise SystemExit("CHANGELOG already contains the staged 0.43.0 entry")
+changelog_path.write_text(entry + changelog)
+
 test_path = ROOT / "tests/test_ai_director_authority.py"
 text = test_path.read_text()
 addition = '''\n\ndef test_effect_name_normalization_accepts_canonical_hyphenated_names():\n    from tubeviz.ai_resources import normalize_effect_name\n    assert normalize_effect_name("optical-flow warp") == "optical-flow warp"\n    assert normalize_effect_name("optical flow warp") == "optical-flow warp"\n    assert normalize_effect_name("source-preserving color grade") == "source-preserving color grade"\n'''
 if "test_effect_name_normalization_accepts_canonical_hyphenated_names" not in text:
     test_path.write_text(text + addition)
 
-print("AI effect normalization and Studio default patch applied")
+print("AI effect normalization, Studio default and changelog patch applied")
