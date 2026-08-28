@@ -24,6 +24,7 @@ jobs:
 
       - name: Apply director authority patch
         run: |
+          python .github/scripts/prepare_ai_director_patch.py
           python .github/scripts/apply_ai_director_authority.py
           python .github/scripts/fix_ai_effect_normalization.py
 
