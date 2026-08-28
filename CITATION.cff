@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use Tubeviz in research, published work, or derivative projects, please cite it using these metadata."
+
+title: "Tubeviz"
+type: software
+
+authors:
+  - family-names: "Muller"
+    given-names: "Scott"
+
+abstract: >
+  Tubeviz is an AI-directed, beat-synchronized music video generation system
+  that combines music analysis, semantic video retrieval, scene planning,
+  interactive timeline inspection, creative effects, and GPU-accelerated
+  rendering to produce directed music videos from curated source footage.
+
+version: "0.44.0"
+date-released: "2026-08-28"
+
+repository-code: "https://github.com/interrupt21h/tubeviz"
+url: "https://github.com/interrupt21h/tubeviz"
+
+license: Apache-2.0
+
+keywords:
+  - music visualization
+  - music video generation
+  - video analysis
+  - audio analysis
+  - generative video
+  - AI-directed editing
+  - beat synchronization
+  - semantic search
+  - GPU rendering
+  - WebGPU
+  - computer vision
