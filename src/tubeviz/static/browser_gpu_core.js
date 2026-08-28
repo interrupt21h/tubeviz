@@ -71,7 +71,7 @@ fn beatWarpUv(uv0:vec2f)->vec2f{
     let lens=(1.0-smoothstep(.04,.72,r));
     out-=p*a*.095*polarity*lens;
   }else{
-    let angle=a*.24*polarity*(1.0-smoothstep(.05,.88,r));
+    var angle=a*.24*polarity*(1.0-smoothstep(.05,.88,r));
     angle+=sin(r*34.0*frequency-localPhase*11.0+variant)*a*.035;
     let cs=cos(angle);let sn=sin(angle);out=center+mat2x2f(cs,-sn,sn,cs)*p;
   }

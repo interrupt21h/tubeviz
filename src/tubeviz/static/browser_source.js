@@ -39,6 +39,21 @@ export function parsePackedH264(buffer) {
   return {version: magic === 'TVZ2' ? 2 : 1, fps, units};
 }
 
+function decoderConfigCandidates(config = {}) {
+  const base={...config,codec:config.codec||DEFAULT_CODEC};
+  const raw=[
+    base,
+    {...base,hardwareAcceleration:'prefer-hardware',optimizeForLatency:true},
+    {...base,hardwareAcceleration:'no-preference',optimizeForLatency:true},
+    {...base,hardwareAcceleration:'prefer-software',optimizeForLatency:true},
+    {codec:base.codec,optimizeForLatency:true,hardwareAcceleration:'no-preference'},
+    {codec:base.codec,optimizeForLatency:true},
+    {codec:base.codec},
+  ];
+  const seen=new Set();
+  return raw.filter(item=>{const key=JSON.stringify(item);if(seen.has(key))return false;seen.add(key);return true;});
+}
+
 let decoderProbePromise = null;
 export async function probeWebCodecsSourceDecoder() {
   if (decoderProbePromise) return decoderProbePromise;
@@ -46,18 +61,15 @@ export async function probeWebCodecsSourceDecoder() {
     if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') {
       return {supported: false, reason: 'VideoDecoder or EncodedVideoChunk unavailable'};
     }
-    const configs = [
-      {codec: DEFAULT_CODEC, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true},
-      {codec: 'avc1.4d002a', hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true},
-      {codec: 'avc1.42002a', hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true},
-    ];
-    for (const config of configs) {
+    // TVZ2 is encoded as High Profile Level 4.2 (`avc1.64002a`). Do not
+    // advertise support by probing a different AVC profile than the transport.
+    for (const config of decoderConfigCandidates({codec:DEFAULT_CODEC,hardwareAcceleration:'prefer-hardware',optimizeForLatency:true})) {
       try {
-        const support = await VideoDecoder.isConfigSupported(config);
-        if (support?.supported) return {supported: true, config: support.config ?? config, codec: config.codec};
+        const support=await VideoDecoder.isConfigSupported(config);
+        if(support?.supported)return {supported:true,config:support.config??config,codec:DEFAULT_CODEC};
       } catch (_) {}
     }
-    return {supported: false, reason: 'no supported Annex-B H.264 VideoDecoder configuration'};
+    return {supported:false,reason:'no supported High Profile Level 4.2 Annex-B H.264 VideoDecoder configuration'};
   })();
   return decoderProbePromise;
 }
@@ -77,37 +89,46 @@ export function prewarmWebCodecsScene(sceneIndex, layerCount, {fps = 60} = {}) {
 }
 
 let sourceWorkerManager = null;
+let sourceWorkerWarningShown = false;
 class SourceWorkerManager {
   constructor() {
-    this.worker = new Worker('/static/browser_source_worker.js', {type: 'module'});
-    this.seq = 0; this.sourceSeq = 0; this.pending = new Map(); this.failed = false;
-    this.worker.onmessage = e => {
-      const m = e.data || {}, p = this.pending.get(m.requestId);
-      if (!p) return;
-      this.pending.delete(m.requestId);
-      m.type === 'error' ? p.reject(new Error(m.error)) : p.resolve(m);
+    this.worker=new Worker('/static/browser_source_worker.js?v=0.42.1',{type:'module'});
+    this.seq=0;this.sourceSeq=0;this.pending=new Map();this.failed=false;this.workerDecodeUnavailableReason='';
+    this.worker.onmessage=e=>{
+      const m=e.data||{},p=this.pending.get(m.requestId);
+      if(!p){try{m.frame?.close?.();}catch(_){}return;}
+      this.pending.delete(m.requestId);m.type==='error'?p.reject(new Error(m.error)):p.resolve(m);
     };
-    this.worker.onerror = e => {
-      this.failed = true;
-      const err = new Error(e.message || 'source decoder worker failed');
-      for (const p of this.pending.values()) p.reject(err);
-      this.pending.clear();
+    this.worker.onerror=e=>{
+      this.failed=true;const err=new Error(e.message||'source decoder worker failed');
+      for(const p of this.pending.values())p.reject(err);this.pending.clear();
     };
   }
   request(message) {
-    if (this.failed) return Promise.reject(new Error('source decoder worker unavailable'));
-    const requestId = ++this.seq;
-    return new Promise((resolve, reject) => {
-      this.pending.set(requestId, {resolve, reject});
-      this.worker.postMessage({...message, requestId});
+    if(this.failed)return Promise.reject(new Error('source decoder worker unavailable'));
+    const requestId=++this.seq;
+    return new Promise((resolve,reject)=>{
+      this.pending.set(requestId,{resolve,reject,sourceId:message.sourceId??null});
+      try{this.worker.postMessage({...message,requestId});}catch(error){this.pending.delete(requestId);reject(error);}
     });
   }
-  async open(url, config) {
-    const sourceId = ++this.sourceSeq;
-    const m = await this.request({type: 'open', sourceId, url, config});
-    return new WorkerWebCodecsSceneSource(this, sourceId, m.fps, m.count, m.version);
+  async open(url,config) {
+    if(this.workerDecodeUnavailableReason)throw new Error(this.workerDecodeUnavailableReason);
+    const sourceId=++this.sourceSeq;
+    try{
+      const m=await this.request({type:'open',sourceId,url,config});
+      return new WorkerWebCodecsSceneSource(this,sourceId,m.fps,m.count,m.version);
+    }catch(error){
+      const reason=String(error?.message||error);
+      if(/no supported worker VideoDecoder configuration|Unsupported configuration/i.test(reason))this.workerDecodeUnavailableReason=reason;
+      throw error;
+    }
   }
-  close(sourceId) { if (!this.failed) this.worker.postMessage({type: 'close', sourceId}); }
+  close(sourceId) {
+    const error=new Error('source decoder closed');
+    for(const [requestId,p] of this.pending){if(p.sourceId!==sourceId)continue;this.pending.delete(requestId);p.reject(error);}
+    if(!this.failed){try{this.worker.postMessage({type:'close',sourceId});}catch(_){}}
+  }
 }
 
 class WorkerWebCodecsSceneSource {
@@ -133,13 +154,14 @@ class WorkerWebCodecsSceneSource {
   }
 }
 
-async function openWorkerSource(url, config) {
-  if (typeof Worker === 'undefined' || typeof VideoFrame === 'undefined') return null;
-  try {
-    if (!sourceWorkerManager || sourceWorkerManager.failed) sourceWorkerManager = new SourceWorkerManager();
-    return await sourceWorkerManager.open(url, config);
-  } catch (error) {
-    console.warn('tubeviz source worker unavailable; using main-thread VideoDecoder', error);
+async function openWorkerSource(url,config) {
+  if(typeof Worker==='undefined'||typeof VideoFrame==='undefined')return null;
+  try{
+    if(!sourceWorkerManager||sourceWorkerManager.failed)sourceWorkerManager=new SourceWorkerManager();
+    if(sourceWorkerManager.workerDecodeUnavailableReason)return null;
+    return await sourceWorkerManager.open(url,config);
+  }catch(error){
+    if(!sourceWorkerWarningShown){sourceWorkerWarningShown=true;console.warn('tubeviz source worker unavailable; using main-thread VideoDecoder',error);}
     return null;
   }
 }
@@ -152,20 +174,17 @@ export class WebCodecsSceneSource {
     this._createDecoder();
   }
   _createDecoder() {
-    this.decoder = new VideoDecoder({
-      output: frame => {
-        const index = this.outputIndices.shift();
-        const waiter = this.waiters.get(index);
-        if (waiter) { this.waiters.delete(index); waiter.resolve(frame); }
-        else frame.close();
-      },
-      error: error => {
-        this.decoderError = error instanceof Error ? error : new Error(String(error));
-        for (const waiter of this.waiters.values()) waiter.reject(this.decoderError);
-        this.waiters.clear(); this.outputIndices.length = 0;
-      },
-    });
-    this.decoder.configure(this.config);
+    const callbacks={
+      output:frame=>{const index=this.outputIndices.shift(),waiter=this.waiters.get(index);if(waiter){this.waiters.delete(index);waiter.resolve(frame);}else frame.close();},
+      error:error=>{this.decoderError=error instanceof Error?error:new Error(String(error));for(const waiter of this.waiters.values())waiter.reject(this.decoderError);this.waiters.clear();this.outputIndices.length=0;},
+    };
+    let lastError=null;
+    for(const config of decoderConfigCandidates(this.config)){
+      const decoder=new VideoDecoder(callbacks);
+      try{decoder.configure(config);this.decoder=decoder;this.config=config;return;}
+      catch(error){lastError=error;try{decoder.close();}catch(_){}}
+    }
+    throw lastError??new Error(`no supported VideoDecoder configuration for ${this.config?.codec||DEFAULT_CODEC}`);
   }
   _nearestKey(index) {
     for (let i = index; i >= 0; i--) if (this.units[i]?.key) return i;

@@ -23,38 +23,69 @@ function parsePacked(buffer) {
   return {version: magic === 'TVZ2' ? 2 : 1, fps, units};
 }
 function nearestKey(s, index) { for (let i = index; i >= 0; i--) if (s.units[i]?.key) return i; return 0; }
-function createDecoder(s) {
-  s.outputIndices = [];
-  s.waiters = new Map();
-  s.error = null;
-  s.decoder = new VideoDecoder({
-    output: frame => {
-      const index = s.outputIndices.shift(), waiter = s.waiters.get(index);
-      if (waiter) { s.waiters.delete(index); waiter.resolve(frame); } else frame.close();
-    },
-    error: error => {
-      s.error = error instanceof Error ? error : new Error(String(error));
-      for (const waiter of s.waiters.values()) waiter.reject(s.error);
-      s.waiters.clear(); s.outputIndices.length = 0;
-    },
-  });
-  s.decoder.configure(s.config);
+function decoderError(error, fallback='source decoder failed') { return error instanceof Error ? error : new Error(String(error || fallback)); }
+function rejectWaiters(s, error) {
+  const err = decoderError(error);
+  for (const waiter of s.waiters?.values?.() ?? []) waiter.reject(err);
+  s.waiters?.clear?.(); if (s.outputIndices) s.outputIndices.length = 0;
 }
-function restartAt(s, index) {
-  try { if (s.decoder?.state !== 'closed') s.decoder.close(); } catch (_) {}
-  createDecoder(s); s.decodedThrough = index - 1;
+function configCandidates(config) {
+  const base = {...(config || {})}, codec = String(base.codec || '');
+  if (!codec) return [];
+  const raw = [
+    base,
+    {...base, hardwareAcceleration:'no-preference'},
+    {...base, hardwareAcceleration:'prefer-software'},
+    {codec, optimizeForLatency:true, hardwareAcceleration:'no-preference'},
+    {codec, optimizeForLatency:true},
+    {codec},
+  ];
+  const seen = new Set();
+  return raw.filter(item => { const key=JSON.stringify(item); if(seen.has(key))return false; seen.add(key); return true; });
+}
+function newDecoder(s) {
+  return new VideoDecoder({
+    output: frame => {
+      const index=s.outputIndices.shift(), waiter=s.waiters.get(index);
+      if(waiter){s.waiters.delete(index);waiter.resolve(frame);}else frame.close();
+    },
+    error: error => { s.error=decoderError(error); rejectWaiters(s,s.error); },
+  });
+}
+async function createDecoder(s) {
+  s.outputIndices=[];s.waiters=new Map();s.error=null;
+  let lastError=null;
+  for(const candidate of configCandidates(s.config)){
+    let selected=candidate;
+    try{
+      if(typeof VideoDecoder.isConfigSupported==='function'){
+        const support=await VideoDecoder.isConfigSupported(candidate);
+        if(!support?.supported)continue;selected=support.config??candidate;
+      }
+      const decoder=newDecoder(s);
+      try{decoder.configure(selected);}catch(error){try{decoder.close();}catch(_){}throw error;}
+      s.decoder=decoder;s.config=selected;return;
+    }catch(error){lastError=decoderError(error);}
+  }
+  throw new Error(`no supported worker VideoDecoder configuration for ${s.config?.codec||'unknown codec'}: ${lastError?.message||'unsupported'}`);
+}
+async function restartAt(s,index) {
+  rejectWaiters(s,new Error('source decoder restarted'));
+  try{if(s.decoder?.state!=='closed')s.decoder.close();}catch(_){}
+  await createDecoder(s);s.decodedThrough=index-1;
 }
 async function openSource(m) {
   const response = await fetch(m.url, {cache: 'force-cache'});
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
   const packed = parsePacked(await response.arrayBuffer());
-  const state = {fps: packed.fps, units: packed.units, version: packed.version, config: m.config, decodedThrough: -1, chain: Promise.resolve()};
-  createDecoder(state); sources.set(m.sourceId, state);
+  const state = {fps: packed.fps, units: packed.units, version: packed.version, config: m.config, decodedThrough: -1, chain: Promise.resolve(), closed: false};
+  await createDecoder(state); sources.set(m.sourceId, state);
   postMessage({type: 'opened', requestId: m.requestId, sourceId: m.sourceId, fps: state.fps, count: state.units.length, version: state.version});
 }
 async function decodeFrame(s, index) {
   if (s.error) throw s.error;
-  if (index <= s.decodedThrough) restartAt(s, nearestKey(s, index));
+  if (s.closed) throw new Error('source decoder closed');
+  if (index <= s.decodedThrough) await restartAt(s, nearestKey(s, index));
   const framePromise = new Promise((resolve, reject) => s.waiters.set(index, {resolve, reject}));
   const duration = Math.round(1e6 / s.fps);
   for (let i = s.decodedThrough + 1; i <= index; i++) {
@@ -71,11 +102,13 @@ async function frameSource(m) {
   const work = s.chain.then(() => decodeFrame(s, index));
   s.chain = work.then(() => {}, () => {});
   const frame = await work;
-  postMessage({type: 'frame', requestId: m.requestId, sourceId: m.sourceId, index, frame}, [frame]);
+  try { postMessage({type: 'frame', requestId: m.requestId, sourceId: m.sourceId, index, frame}, [frame]); }
+  catch (error) { try { frame.close(); } catch (_) {} throw error; }
 }
 function closeSource(id) {
   const s = sources.get(id); if (!s) return;
-  try { if (s.decoder.state !== 'closed') s.decoder.close(); } catch (_) {}
+  s.closed=true;rejectWaiters(s,new Error('source decoder closed'));
+  try { if (s.decoder?.state !== 'closed') s.decoder.close(); } catch (_) {}
   sources.delete(id);
 }
 self.onmessage = async e => {

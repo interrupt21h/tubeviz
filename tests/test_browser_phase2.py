@@ -105,3 +105,41 @@ def test_webgpu_preview_probes_before_transfer_and_falls_back_safely():
     assert "probe-result" in worker and "OffscreenCanvas(4,4)" in worker
     assert "render-meta" in index
     assert "WebGPU requested for offline rendering but unavailable" in visualizer
+
+
+
+def test_webgpu_wgsl_mutation_and_webcodecs_lifecycle_regressions():
+    core = Path("src/tubeviz/static/browser_gpu_core.js").read_text()
+    facade = Path("src/tubeviz/static/browser_gpu.js").read_text()
+    source = Path("src/tubeviz/static/browser_source.js").read_text()
+    source_worker = Path("src/tubeviz/static/browser_source_worker.js").read_text()
+    visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
+
+    assert "var angle=a*.24*polarity" in core
+    assert "let angle=a*.24*polarity" not in core
+    assert "angle+=sin(r*34.0*frequency" in core
+    assert "avc1.64002a" in source
+    assert "avc1.4d002a" not in source
+    assert "avc1.42002a" not in source
+    assert "VideoDecoder.isConfigSupported" in source_worker
+    assert "hardwareAcceleration:'no-preference'" in source_worker
+    assert "hardwareAcceleration:'prefer-software'" in source_worker
+    assert "m.frame?.close?.()" in source
+    assert "effect?.close()" in facade and "source?.close()" in facade
+    assert "rejectWaiters(s,new Error('source decoder closed'))" in source_worker
+    assert "bankState[bankIndex]=[]" in visualizer
+    assert "st.source.closed" in visualizer
+    assert "live WebCodecs source failed; switching this preview to HTMLVideoElement" in visualizer
+    assert "liveSourceDecodeMode='video'" in visualizer
+
+
+def test_preview_module_graph_is_release_cache_busted():
+    index = Path("src/tubeviz/static/index.html").read_text()
+    visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
+    gpu = Path("src/tubeviz/static/browser_gpu.js").read_text()
+    source = Path("src/tubeviz/static/browser_source.js").read_text()
+    assert "/static/visualizer.js?v=0.42.1" in index
+    assert "/static/browser_gpu.js?v=0.42.1" in visualizer
+    assert "/static/browser_source.js?v=0.42.1" in visualizer
+    assert "/static/browser_gpu_core.js?v=0.42.1" in gpu
+    assert "/static/browser_source_worker.js?v=0.42.1" in source
