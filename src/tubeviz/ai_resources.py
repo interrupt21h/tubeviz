@@ -85,7 +85,7 @@ EFFECT_FAMILIES = ["dream", "liquid", "analog", "fracture", "hyper", "prismatic"
 
 
 def normalize_effect_name(value: Any) -> str | None:
-    raw = str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+    raw = " ".join(str(value or "").strip().lower().replace("_", " ").replace("-", " ").split())
     aliases = {
         "flow warp": "optical-flow warp", "optical flow warp": "optical-flow warp",
         "beat warp": "beat-local deformation", "beat deformation": "beat-local deformation",
@@ -97,10 +97,11 @@ def normalize_effect_name(value: Any) -> str | None:
     }
     if raw in aliases:
         return aliases[raw]
-    for name in RASTER_EFFECTS:
-        if name.lower() == raw:
-            return name
-    return None
+    by_key = {
+        " ".join(name.strip().lower().replace("_", " ").replace("-", " ").split()): name
+        for name in RASTER_EFFECTS
+    }
+    return by_key.get(raw)
 
 
 def _bucket_hue(hue: float) -> str:

@@ -1,6 +1,6 @@
-import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.42.2';
-import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.42.2';
-import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.42.2';
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.43.0';
+import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.43.0';
+import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.43.0';
 // SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
 const ctx = canvas.getContext('2d', {alpha:true,desynchronized:true});
@@ -10,6 +10,7 @@ const gpuCanvas = document.querySelector('#gpu-fx');
 const audio = document.querySelector('#audio');
 const meta = document.querySelector('#meta');
 const clipMeta = document.querySelector('#clip-meta');
+const directorMeta = document.querySelector('#director-meta');
 const renderMeta = document.querySelector('#render-meta');
 const decoders = Array.from({length:8}, (_,i)=>document.querySelector(`#decoder-${i}`));
 const banks = [decoders.slice(0,4), decoders.slice(4,8)];
@@ -216,6 +217,9 @@ if(tempoValues.length>4){
   if(hi-lo>=3)tempoText=`${lo.toFixed(0)}–${hi.toFixed(0)} BPM variable`;
 }
 meta.textContent=`${tempoText} · ${timeline.track.key ?? 'key ?'} · ${timeline.track.sections.length} sections · ${timeline.motifs.length} motifs · ${status.scene_count ?? 0} scene groups`;
+const llmSections=(timeline.track.sections??[]).filter(section=>section?.ai_direction?.provenance==='llm');
+const llmBeats=llmSections.reduce((n,section)=>n+(section?.ai_direction?.director_beats?.length??0),0);
+if(directorMeta&&llmSections.length){directorMeta.style.display='block';directorMeta.textContent=`AI director active · ${llmSections.length} sections · ${llmBeats} authored moments`;}
 if(!status.clips_enabled||!status.scene_count) clipMeta.textContent='No clip scene plan; video canvas idle';
 
 const wsProtocol=location.protocol==='https:'?'wss:':'ws:';
@@ -313,6 +317,15 @@ async function activateScene(scene,{immediate=false}={}){
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
     const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';const vectors=d.vector_effects?.length?` · ${d.vector_effects.length} vector fx`:'';
     clipMeta.textContent=`${scene.term}${scene.motif_id?` · ${scene.motif_id} #${scene.occurrence}`:''} · ${scene.composition_mode} · ${1+(scene.layers?.length??0)} video layers${align}${family}${vectors} · ${scene.title??scene.source_id}${fxNames?` · fx ${fxNames}`:''}`;
+    if(directorMeta){
+      const section=(timeline.track.sections??[]).find(item=>Number(item.index)===Number(scene.section_index));
+      const ai=section?.ai_direction??{};const authored=scene.ai_director??{};
+      if(ai.provenance==='llm'){
+        const beat=authored.beat_applied?` · moment: ${authored.purpose||authored.source_query||authored.hero_kind||authored.composition_mode||'directed accent'}`:'';
+        const hold=authored.hold?' · HOLD CLEAN':'';const hero=authored.hero_kind?` · hero ${authored.hero_kind}`:'';
+        directorMeta.style.display='block';directorMeta.textContent=`AI director · ${ai.strategy||'direct'} · ${ai.visual_world||ai.source_focus||'section plan'}${beat}${hero}${hold}`;
+      }else{directorMeta.style.display='none';directorMeta.textContent='';}
+    }
   }catch(e){console.warn('scene activation failed',e);clipMeta.textContent=`Clip group unavailable: ${scene.title??scene.source_id}`;}
 }
 

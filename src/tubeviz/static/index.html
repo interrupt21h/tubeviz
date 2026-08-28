@@ -14,8 +14,9 @@
     #gpu-fx { z-index:1; background:#000; display:none; }
     #canvas { z-index:2; }
     #hud { position:fixed; z-index:4; left:16px; bottom:16px; color:white; background:rgba(0,0,0,.48); padding:10px 12px; border-radius:8px; backdrop-filter:blur(10px); }
-    #meta,#clip-meta { font-size:12px; opacity:.82; margin-top:6px; max-width:min(820px,80vw); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    #meta,#clip-meta,#director-meta { font-size:12px; opacity:.82; margin-top:6px; max-width:min(920px,84vw); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #clip-meta { opacity:.68; }
+    #director-meta { opacity:.90; color:#b9dcff; display:none; }
     audio { width:min(520px,80vw); }
     #fx-toggle { margin-top:7px; padding:4px 9px; border:1px solid rgba(255,255,255,.25); border-radius:6px; background:rgba(255,255,255,.08); color:#fff; cursor:pointer; }
     #fx-panel { display:none; margin-top:8px; grid-template-columns:auto minmax(120px,220px) 42px; gap:5px 9px; align-items:center; font-size:11px; }
@@ -42,6 +43,7 @@
   <audio id="audio" controls src="/audio"></audio>
   <div id="meta">Loading timeline…</div>
   <div id="clip-meta">Video renderer</div>
+  <div id="director-meta"></div>
   <div id="render-meta" style="font-size:11px;opacity:.62;margin-top:4px">Renderer initialization…</div>
   <button id="fx-toggle" type="button">FX controls</button>
   <div id="fx-panel">
@@ -52,6 +54,6 @@
     <label for="fx-strobe">Strobe</label><input id="fx-strobe" type="range" min="0" max="2" step="0.05" value="1"><span id="fx-strobe-v" class="fx-value">1.00</span>
   </div>
 </div>
-<script type="module" src="/static/visualizer.js?v=0.42.2"></script>
+<script type="module" src="/static/visualizer.js?v=0.43.0"></script>
 </body>
 </html>

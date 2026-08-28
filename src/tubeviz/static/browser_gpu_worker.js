@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.42.2';
+import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.43.0';
 let renderer=null;
 
 async function probeWebGpu(){

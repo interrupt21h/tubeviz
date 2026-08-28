@@ -35,6 +35,27 @@ class TempoPoint(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class AIDirectorBeat(BaseModel):
+    """A bounded creative idea authored by the whole-song LLM director.
+
+    ``at`` is normalized section progress, not an exact edit time. The deterministic
+    editor maps each idea to the nearest valid beat-aligned shot, so the LLM can
+    author memorable moments without taking ownership of timing or media validity.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    at: float = Field(ge=0.0, le=1.0)
+    purpose: str = ""
+    source_query: str = ""
+    composition: str | None = None
+    preferred_effects: list[str] = Field(default_factory=list)
+    effect_bias: float = Field(default=1.0, ge=0.25, le=1.75)
+    hero_kind: str | None = None
+    history_mode: str = "auto"
+    hold: bool = False
+
+
 class SectionAIDirection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +63,15 @@ class SectionAIDirection(BaseModel):
     motion_style: str = ""
     palette: str = ""
     effect_family: str | None = None
+    # LLM-authored creative intent. The semantic/CLAP director leaves provenance
+    # as ``semantic``; a successful whole-song language-model pass changes it to
+    # ``llm`` and may author a few shot-local director beats.
+    strategy: str = ""
+    source_focus: str = ""
+    transition_style: str = "auto"
+    director_beats: list[AIDirectorBeat] = Field(default_factory=list)
+    provenance: str = "semantic"
+    director_strength: float = Field(default=0.0, ge=0.0, le=1.0)
     desired_motion: float = Field(default=0.5, ge=0.0, le=1.0)
     desired_complexity: float = Field(default=0.5, ge=0.0, le=1.0)
     edit_density: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -484,6 +514,10 @@ class SceneSelection(BaseModel):
     composition_mode: str = "single"
     layers: list[CompositeLayer] = Field(default_factory=list)
     codec_materialization: CodecMaterialization = Field(default_factory=CodecMaterialization)
+    # Whole-song LLM provenance copied onto the final shot. This makes the
+    # director's contribution inspectable in JSON and Studio instead of hiding it
+    # behind scalar planner weights.
+    ai_director: dict[str, Any] = Field(default_factory=dict)
     # Advisory provenance from the bounded LLM edit-consultant pass. It records only
     # validated candidate IDs/treatment hints; hard selection constraints remain deterministic.
     ai_consultant: dict[str, Any] = Field(default_factory=dict)

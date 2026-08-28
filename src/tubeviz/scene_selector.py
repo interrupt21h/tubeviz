@@ -637,6 +637,23 @@ def _shot_windows(timeline: DirectedTimeline, section, cfg: SceneSelectorConfig)
     return windows or [(start, end)]
 
 
+def _director_beat_assignments(section, windows: list[tuple[float, float]]) -> dict[int, object]:
+    direction = section.ai_direction
+    beats = list(direction.director_beats) if direction is not None else []
+    if not beats or not windows:
+        return {}
+    span = max(0.05, float(section.end-section.start))
+    mids = [min(1.0, max(0.0, (((a+b)*.5)-section.start)/span)) for a, b in windows]
+    remaining = set(range(len(windows)))
+    out: dict[int, object] = {}
+    for beat in sorted(beats, key=lambda item: item.at):
+        pool = remaining or set(range(len(windows)))
+        index = min(pool, key=lambda i: (abs(mids[i]-beat.at), i))
+        out[index] = beat
+        remaining.discard(index)
+    return out
+
+
 def _excerpt(candidate: SceneCandidate, shot_seconds: float, salt: str, cfg: SceneSelectorConfig) -> tuple[float, float]:
     """Choose a deterministic short source range within a detected scene."""
     available = max(0.05, candidate.end_time - candidate.start_time)
@@ -836,8 +853,9 @@ def build_scene_plan(
         } if section.audio_semantics else {}
 
         windows = _shot_windows(timeline, section, cfg)
+        director_beats = _director_beat_assignments(section, windows)
         consultant_advice: dict[int, dict[str, object]] = {}
-        consultant_hero_used = False
+        section_hero_used = 0
         if cfg.ai_consultant_enabled and cfg.ai_consultant_base_url and cfg.ai_consultant_model:
             slate = _consultant_slate(
                 candidates, section=section, windows=windows, semantic_scores=semantic_scores,
@@ -862,6 +880,22 @@ def build_scene_plan(
         for local_shot_index, (shot_start, shot_end) in enumerate(windows):
             shot_ordinal += 1
             shot_duration = max(0.05, shot_end - shot_start)
+            director_beat = director_beats.get(local_shot_index)
+            director_query = str(getattr(director_beat, "source_query", "") or "").strip()
+            director_query_vector = (
+                embedder.encode_text([director_query])[0]
+                if director_query and embedder is not None else None
+            )
+            director_query_scores = {
+                candidate.scene_id: _semantic_score(
+                    candidate,
+                    query=director_query,
+                    query_vector=director_query_vector,
+                    embedding_map=all_embeddings,
+                    visual_weight=cfg.visual_semantic_weight * 0.55,
+                )
+                for candidate in candidates
+            } if director_query else {}
 
             # Preserve motif source identity at the entry of a recurring motif,
             # then allow fresh sources within the phrase so callbacks remain
@@ -890,12 +924,15 @@ def build_scene_plan(
                     )
                     + cfg.effect_compatibility_weight * effect_compatibility_score(candidate, section)
                     + cfg.preference_weight * _preference_score(candidate, preference_profile)
+                    # An explicit whole-song director beat gets a meaningful but
+                    # bounded source-retrieval vote for this one shot.
+                    + 0.70 * director_query_scores.get(candidate.scene_id, 0.0)
                     + preference_bonus(candidate.scene_id, consultant_advice.get(local_shot_index), cfg.ai_consultant_weight)
                 )
                 for candidate in candidates
             }
             selected = None
-            if cfg.sequence_lookahead > 1 and len(candidates) > 1 and preferred_clip is None:
+            if cfg.sequence_lookahead > 1 and len(candidates) > 1 and preferred_clip is None and not director_query:
                 selected = _sequence_choose(
                     candidates, section=section, windows=windows, window_index=local_shot_index,
                     previous=previous_primary, semantic_scores=semantic_scores,
@@ -1002,8 +1039,12 @@ def build_scene_plan(
             advice = consultant_advice.get(local_shot_index) or {}
             ai_density = section.ai_direction.effect_density if section.ai_direction is not None else 1.0
             advice_bias = max(0.25, min(1.75, float(advice.get("effect_bias", 1.0) or 1.0)))
-            effective_density = max(0.0, min(2.5, cfg.effect_density * ai_density * advice_bias))
+            director_bias = float(getattr(director_beat, "effect_bias", 1.0) or 1.0)
+            if bool(getattr(director_beat, "hold", False)):
+                director_bias = min(director_bias, 0.45)
+            effective_density = max(0.0, min(2.5, cfg.effect_density * ai_density * advice_bias * director_bias))
             preferred_effects = list(section.ai_direction.preferred_effects if section.ai_direction is not None else [])
+            preferred_effects.extend(str(v) for v in getattr(director_beat, "preferred_effects", []) if str(v))
             preferred_effects.extend(str(v) for v in advice.get("preferred_effects", []) if str(v))
             direction = build_visual_direction(
                 selected,
@@ -1025,8 +1066,9 @@ def build_scene_plan(
                 effect_family_override=(consultant_advice.get(local_shot_index) or {}).get("effect_family"),
             )
             requested_family = advice.get("effect_family")
-            requested_hero = advice.get("hero_kind")
-            if requested_hero and cfg.hero_frequency > 0.0 and not consultant_hero_used and direction.creative.hero_amount <= 0.01:
+            requested_hero = getattr(director_beat, "hero_kind", None) or advice.get("hero_kind")
+            hero_budget = min(2, max(1, int(round(section.ai_direction.hero_frequency)))) if section.ai_direction is not None else 1
+            if requested_hero and cfg.hero_frequency > 0.0 and section_hero_used < hero_budget and direction.creative.hero_amount <= 0.01:
                 hero_name = str(requested_hero).replace(" ", "_")
                 # The consultant may request a hero, but at most one consultant hero is
                 # admitted per musical section. Renderer semantics stay deterministic.
@@ -1034,7 +1076,7 @@ def build_scene_plan(
                     "hero_kind": hero_name, "hero_amount": min(0.62, 0.28 + 0.22*section.energy),
                     "hero_start": 0.18, "hero_end": 0.82,
                 })})
-                consultant_hero_used = True
+                section_hero_used += 1
 
             layer_budget = max(1, min(4, int(cfg.max_video_layers)))
             comp_strength = max(0.0, min(2.0, cfg.composition_intensity))
@@ -1045,7 +1087,10 @@ def build_scene_plan(
                 comp_strength = max(0.0, min(2.0, comp_strength))
                 comp_diversity = max(0.0, min(2.5, comp_diversity))
             comp_diversity = max(0.0, min(2.5, comp_diversity * advice_bias))
-            if section.energy < 0.30 or comp_strength <= 0.0:
+            explicit_composition = getattr(director_beat, "composition", None) or advice.get("composition_mode")
+            if bool(getattr(director_beat, "hold", False)):
+                explicit_composition = "single"
+            if section.energy < 0.30 or comp_strength <= 0.0 or explicit_composition == "single":
                 desired_layers = 1
             elif section.energy < 0.58:
                 desired_layers = min(layer_budget, 2)
@@ -1053,6 +1098,9 @@ def build_scene_plan(
                 desired_layers = min(
                     layer_budget, 3 if comp_strength < 1.5 else 4
                 )
+
+            if explicit_composition and explicit_composition != "single" and layer_budget > 1:
+                desired_layers = max(2, desired_layers)
 
             companions = _choose_companions(
                 candidates,
@@ -1108,6 +1156,17 @@ def build_scene_plan(
                     )
                 )
 
+            # Section-level composition is a motif suggestion, not wallpaper.
+            # Explicit director beats/consultant shots are honored; a broad section
+            # preference is sampled at most periodically so "mosaic" cannot occupy
+            # an entire section merely because the LLM mentioned it once.
+            section_preferred = section.ai_direction.preferred_composition if section.ai_direction is not None else None
+            sampled_section_preference = (
+                section_preferred
+                if not explicit_composition and section_preferred and comp_diversity >= 0.70
+                and (shot_ordinal + section.index) % 4 == 0
+                else None
+            )
             composition_mode = _composition_mode(
                 section.label,
                 section.energy,
@@ -1115,7 +1174,7 @@ def build_scene_plan(
                 desired_layers,
                 section.vibe,
                 diversity=comp_diversity,
-                preferred=(advice.get("composition_mode") or (section.ai_direction.preferred_composition if section.ai_direction is not None else None)),
+                preferred=(explicit_composition or sampled_section_preference),
             )
             selections.append(
                 SceneSelection(
@@ -1139,7 +1198,7 @@ def build_scene_plan(
                         max(0.0, shot_duration * 0.32),
                     ),
                     opacity=min(1.0, max(0.0, cfg.opacity)),
-                    intent_query=query,
+                    intent_query=(query + (f". director shot focus: {director_query}" if director_query else "")),
                     semantic_score=float(
                         shot_scores.get(selected.scene_id, 0.0)
                         if selected.scene_id in shot_scores
@@ -1148,6 +1207,22 @@ def build_scene_plan(
                     direction=direction,
                     composition_mode=composition_mode,
                     layers=composite_layers,
+                    ai_director={
+                        "provenance": section.ai_direction.provenance,
+                        "strength": section.ai_direction.director_strength,
+                        "strategy": section.ai_direction.strategy,
+                        "source_focus": section.ai_direction.source_focus,
+                        "transition_style": section.ai_direction.transition_style,
+                        "beat_applied": director_beat is not None,
+                        "purpose": str(getattr(director_beat, "purpose", "") or ""),
+                        "source_query": director_query,
+                        "composition_mode": explicit_composition or sampled_section_preference,
+                        "preferred_effects": list(getattr(director_beat, "preferred_effects", []) or []),
+                        "effect_bias": director_bias,
+                        "history_mode": str(getattr(director_beat, "history_mode", "auto") or "auto"),
+                        "hero_kind": getattr(director_beat, "hero_kind", None),
+                        "hold": bool(getattr(director_beat, "hold", False)),
+                    } if section.ai_direction is not None and section.ai_direction.provenance == "llm" else {},
                     ai_consultant={
                         "enabled": bool(consultant_advice),
                         "preferred_scene_ids": list((advice or {}).get("preferred_scene_ids") or []),
