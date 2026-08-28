@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {createGpuRendererCore} from '/static/browser_gpu_core.js';
+import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.42.1';
 
 const WORKER_PROBE_TIMEOUT_MS=4000;
 const WORKER_INIT_TIMEOUT_MS=5000;
@@ -43,11 +43,11 @@ class WorkerGpuFinalizer{
   render(effectSource,sourceColorSource,params={}){
     if(this.failed)return false;
     // Live preview may drop a GPU submission if the worker is already behind.
-    // This is preferable to growing an unbounded queue and increasing preview latency.
     if(this.inflight>=2)return true;
+    let effect=null,source=null;
     try{
       const ts=Math.max(0,Math.round(Number(params.time||0)*1e6));
-      const effect=new VideoFrame(effectSource,{timestamp:ts});const source=new VideoFrame(sourceColorSource,{timestamp:ts});
+      effect=new VideoFrame(effectSource,{timestamp:ts});source=new VideoFrame(sourceColorSource,{timestamp:ts});
       const id=++this.seq;this.inflight++;
       const promise=new Promise((resolve,reject)=>{
         const timer=setTimeout(()=>{
@@ -56,11 +56,13 @@ class WorkerGpuFinalizer{
         },WORKER_FRAME_TIMEOUT_MS);
         this.pending.set(id,{resolve,reject,timer});
       });
-      // Avoid an unhandled rejection during live preview if the worker fails between
-      // frames. Offline rendering explicitly awaits sync().
       promise.catch(()=>{});this.lastPromise=promise;
-      this.worker.postMessage({type:'render',id,effect,source,params},[effect,source]);return true;
-    }catch(error){this._markFailed(error?.message||error);return false;}
+      this.worker.postMessage({type:'render',id,effect,source,params},[effect,source]);
+      effect=null;source=null;return true;
+    }catch(error){
+      try{effect?.close();}catch(_){}try{source?.close();}catch(_){}
+      this._markFailed(error?.message||error);return false;
+    }
   }
   resetHistory(){if(!this.failed)this.worker.postMessage({type:'reset-history'});}
   async sync(){if(!this.lastPromise)return !this.failed;try{return await this.lastPromise;}catch(_){return false;}}
@@ -77,7 +79,7 @@ async function probeWorkerWebGpu(worker){
 
 async function createWorkerGpuFinalizer(canvas){
   if(typeof Worker==='undefined'||typeof VideoFrame==='undefined'||typeof OffscreenCanvas==='undefined'||typeof canvas.transferControlToOffscreen!=='function')throw new Error('worker OffscreenCanvas/VideoFrame unavailable');
-  const worker=new Worker('/static/browser_gpu_worker.js',{type:'module'});
+  const worker=new Worker('/static/browser_gpu_worker.js?v=0.42.1',{type:'module'});
   try{
     // Crucial ordering: prove worker-side WebGPU + WGSL + external-image copies on a
     // scratch OffscreenCanvas BEFORE transferring the visible canvas. Once an

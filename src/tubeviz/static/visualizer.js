@@ -1,6 +1,6 @@
-import {createBrowserGpuFinalizer} from '/static/browser_gpu.js';
-import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js';
-import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js';
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.42.1';
+import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.42.1';
+import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.42.1';
 // SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
 const ctx = canvas.getContext('2d', {alpha:true,desynchronized:true});
@@ -245,7 +245,8 @@ function previewMediaUrl(sceneIndex,layerIndex){return `/api/preview-media/${sce
 function allLayers(scene){return [{...scene,role:'primary',opacity:scene.opacity??.92,blend_mode:scene.transform?.blend_mode??'normal'},...(scene.layers??[])].slice(0,4);}
 
 function closeBankSources(bankIndex){
-  for(const st of bankState[bankIndex]??[])try{st.source?.close();}catch(_){}
+  const states=bankState[bankIndex]??[];bankState[bankIndex]=[];
+  for(const st of states)try{st.source?.close();}catch(_){}
 }
 async function loadHtmlLayer(v,layer,scene,i,sceneIndex=null){
   const useProxy=responsivePreview&&previewProxyEnabled&&status.clips_enabled&&Number.isInteger(sceneIndex);
@@ -318,12 +319,29 @@ async function activateScene(scene,{immediate=false}={}){
 function updateLiveSourceFrames(){
   if(offlineMode||liveSourceDecodeMode!=='webcodecs'||audio.paused)return;
   const now=clockSeconds();
-  for(const states of bankState)for(const st of states){
-    if(!st.source||st.framePending)continue;
-    const rate=st.transform?.materialized?1:Number(st.transform?.playback_rate??1);
-    let offset=((now-Number(st.sceneTime??0))*rate+(st.liveBias??0))%st.span;if(offset<0)offset+=st.span;
-    if(st.transform?.reverse)offset=Math.max(0,st.span-offset-.001);
-    st.framePending=st.source.frameAt(offset).then(frame=>{st.frame=frame;}).catch(error=>{console.warn('live WebCodecs frame failed',error);}).finally(()=>{st.framePending=null;});
+  for(let bankIndex=0;bankIndex<bankState.length;bankIndex++){
+    const states=bankState[bankIndex]??[];
+    for(let layerIndex=0;layerIndex<states.length;layerIndex++){
+      const st=states[layerIndex];if(!st.source||st.source.closed||st.framePending)continue;
+      const rate=st.transform?.materialized?1:Number(st.transform?.playback_rate??1);
+      let offset=((now-Number(st.sceneTime??0))*rate+(st.liveBias??0))%st.span;if(offset<0)offset+=st.span;
+      if(st.transform?.reverse)offset=Math.max(0,st.span-offset-.001);
+      const fallbackOffset=offset;
+      st.framePending=st.source.frameAt(offset).then(frame=>{st.frame=frame;}).catch(async error=>{
+        if(st.webCodecsFailed||bankState[bankIndex]?.[layerIndex]!==st)return;
+        st.webCodecsFailed=true;console.warn('live WebCodecs source failed; switching this preview to HTMLVideoElement',error);
+        try{st.source?.close();}catch(_){}st.source=null;st.frame=null;
+        liveSourceDecodeMode='video';liveSourceDecodeReason=`WebCodecs fallback: ${String(error?.message||error)}`;updateRendererStatus(liveSourceDecodeReason);
+        const scene=timeline.scene_plan[st.sceneIndex],layer=scene?allLayers(scene)[st.layerIndex]:null,video=banks[bankIndex]?.[st.layerIndex];
+        if(!scene||!layer||!video||bankState[bankIndex]?.[layerIndex]!==st)return;
+        try{
+          const replacement=await loadHtmlLayer(video,layer,scene,st.layerIndex,st.sceneIndex);
+          if(bankState[bankIndex]?.[layerIndex]!==st)return;
+          replacement.video.currentTime=Math.max(replacement.start,Math.min(replacement.end-.02,replacement.start+fallbackOffset));
+          Object.assign(st,replacement,{webCodecsFailed:true});
+        }catch(fallbackError){console.warn('HTML video fallback also failed',fallbackError);}
+      }).finally(()=>{st.framePending=null;});
+    }
   }
 }
 

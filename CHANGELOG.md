@@ -1,3 +1,12 @@
+# 0.42.1 — WebGPU and WebCodecs preview reliability
+
+- Fix the WebGPU compositor WGSL regression that declared the final beat-warp `angle` as immutable and then mutated it, causing shader-module compilation to fail and forcing affected previews back to Canvas2D.
+- Keep the TVZ2 WebCodecs codec contract truthful: capability probing now tests the High Profile Level 4.2 AVC configuration actually emitted by the server and varies hardware/software preference without substituting an incompatible profile string.
+- Negotiate WebCodecs support inside the dedicated decoder worker as well as on the main thread. Decoder creation and random-access restarts fall back from hardware preference to no-preference/software decoding when a hardware session cannot be configured.
+- Close orphaned or failed-transfer `VideoFrame` objects explicitly, reject pending requests when a source closes, and detach closed banks immediately so late worker frames cannot leak or trigger repeated `source decoder closed` requests.
+- If a live worker decoder still fails at runtime, downgrade the active preview to `HTMLVideoElement` once and preserve the current source position instead of logging the same failure every animation frame.
+- Cache-bust the browser preview module graph for 0.42.1 and expand CI JavaScript syntax validation across the WebGPU, WebCodecs, encoder and visualizer modules.
+
 # 0.42.0 — GPU-resident native rendering
 
 - Add a native GPU-resident rendering path that keeps decoded FFmpeg `AVFrame` data in YUV/hardware form through layer transforms, multi-source composition, creative/post effects, vector treatment and temporal history instead of converting every source frame to full-resolution RGB first.
