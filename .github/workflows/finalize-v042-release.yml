@@ -1,0 +1,68 @@
+name: Finalize v0.42 release
+
+on:
+  push:
+    branches: [v042-native-gpu]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-v042-release
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Apply final release patch
+        run: python .github/scripts/finalize_v042_release.py
+
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config ffmpeg libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libplacebo-dev libvulkan-dev
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Validate Python and browser source
+        run: |
+          pytest -q
+          python -m compileall -q src/tubeviz
+          node --check src/tubeviz/static/gui.js
+          node --check src/tubeviz/static/visualizer.js
+
+      - name: Validate native CPU fallback build
+        run: |
+          cmake -S src/tubeviz/native_src -B build/native-off -DTUBEVIZ_WITH_PLACEBO=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-off --parallel 2
+          build/native-off/tubeviz-native-render --version
+          build/native-off/tubeviz-native-render --help
+
+      - name: Validate native resident Vulkan build
+        run: |
+          cmake -S src/tubeviz/native_src -B build/native-on -DTUBEVIZ_WITH_PLACEBO=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-on --parallel 2
+          build/native-on/tubeviz-native-render --version
+          build/native-on/tubeviz-native-render --help
+
+      - name: Commit clean release tree
+        run: |
+          git rm .github/scripts/finalize_v042_release.py
+          git rm .github/workflows/finalize-v042-release.yml
+          git rm .github/workflows/v042-native-validation.yml
+          git add -A
+          git config user.name "Scott Muller"
+          git config user.email "scott@21h.io"
+          git commit -m "Release v0.42.0 GPU-resident native rendering"
+
+      - name: Fast-forward main and remove staging branch
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin HEAD:main
+          git push origin --delete v042-native-gpu
