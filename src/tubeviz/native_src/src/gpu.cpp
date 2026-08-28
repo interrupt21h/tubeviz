@@ -296,15 +296,32 @@ vec4 hook() {
         uv=clamp(uv,vec2(.001),vec2(.999));
     }
 
-    // Slower shot-level flow remains continuous underneath the event-local beat
-    // grammar. Reactive vortex is a subtle full-frame rotation around the focal point.
-    float va = vortex * .018;
-    if (abs(va) > .00001) {
-        vec2 vv = uv - center;
+    // Slower spatial grammar is intentionally separated by topology. Vortex is
+    // tangential rotation with radial falloff; ripple is radial displacement;
+    // continuous flow/harmonic motion remains an organic Cartesian field.
+    float aspect = max(.35, HOOKED_pt.y / max(HOOKED_pt.x, 1e-6));
+    if (vortex > .0001) {
+        vec2 vp = uv - center;
+        vp.x *= aspect;
+        float vr = length(vp);
+        float va = vortex * .24 * (1.0 - smoothstep(.04, .95, vr));
         float vcs = cos(va), vsn = sin(va);
-        uv = center + mat2(vcs, -vsn, vsn, vcs) * vv;
+        vp = mat2(vcs, -vsn, vsn, vcs) * vp;
+        vp.x /= aspect;
+        uv = center + vp;
     }
-    float wave = flow*.010 + ripple*.006 + harmonic*.005;
+    if (ripple > .0001) {
+        vec2 rp = uv - center;
+        rp.x *= aspect;
+        float rr = length(rp);
+        vec2 radial = rp / max(rr, .0001);
+        float ring = sin(rr*34.0 - phase*4.6);
+        float falloff = 1.0 - smoothstep(.03, 1.05, rr);
+        rp += radial * ring * ripple * .0105 * falloff;
+        rp.x /= aspect;
+        uv = center + rp;
+    }
+    float wave = flow*.010 + harmonic*.005;
     uv.x += sin(uv.y*24.0 + phase*3.7 + uv.x*5.0) * wave;
     uv.y += cos(uv.x*19.0 - phase*3.1 + uv.y*4.0) * wave*.72;
 
