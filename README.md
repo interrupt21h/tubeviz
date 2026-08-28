@@ -1540,3 +1540,10 @@ OpenCLIP, PyTorch, Transformers, libplacebo, Vulkan implementations, and FFglitc
 Users are responsible for ensuring that source media is acquired and used in accordance
 with applicable licenses, copyright law, platform terms, and any other relevant
 permissions.
+
+## Author
+
+Tubeviz was created and is maintained by **Scott Muller**.
+
+GitHub: [@interrupt21h](https://github.com/interrupt21h)
+
