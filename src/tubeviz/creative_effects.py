@@ -473,6 +473,10 @@ def promote_hero_effects(
         if section is None:
             continue
         creative = selection.direction.creative
+        if bool((selection.ai_director or {}).get("hold")):
+            continue
+        if creative.hero_kind and creative.hero_amount > 0.01:
+            continue
         if max(
             creative.flow_warp, creative.temporal_echo, creative.camera_energy,
             creative.depth_parallax, creative.feedback, creative.local_symmetry,
@@ -552,8 +556,9 @@ def apply_temporal_persistence(
             continue
         ai_scale = section.ai_direction.temporal_persistence if section.ai_direction is not None else 1.0
         local = max(0.0, min(3.0, global_persistence * ai_scale))
+        director_advice = current.ai_director or {}
         advice = current.ai_consultant or {}
-        history_mode = str(advice.get("history_mode") or "auto").lower()
+        history_mode = str(director_advice.get("history_mode") or advice.get("history_mode") or "auto").lower()
         if history_mode == "reset" or local <= 1e-6:
             inherit = 0.0
         else:

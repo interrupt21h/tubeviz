@@ -234,6 +234,8 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
     codec_effects = sum(len(selection.direction.codec_effects) for selection in timeline.scene_plan)
     audio_ai_sections = sum(bool(section.audio_semantics) for section in analysis.sections)
     ai_directed_sections = sum(section.ai_direction is not None for section in analysis.sections)
+    llm_directed_sections = sum(bool(section.ai_direction and section.ai_direction.provenance == "llm") for section in analysis.sections)
+    ai_director_beats = sum(len(section.ai_direction.director_beats) for section in analysis.sections if section.ai_direction is not None and section.ai_direction.provenance == "llm")
     trajectory_sections = sum(section.trajectory is not None for section in analysis.sections)
     build_sections = sum(bool(section.trajectory and section.trajectory.build_probability >= .55) for section in analysis.sections)
     drop_sections = sum(bool(section.trajectory and section.trajectory.drop_probability >= .55) for section in analysis.sections)
@@ -245,7 +247,7 @@ def _cmd_analyze(args: argparse.Namespace) -> None:
         f"{len(timeline.scene_plan)} planned shots, "
         f"{unique_sources} unique primary clips/{len(all_source_ids)} including companions, "
         f"codec_fx={codec_effects} across {codec_shots} shots, "
-        f"audio_ai_sections={audio_ai_sections} ai_directed_sections={ai_directed_sections}, "
+        f"audio_ai_sections={audio_ai_sections} ai_directed_sections={ai_directed_sections} llm_sections={llm_directed_sections} director_beats={ai_director_beats}, "
         f"trajectory_sections={trajectory_sections} builds={build_sections} drops={drop_sections}, "
         f"vibes={','.join(vibes) if vibes else '-'}"
     )
@@ -1402,7 +1404,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--ai-director-timeout", type=float, default=90.0)
     analyze.add_argument("--ai-director-cache-dir")
     analyze.add_argument("--ai-director-force", action="store_true")
-    analyze.add_argument("--ai-director-strength", type=float, default=0.75, help="How strongly the whole-song LLM plan may alter the deterministic CLAP baseline")
+    analyze.add_argument("--ai-director-strength", type=float, default=0.95, help="How strongly the whole-song LLM plan may alter the deterministic CLAP baseline")
     analyze.add_argument("--ai-director-reasoning-effort", choices=("none", "low", "medium", "high", "xhigh", "max"), default="none", help="Native OpenAI GPT-5.6 reasoning effort; 'none' avoids spending the director output budget on hidden reasoning")
     analyze.add_argument("--ai-director-max-completion-tokens", type=int, default=8192, help="Native OpenAI Chat Completions budget for the whole-song JSON plan")
     analyze.add_argument("--ai-edit-consultant", action=argparse.BooleanOptionalAction, default=True, help="With --ai-director and --library, run a second bounded LLM pass that ranks valid scene candidates for each section")

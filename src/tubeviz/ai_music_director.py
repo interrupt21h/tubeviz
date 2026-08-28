@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .audio_ai import top_audio_concepts
+from .ai_resources import COMPOSITION_MODES, HERO_EFFECTS, normalize_effect_name
 from .models import Section, SectionAIDirection, TrackAnalysis
 from .settings import resolve_llm_api_key
 
@@ -25,7 +26,7 @@ class AIDirectorConfig:
     timeout: float = 90.0
     cache_dir: str | None = None
     force: bool = False
-    semantic_strength: float = 0.75
+    semantic_strength: float = 1.0
     reasoning_effort: str = "none"
     max_completion_tokens: int = 8192
 
@@ -234,6 +235,20 @@ def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | N
             "motion_style": "short motion/camera description",
             "palette": "palette description",
             "effect_family": "dream|liquid|analog|fracture|hyper|prismatic|cinematic",
+            "strategy": "establish|develop|withhold|contrast|escalate|payoff|release|callback",
+            "source_focus": "short retrieval/storytelling focus for this section",
+            "transition_style": "auto|clean|hard|blend|echo|reset|inherit",
+            "director_beats": [{
+                "at": 0.72,
+                "purpose": "one memorable shot-level idea",
+                "source_query": "specific visual subject/action to favor for this moment",
+                "composition": "single|flow|luma|strips|split|mosaic|swap|null",
+                "preferred_effects": ["motion trails"],
+                "effect_bias": 1.05,
+                "hero_kind": "subject echo|flow melt|depth burst|time prism|recursive portal|null",
+                "history_mode": "auto|inherit|reset",
+                "hold": False
+            }],
             "desired_motion": 0.5,
             "desired_complexity": 0.5,
             "edit_density": 0.5,
@@ -264,6 +279,7 @@ def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | N
         "Do NOT select filenames, clip IDs, scene IDs, or exact cut times in this first pass. A later bounded edit-consultant pass will choose only among valid retrieved scenes, and the deterministic optimizer owns hard timing. "
         "Explicitly exploit resources that exist and avoid relying on visual worlds/effects that the resource manifest says are absent or scarce. "
         "The renderer manifest contains an exact effect_catalog with native/WebGPU parity, destructiveness and best-use guidance. Choose preferred_effects only from that catalog and use them as a vocabulary for each section rather than relying only on broad effect_family labels. "
+        "Your job is to make creative decisions that are recognizable in the finished edit, not merely return adjectives. Give each section a strategy and, when useful, 1–4 director_beats at normalized section progress. A director beat is a bounded shot-level idea: it may steer source retrieval, request a composition, choose a small effect vocabulary, preserve/reset temporal history, deliberately hold a clean shot, or request a hero treatment. The deterministic editor maps it to the nearest valid beat-aligned shot. Use source_query to ask for a concrete visual idea that the actual library can plausibly supply. Do not fill every shot with a beat: contrast and restraint make the directed moments legible. Mosaic/swap/split should be specific compositional ideas, not a section-long default unless there is an exceptional narrative reason. "
         "Actively shape effect_density (how often effects become visible), temporal_persistence (whether trails/feedback can cross compatible cuts), composition_diversity (how often multi-source layouts evolve), and hero_frequency (rare large transformations). These are independent of amplitude/intensity. Treat source-first as the normal state: core-tier effects may remain subtle, accent-tier effects should be absent on most ordinary shots, and hero-tier effects should normally appear only for deliberate hero/payoff moments. Values around 0.55–0.90 are normal for effect density; use values above 1 primarily for genuinely high-energy drops/builds or intentionally experimental sections. It is valid to recommend no special effect for a shot/section. "
         "Prefer source-safe motion/depth/temporal treatments for faces or text, and reserve destructive glitch/symmetry/stylization for abstract footage, noisy peaks, mutations and payoffs. Native render is the reference output, so recommend only catalog capabilities marked native. "
         "Use callbacks and controlled evolution: avoid changing visual worlds arbitrarily every section. "
@@ -392,6 +408,14 @@ def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: flo
         "motion_style": proposed.motion_style or base.motion_style,
         "palette": proposed.palette or base.palette,
         "effect_family": proposed.effect_family or base.effect_family,
+        # Explicit creative intent is not numerically averaged away. Hard timing,
+        # candidate validity and renderer safety remain deterministic downstream.
+        "strategy": proposed.strategy or base.strategy,
+        "source_focus": proposed.source_focus or base.source_focus,
+        "transition_style": proposed.transition_style or base.transition_style,
+        "director_beats": proposed.director_beats or base.director_beats,
+        "provenance": proposed.provenance or base.provenance,
+        "director_strength": proposed.director_strength or base.director_strength,
         "desired_motion": mix(base.desired_motion, proposed.desired_motion),
         "desired_complexity": mix(base.desired_complexity, proposed.desired_complexity),
         "edit_density": mix(base.edit_density, proposed.edit_density),
@@ -410,6 +434,60 @@ def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: flo
     })
 
 
+def _sanitize_director_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate LLM-authored creative authority before Pydantic model loading."""
+    out = dict(data)
+    preferred = str(out.get("preferred_composition") or "").strip().lower().replace("_", " ")
+    out["preferred_composition"] = preferred if preferred in COMPOSITION_MODES else None
+    effects: list[str] = []
+    for value in out.get("preferred_effects", []) or []:
+        name = normalize_effect_name(value)
+        if name and name not in effects:
+            effects.append(name)
+    out["preferred_effects"] = effects[:8]
+    beats = []
+    for raw in list(out.get("director_beats", []) or [])[:4]:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            at = min(1.0, max(0.0, float(raw.get("at", 0.5))))
+            effect_bias = min(1.75, max(0.25, float(raw.get("effect_bias", 1.0))))
+        except (TypeError, ValueError):
+            continue
+        composition = str(raw.get("composition") or "").strip().lower().replace("_", " ")
+        if composition not in COMPOSITION_MODES:
+            composition = None
+        hero = str(raw.get("hero_kind") or "").strip().lower().replace("_", " ") or None
+        if hero not in HERO_EFFECTS:
+            hero = None
+        history = str(raw.get("history_mode") or "auto").strip().lower()
+        if history not in {"auto", "inherit", "reset"}:
+            history = "auto"
+        beat_effects: list[str] = []
+        for value in raw.get("preferred_effects", []) or []:
+            name = normalize_effect_name(value)
+            if name and name not in beat_effects:
+                beat_effects.append(name)
+        beats.append({
+            "at": at,
+            "purpose": str(raw.get("purpose") or "")[:240],
+            "source_query": str(raw.get("source_query") or "")[:280],
+            "composition": composition,
+            "preferred_effects": beat_effects[:6],
+            "effect_bias": effect_bias,
+            "hero_kind": hero,
+            "history_mode": history,
+            "hold": bool(raw.get("hold", False)),
+        })
+    out["director_beats"] = beats
+    out["strategy"] = str(out.get("strategy") or "")[:120]
+    out["source_focus"] = str(out.get("source_focus") or "")[:280]
+    transition = str(out.get("transition_style") or "auto").strip().lower()
+    out["transition_style"] = transition if transition in {"auto", "clean", "hard", "blend", "echo", "reset", "inherit"} else "auto"
+    out["provenance"] = "llm"
+    return out
+
+
 def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None, progress=print) -> TrackAnalysis:
     if not config.enabled:
         return track
@@ -420,6 +498,7 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, res
         "base_url": config.base_url,
         "sections": _track_summary(track),
         "resources": resource_manifest or {},
+        "director_schema": 2,
     }, sort_keys=True).encode()).hexdigest()
     cache = root / f"{digest}.json"
     if cache.is_file() and not config.force:
@@ -451,13 +530,23 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, res
         # Drop unknown keys rather than letting a chat model break timeline validation.
         allowed = set(SectionAIDirection.model_fields)
         data = {key: value for key, value in data.items() if key in allowed}
+        data = _sanitize_director_data(data)
         try:
             proposed = SectionAIDirection.model_validate({**base.model_dump(), **data})
         except Exception:
             proposed = base
-        # High CLAP uncertainty reduces how strongly the language model may pull
-        # choreography away from the deterministic baseline.
+        # CLAP remains grounding evidence, but a successful language-model
+        # director is intentionally visible. Even low semantic confidence retains
+        # at least 70% of the requested numeric authority; explicit director beats
+        # are preserved wholesale and remain bounded by deterministic execution.
         confidence = section.audio_semantic_confidence
-        strength = config.semantic_strength * (.35 + .65*confidence)
-        sections.append(section.model_copy(update={"ai_direction": _blend(base, proposed, strength)}))
+        strength = min(1.0, max(0.0, config.semantic_strength * (.70 + .30*confidence)))
+        merged = _blend(base, proposed, strength).model_copy(update={
+            "provenance": "llm", "director_strength": strength,
+        })
+        sections.append(section.model_copy(update={"ai_direction": merged}))
+    directed = [s for s in sections if s.ai_direction is not None and s.ai_direction.provenance == "llm"]
+    beat_count = sum(len(s.ai_direction.director_beats) for s in directed if s.ai_direction is not None)
+    avg_strength = sum(s.ai_direction.director_strength for s in directed if s.ai_direction is not None) / max(1, len(directed))
+    progress(f"AI director: applied LLM plan to {len(directed)}/{len(sections)} sections · {beat_count} creative beats · authority {avg_strength:.2f}")
     return track.model_copy(update={"sections": sections})

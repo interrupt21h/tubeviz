@@ -494,7 +494,7 @@ def _job_command(request: JobRequest) -> list[str]:
             command.append("--ai-director")
             _flag(command, "--ai-director-base-url", o.get("ai_director_base_url"))
             _flag(command, "--ai-director-model", o.get("ai_director_model"))
-            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))
+            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .95))
             if o.get("ai_edit_consultant", True) is False:
                 command.append("--no-ai-edit-consultant")
             _flag(command, "--ai-consultant-candidates", o.get("ai_consultant_candidates", 12))

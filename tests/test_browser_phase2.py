@@ -146,8 +146,8 @@ def test_preview_module_graph_is_release_cache_busted():
     visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
     gpu = Path("src/tubeviz/static/browser_gpu.js").read_text()
     source = Path("src/tubeviz/static/browser_source.js").read_text()
-    assert "/static/visualizer.js?v=0.42.2" in index
-    assert "/static/browser_gpu.js?v=0.42.2" in visualizer
-    assert "/static/browser_source.js?v=0.42.2" in visualizer
-    assert "/static/browser_gpu_core.js?v=0.42.2" in gpu
-    assert "/static/browser_source_worker.js?v=0.42.2" in source
+    assert "/static/visualizer.js?v=0.43.0" in index
+    assert "/static/browser_gpu.js?v=0.43.0" in visualizer
+    assert "/static/browser_source.js?v=0.43.0" in visualizer
+    assert "/static/browser_gpu_core.js?v=0.43.0" in gpu
+    assert "/static/browser_source_worker.js?v=0.43.0" in source

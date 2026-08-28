@@ -1,3 +1,13 @@
+# 0.43.0 — AI director authority and visible creative intent
+
+- Promote the whole-song LLM from a mostly invisible scalar bias to a bounded creative director that can author section strategies and 1–4 normalized director beats per section.
+- Director beats can steer a concrete source query, composition, effect vocabulary, temporal-history behavior, clean holds and hero treatments while deterministic beat timing and valid media selection remain authoritative.
+- Preserve explicit LLM creative moments instead of blending them back into CLAP; numeric direction now retains at least 70% of the requested authority when the director is enabled, with a director-led default strength of 0.95.
+- Make broad section composition preferences periodic/soft so a single AI `mosaic` recommendation cannot turn into mosaic wallpaper across an entire section.
+- Record whole-song director provenance on every final shot and show the current AI strategy/moment directly in the browser preview HUD.
+- Report LLM-directed section and authored-moment counts in analyze progress/summary output and invalidate old whole-song director caches with the new schema.
+- Normalize canonical effect names consistently so hyphenated catalog names remain valid in AI-authored plans.
+
 # 0.42.2 — WebGPU external-texture sampling
 
 - Fix the direct WebGPU layer compositor's WGSL external-texture calls to pass the required sampler to `textureSampleBaseClampToEdge`, resolving Chrome's `no matching call` compilation failure for `texture_external`.
