@@ -92,7 +92,7 @@ let sourceWorkerManager = null;
 let sourceWorkerWarningShown = false;
 class SourceWorkerManager {
   constructor() {
-    this.worker=new Worker('/static/browser_source_worker.js?v=0.43.0',{type:'module'});
+    this.worker=new Worker('/static/browser_source_worker.js?v=0.44.0',{type:'module'});
     this.seq=0;this.sourceSeq=0;this.pending=new Map();this.failed=false;this.workerDecodeUnavailableReason='';
     this.worker.onmessage=e=>{
       const m=e.data||{},p=this.pending.get(m.requestId);

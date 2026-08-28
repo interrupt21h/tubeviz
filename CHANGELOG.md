@@ -1,46 +1,40 @@
-# Unreleased — Studio navigation refinement
+# 0.44.0 — Studio workflow, Timeline, and preview reliability
 
-- Keep the live Jobs log independently scrollable while a task is running: polling now follows new output only when the viewer is already at the bottom and otherwise preserves the user's manual scroll position.
+## Studio workflow and navigation
 
-- Promote **Advanced** to a dedicated top-level Studio workspace and move the full **Command Center** there, keeping Settings focused on configuration rather than developer tooling.
-- Remove legacy numeric prefixes such as `01`, `01B`, and `02` from visible card subtitles/kickers while retaining meaningful workflow sequencing where it is intentionally presented as a process.
-- Update Studio tab hooks and compatibility routing so the legacy `command` target now opens **Advanced**, while the legacy `ai` target continues to open **Settings**.
-- Update screenshot automation and focused UI regression coverage for the new **Advanced** tab and simplified subtitles.
+- Replace the overloaded Create-era interface with a focused eight-workspace flow: **Project → Ingest → Library → Timeline → Render → Jobs → Settings → Advanced**.
+- Keep **Project** limited to project identity and canonical paths, add a persistent cross-workspace project-context bar, and provide direct workflow shortcuts without mixing ingest, analysis, rendering, or task output into project setup.
+- Consolidate acquisition under **Ingest** with explicit **AI Discovery**, **Search Terms**, and **YouTube URLs** modes while preserving shared download, quality, media-preparation, filtering, and scene-analysis controls. Hidden stale mode fields are excluded from job payloads so switching modes cannot silently alter ingest semantics.
+- Keep **Timeline** focused on analysis, AI direction, generated-edit inspection, and browser preview, and move final renderer configuration into its own **Render** workspace.
+- Keep **Settings** focused on configuration and promote **Advanced** to a dedicated top-level workspace containing the full Command Center and CLI-parity developer tooling.
+- Remove legacy numeric card prefixes and retain meaningful sequencing only where it communicates an actual workflow.
+- Replace task-specific terminal/progress panels with a fixed global activity strip that shows foreground stage, progress, ETA, cancellation, completion/failure state, and a direct **View Jobs** action.
+- Make **Jobs** the canonical full-detail task surface with history, argument vectors, captured command output, progress, timing, cancellation, and selected-job inspection.
+- Keep the live Jobs log usable while a task is running: polling now auto-follows only when the viewer is already at the bottom and otherwise preserves the user's manual scroll position.
+- Fix compact contextual-help controls so 16px circular icons cannot shrink or distort, including the Timeline Zoom control.
+- Update Studio tab hooks, compatibility routing, and screenshot automation for Project, Ingest, Library, Timeline, Render, Jobs, Settings, and Advanced while retaining legacy aliases where useful.
 
-# Unreleased — Studio workflow and activity cleanup
+## Timeline workspace
 
-- Replace the overloaded **Create** tab with a focused seven-workspace flow: **Project → Ingest → Library → Timeline → Render → Jobs → Settings**.
-- Keep Project limited to project identity and paths, add a persistent cross-workspace project-context bar, and provide direct workflow shortcuts without mixing acquisition, analysis, or rendering controls into project setup.
-- Consolidate acquisition under **Ingest** with explicit **AI Discovery**, **Search Terms**, and **YouTube URLs** modes while preserving the existing shared download, quality, media-preparation, filtering, and scene-analysis controls.
-- Keep the dedicated Timeline workspace focused on analysis, direction, generated-edit inspection, and preview; move final renderer configuration into its own **Render** workspace.
-- Rename AI Settings to **Settings** and move the full CLI **Command Center** under a collapsed Advanced / Developer Tools section instead of presenting it as a peer creative workflow.
-- Remove visible terminal/progress panels from task workspaces. A fixed global activity strip now shows the current foreground task, determinate/indeterminate progress, ETA, cancellation, completion/failure state, and a direct **View Jobs** action.
-- Make **Jobs** the canonical full-detail surface for background work, including complete captured command output, argument vectors, progress, timing, cancellation, and history.
-- Fix compact contextual-help buttons so the 16px circular icon cannot shrink or distort, including the Timeline Zoom control's flex layout.
-- Update screenshot automation for the new Project/Ingest/Render/Settings tabs, retain Create/AI/Command as compatibility aliases, and add selectable AI/Search/URL Ingest captures.
-
-# Unreleased — Studio Timeline workspace
-
-- Move analysis and browser preview out of the Create project card into a dedicated **Timeline** tab, preserving the existing analysis controls while making the generated edit itself the primary inspection surface.
+- Move analysis and browser preview into a dedicated **Timeline** workspace and make the generated edit the primary inspection surface.
 - Embed the live browser renderer above a synchronized, horizontally zoomable timeline with musical sections, section energy, bar/beat markers, clip blocks, crossfades, creative FX, vector/codec treatments, and AI Director events.
 - Add click-to-seek inspection for generated decisions, including source excerpt timing, composition/layering, transition duration, effect vocabulary, rhythm/selection scores when available, and section/shot AI direction.
-- Add Timeline playback, scrub, zoom, refresh and preview controls plus an optional muted popout that follows the embedded preview through a cross-port `postMessage` playback bridge.
-- Add a local Studio timeline JSON endpoint so the GUI can inspect the currently selected timeline without duplicating planner logic or depending on the preview server's in-memory state.
-- Keep the preview server's fresh-port lifecycle and responsive/full, quality, GPU, decode, and codec-materialization controls intact while changing the default presentation from a separate window to the Timeline workspace.
-- Update the Studio screenshot helper with a `timeline` target, optional timeline path, and optional embedded-preview startup for documentation captures.
-- Add focused API/static-contract tests and cache-bust the modified preview visualizer entry asset; Studio static assets continue to use the existing no-cache middleware.
+- Add Timeline playback, scrub, zoom, refresh, preview controls, and an optional muted popout synchronized through the cross-port `postMessage` playback bridge.
+- Add a local Studio timeline JSON endpoint so the GUI can inspect the selected timeline without duplicating planner logic or depending on the preview server's in-memory state.
+- Preserve the fresh-port preview lifecycle and responsive/full, quality, GPU, decode, and codec-materialization controls while making embedded Timeline preview the default presentation.
+- Extend screenshot automation with Timeline capture, optional timeline selection, optional embedded-preview startup, and clean preview-server shutdown after capture.
+- Add focused API/static-contract regression coverage for Timeline behavior and preview integration.
 
-# Unreleased — Preview cold-start reliability
+## Preview cold-start reliability
 
-- Send an initial timeline state immediately when the browser preview WebSocket connects, so a cold preview resolves the first scene before Play/Seek instead of opening on an uninitialized black canvas.
-- Replace all-layer activation barriers with primary-first loading: the primary shot becomes visible as soon as its first decoded frame is ready, while companion layers join progressively in the background.
-- Generate lazy HTML preview proxies only for the scene's source range rather than transcoding an entire long clip. Startup begins at 360p and subsequent sources promote with the adaptive preview resolution.
-- Wait for seek completion and at least `HAVE_CURRENT_DATA` before exposing an `HTMLVideoElement` to Canvas/WebGPU; use `requestVideoFrameCallback()` opportunistically before GPU import.
-- Reject zero-size/seeking media before `GPUDevice.importExternalTexture()`, preventing a transient cold-start decode state from poisoning the WebGPU renderer and forcing a permanent Canvas2D fallback.
+- Send initial timeline state immediately when the browser preview WebSocket connects so a cold preview resolves its first scene before Play/Seek instead of opening on an uninitialized black canvas.
+- Replace all-layer activation barriers with primary-first loading: the primary shot becomes visible as soon as its first decoded frame is ready while companion layers join progressively in the background.
+- Generate lazy HTML preview proxies only for the scene's source range instead of transcoding an entire long clip; startup begins at 360p and later sources promote with adaptive preview resolution.
+- Wait for seek completion and at least `HAVE_CURRENT_DATA` before exposing HTML video to Canvas/WebGPU and use `requestVideoFrameCallback()` opportunistically before GPU import.
+- Reject zero-size or seeking media before `GPUDevice.importExternalTexture()`, preventing transient cold-start decode state from poisoning WebGPU and forcing a permanent Canvas2D fallback.
 - Prewarm the next two primary shots after the current primary is visible, de-duplicate prewarm requests, use unique temporary transcode files for concurrent lazy requests, and expose preview-loading progress in the renderer HUD.
-- Cache-bust the patched visualizer/WebGPU module chain so an existing 0.43.0 browser cache cannot silently keep the old cold-start code after the server restarts.
+- Cache-bust the patched preview module chain so existing 0.43.x browser assets cannot silently retain pre-fix cold-start behavior after upgrade.
 - Add regression coverage for initial WebSocket state, scene-range FFmpeg seeking, scene-range preview routing, browser cold-start contracts, and the preview module cache-bust chain.
-
 # 0.43.0 — AI director authority and visible creative intent
 
 - Promote the whole-song LLM from a mostly invisible scalar bias to a bounded creative director that can author section strategies and 1–4 normalized director beats per section.

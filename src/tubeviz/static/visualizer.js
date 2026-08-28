@@ -1,6 +1,6 @@
-import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.43.0-previewfix1';
-import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.43.0';
-import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.43.0';
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.44.0-previewfix1';
+import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.44.0';
+import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.44.0';
 // SPDX-License-Identifier: Apache-2.0
 const canvas = document.querySelector('#canvas');
 const ctx = canvas.getContext('2d', {alpha:true,desynchronized:true});

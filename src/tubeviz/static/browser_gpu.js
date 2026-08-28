@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.43.0-previewfix1';
+import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.44.0-previewfix1';
 
 const WORKER_PROBE_TIMEOUT_MS=4000;
 const WORKER_INIT_TIMEOUT_MS=5000;
@@ -79,7 +79,7 @@ async function probeWorkerWebGpu(worker){
 
 async function createWorkerGpuFinalizer(canvas){
   if(typeof Worker==='undefined'||typeof VideoFrame==='undefined'||typeof OffscreenCanvas==='undefined'||typeof canvas.transferControlToOffscreen!=='function')throw new Error('worker OffscreenCanvas/VideoFrame unavailable');
-  const worker=new Worker('/static/browser_gpu_worker.js?v=0.43.0-previewfix1',{type:'module'});
+  const worker=new Worker('/static/browser_gpu_worker.js?v=0.44.0-previewfix1',{type:'module'});
   try{
     // Crucial ordering: prove worker-side WebGPU + WGSL + external-image copies on a
     // scratch OffscreenCanvas BEFORE transferring the visible canvas. Once an
