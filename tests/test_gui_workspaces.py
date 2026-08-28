@@ -86,3 +86,14 @@ def test_screenshot_script_supports_advanced_tab_and_compatibility_aliases():
     assert '"command": "advanced"' in script
     assert '#advanced .command-card' in script
     assert '--ingest-mode' in script
+
+
+def test_running_job_log_preserves_manual_scroll_position():
+    js = _static("gui.js")
+    css = _static("gui.css")
+    assert 'const previousLog=detail.querySelector(".job-detail-log")' in js
+    assert 'const previousLogWasAtBottom=' in js
+    assert 'if(previousLogWasAtBottom)nextLog.scrollTop=nextLog.scrollHeight' in js
+    assert 'else nextLog.scrollTop=Math.min(previousLogScrollTop' in js
+    assert 'overscroll-behavior:contain' in css
+    assert 'scrollbar-gutter:stable' in css

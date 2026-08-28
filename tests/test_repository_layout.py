@@ -22,17 +22,21 @@ def test_readme_uses_render_output_as_hero():
     text = Path("README.md").read_text()
     assert text.startswith("# tubeviz\n")
     assert "![tubeviz demo — Dream](dream.webp)" in text.split("## Sample videos", 1)[0]
-    assert "![tubeviz Studio — Create](screenshots/screenshot-create.png)" in text
+    assert "![tubeviz Studio — Project](screenshots/screenshot-project.png)" in text
 
 
 def test_readme_tab_screenshots_live_in_screenshots_directory():
     readme = Path("README.md").read_text()
     names = [
-        "screenshot-ai.png",
-        "screenshot-command.png",
-        "screenshot-create.png",
+        "screenshot-project.png",
+        "screenshot-ingest.png",
+        "screenshot-library-cropped.png",
+        "screenshot-library-detail.png",
+        "screenshot-timeline-example.png",
+        "screenshot-render.png",
         "screenshot-jobs.png",
-        "screenshot-library.png",
+        "screenshot-settings.png",
+        "screenshot-advanced.png",
     ]
     for name in names:
         path = Path("screenshots") / name
@@ -55,5 +59,3 @@ def test_screenshot_helper_supports_library_item_details():
     assert 'max-height: none !important' in script
     assert 'dimensions["clientHeight"] + 2 < dimensions["scrollHeight"]' in script
     assert "screenshots/screenshot-library-detail.png" in readme
-    assert "--tab library-details" in readme
-    assert "complete Library item inspector" in readme

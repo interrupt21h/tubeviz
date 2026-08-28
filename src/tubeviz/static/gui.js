@@ -1389,7 +1389,15 @@ async function loadJobDetail(id,{quiet=false}={}){
     const job=await api(`/api/gui/jobs/${encodeURIComponent(id)}?tail=4000`),running=["queued","running","cancelling"].includes(job.status),pct=Number.isFinite(job.progress_percent)?Math.max(0,Math.min(100,job.progress_percent)):null;
     const timing=[];if(job.elapsed_seconds!=null)timing.push(`Elapsed ${compactDuration(job.elapsed_seconds)}`);if(job.progress_eta_seconds!=null&&running)timing.push(`ETA ${compactDuration(job.progress_eta_seconds)}`);
     const command=(job.command||[]).join(" "),log=(job.log||[]).join("\n");
+    const previousLog=detail.querySelector(".job-detail-log");
+    const previousLogScrollTop=previousLog?previousLog.scrollTop:0;
+    const previousLogWasAtBottom=previousLog?(previousLog.scrollHeight-previousLog.clientHeight-previousLog.scrollTop)<=24:true;
     detail.innerHTML=`<div class="job-detail-header"><div><div class="card-kicker">JOB DETAILS</div><h2>${escapeHtml(jobKindLabel(job.kind))}</h2><div class="job-detail-status status-${escapeHtml(job.status)}">${escapeHtml(job.status)} · ${escapeHtml(job.id)}</div></div><button id="cancelSelectedJob" class="danger" ${running?"":"disabled"}>Cancel</button></div><div><b>${escapeHtml(job.stage||job.status||"Job")}</b></div><div class="job-detail-progress-track"><div style="width:${pct===null?(running?35:job.status==="complete"?100:0):pct}%"></div></div><div class="job-detail-meta"><span>${escapeHtml(pct===null?job.status:`${pct.toFixed(1)}%`)}</span><span>${escapeHtml(timing.join(" · "))}</span></div><div class="job-detail-command">${escapeHtml(command)}</div><pre class="job-detail-log">${escapeHtml(log||"No output captured yet.")}</pre>`;
+    const nextLog=detail.querySelector(".job-detail-log");
+    if(nextLog){
+      if(previousLogWasAtBottom)nextLog.scrollTop=nextLog.scrollHeight;
+      else nextLog.scrollTop=Math.min(previousLogScrollTop,Math.max(0,nextLog.scrollHeight-nextLog.clientHeight));
+    }
     $("cancelSelectedJob")?.addEventListener("click",async()=>{try{const updated=await api(`/api/gui/jobs/${encodeURIComponent(id)}/cancel`,{method:"POST"});renderGlobalActivity(updated,{message:"Cancelling…"});activeJob=id;studioForegroundJobId=id;pollActiveJob();void loadJobDetail(id);}catch(e){showActivityError("Cancel failed",e.message);}});
     document.querySelectorAll(".job-list-item").forEach(item=>item.classList.toggle("selected",item.dataset.jobId===id));
   }catch(e){detail.innerHTML=`<div class="job-detail-empty"><h2>Unable to load job</h2><p>${escapeHtml(e.message)}</p></div>`;}

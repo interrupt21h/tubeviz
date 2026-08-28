@@ -1,5 +1,7 @@
 # Unreleased — Studio navigation refinement
 
+- Keep the live Jobs log independently scrollable while a task is running: polling now follows new output only when the viewer is already at the bottom and otherwise preserves the user's manual scroll position.
+
 - Promote **Advanced** to a dedicated top-level Studio workspace and move the full **Command Center** there, keeping Settings focused on configuration rather than developer tooling.
 - Remove legacy numeric prefixes such as `01`, `01B`, and `02` from visible card subtitles/kickers while retaining meaningful workflow sequencing where it is intentionally presented as a process.
 - Update Studio tab hooks and compatibility routing so the legacy `command` target now opens **Advanced**, while the legacy `ai` target continues to open **Settings**.
