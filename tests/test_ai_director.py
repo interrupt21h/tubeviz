@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
+import json
+
+import pytest
+
 from tubeviz.ai_music_director import AIDirectorConfig, _blend, semantic_direction
 from tubeviz.audio_ai import CONCEPT_KEYS
 from tubeviz.cli import build_parser
@@ -135,3 +139,164 @@ def test_ai_director_cli_openai_defaults_parse():
     assert args.ai_consultant_candidates == 12
     assert args.ai_consultant_weight == 0.85
     assert args.ai_consultant_max_completion_tokens == 4096
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def _completion(content, *, finish_reason="stop", completion_tokens=256, reasoning_tokens=0):
+    return {
+        "choices": [{
+            "index": 0,
+            "message": {"role": "assistant", "content": content},
+            "finish_reason": finish_reason,
+        }],
+        "usage": {
+            "completion_tokens": completion_tokens,
+            "completion_tokens_details": {"reasoning_tokens": reasoning_tokens},
+        },
+    }
+
+
+def test_ai_director_retries_length_completion_with_larger_budget(monkeypatch):
+    import tubeviz.ai_music_director as director
+
+    responses = iter([
+        _completion('{"sections":[{"index":0}', finish_reason="length", completion_tokens=8192),
+        _completion('{"sections":[{"index":0,"strategy":"establish"}]}', completion_tokens=320),
+    ])
+    requests = []
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return _FakeHTTPResponse(next(responses))
+
+    monkeypatch.setattr(director.urllib.request, "urlopen", fake_urlopen)
+    progress = []
+    result = director._call_llm(
+        _track(),
+        AIDirectorConfig(
+            enabled=True,
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.6-terra",
+            max_completion_tokens=8192,
+        ),
+        progress=progress.append,
+    )
+
+    assert result == {"sections": [{"index": 0, "strategy": "establish"}]}
+    assert [item["max_completion_tokens"] for item in requests] == [8192, 16384]
+    assert requests[1]["reasoning_effort"] == "none"
+    assert "COMPLETE JSON object" in requests[1]["messages"][0]["content"]
+    assert any("retrying with 16384 tokens" in message for message in progress)
+
+
+def test_ai_director_retries_malformed_json_even_when_finish_reason_is_stop(monkeypatch):
+    import tubeviz.ai_music_director as director
+
+    responses = iter([
+        _completion('{"sections":[{"index":0,}]}', completion_tokens=700),
+        _completion('{"sections":[]}', completion_tokens=32),
+    ])
+    requests = []
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return _FakeHTTPResponse(next(responses))
+
+    monkeypatch.setattr(director.urllib.request, "urlopen", fake_urlopen)
+    progress = []
+    result = director._call_llm(
+        _track(),
+        AIDirectorConfig(
+            enabled=True,
+            base_url="https://api.openai.com/v1",
+            model="gpt-5.6-terra",
+            max_completion_tokens=8192,
+        ),
+        progress=progress.append,
+    )
+
+    assert result == {"sections": []}
+    assert [item["max_completion_tokens"] for item in requests] == [8192, 16384]
+    assert any("malformed JSON" in message for message in progress)
+
+
+def test_ai_director_reports_length_after_bounded_retries(monkeypatch):
+    import tubeviz.ai_music_director as director
+
+    responses = iter([
+        _completion("{", finish_reason="length", completion_tokens=8192),
+        _completion("{", finish_reason="length", completion_tokens=16384),
+        _completion("{", finish_reason="length", completion_tokens=32768),
+    ])
+    requests = []
+
+    def fake_urlopen(request, timeout=None):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return _FakeHTTPResponse(next(responses))
+
+    monkeypatch.setattr(director.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="exceeded its completion budget") as excinfo:
+        director._call_llm(
+            _track(),
+            AIDirectorConfig(
+                enabled=True,
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.6-terra",
+                max_completion_tokens=8192,
+            ),
+            progress=lambda _message: None,
+        )
+
+    assert [item["max_completion_tokens"] for item in requests] == [8192, 16384, 32768]
+    assert "request_budget=32768" in str(excinfo.value)
+    assert "completion_tokens=32768" in str(excinfo.value)
+
+
+def test_ai_director_reports_json_location_after_bounded_retries(monkeypatch):
+    import tubeviz.ai_music_director as director
+
+    responses = iter([
+        _completion('{"sections":[{"index":0,}]}'),
+        _completion('{"sections":[{"index":0,}]}'),
+        _completion('{"sections":[{"index":0,}]}'),
+    ])
+
+    def fake_urlopen(request, timeout=None):
+        return _FakeHTTPResponse(next(responses))
+
+    monkeypatch.setattr(director.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="malformed JSON after retries") as excinfo:
+        director._call_llm(
+            _track(),
+            AIDirectorConfig(
+                enabled=True,
+                base_url="https://api.openai.com/v1",
+                model="gpt-5.6-terra",
+            ),
+            progress=lambda _message: None,
+        )
+
+    assert "line 1" in str(excinfo.value)
+    assert "column" in str(excinfo.value)
+    assert "char" in str(excinfo.value)
+
+
+def test_ai_director_prompt_requests_sparse_section_patches():
+    from tubeviz.ai_music_director import _director_prompt
+
+    prompt = _director_prompt(_track())
+    assert "PATCH over its supplied baseline" in prompt
+    assert "omit fields you do not intentionally change" in prompt

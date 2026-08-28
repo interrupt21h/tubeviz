@@ -32,6 +32,8 @@ class AIDirectorConfig:
 
 
 _EFFECT_FAMILIES = {"dream", "liquid", "analog", "fracture", "hyper", "prismatic", "cinematic"}
+_DIRECTOR_MAX_ATTEMPTS = 3
+_DIRECTOR_RETRY_TOKEN_CAP = 32768
 
 _HUE = {
     "dark": 228.0,
@@ -283,6 +285,7 @@ def _director_prompt(track: TrackAnalysis, resource_manifest: dict[str, Any] | N
         "Actively shape effect_density (how often effects become visible), temporal_persistence (whether trails/feedback can cross compatible cuts), composition_diversity (how often multi-source layouts evolve), and hero_frequency (rare large transformations). These are independent of amplitude/intensity. Treat source-first as the normal state: core-tier effects may remain subtle, accent-tier effects should be absent on most ordinary shots, and hero-tier effects should normally appear only for deliberate hero/payoff moments. Values around 0.55–0.90 are normal for effect density; use values above 1 primarily for genuinely high-energy drops/builds or intentionally experimental sections. It is valid to recommend no special effect for a shot/section. "
         "Prefer source-safe motion/depth/temporal treatments for faces or text, and reserve destructive glitch/symmetry/stylization for abstract footage, noisy peaks, mutations and payoffs. Native render is the reference output, so recommend only catalog capabilities marked native. "
         "Use callbacks and controlled evolution: avoid changing visual worlds arbitrarily every section. "
+        "Treat each returned section object as a PATCH over its supplied baseline: index is required, but omit fields you do not intentionally change. Keep visual_world, motion_style, palette, source_focus and notes concise, and use 1–2 director beats for ordinary sections; reserve 3–4 for major builds, drops or payoffs. This keeps the whole-song plan complete instead of wasting the output budget repeating baseline values. "
         "Use the supplied trajectory fields (build/drop/release probability, tension slope, anticipation, withholding) to create coherent escalation and payoff. Reserve the strongest contrast/effects for builds, drops, mutations and payoffs; keep pre-drop withholding when it creates useful contrast. Return JSON only.\n\n"
         f"Required schema example:\n{json.dumps(schema, indent=2)}\n\n"
         f"Track analysis:\n{json.dumps(_track_summary(track), indent=2)}\n\n"
@@ -302,13 +305,23 @@ def _is_native_openai(base_url: str) -> bool:
         return False
 
 
-def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request_payload(
+    track: TrackAnalysis,
+    cfg: AIDirectorConfig,
+    resource_manifest: dict[str, Any] | None = None,
+    *,
+    max_completion_tokens: int | None = None,
+    retry_feedback: str | None = None,
+) -> dict[str, Any]:
+    system_content = "Return strict JSON only. You direct themes and intensity; you never choose media files."
+    if retry_feedback:
+        system_content += " " + retry_feedback
     payload: dict[str, Any] = {
         "model": cfg.model,
         "messages": [
             {
                 "role": "system",
-                "content": "Return strict JSON only. You direct themes and intensity; you never choose media files.",
+                "content": system_content,
             },
             {"role": "user", "content": _director_prompt(track, resource_manifest)},
         ],
@@ -319,9 +332,10 @@ def _request_payload(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manif
         # completion budget. The director needs structured creative planning, not
         # deep hidden reasoning, so disable reasoning and leave enough room for a
         # whole-song JSON plan. Do not send legacy sampling parameters here.
+        completion_budget = cfg.max_completion_tokens if max_completion_tokens is None else max_completion_tokens
         payload.update({
             "reasoning_effort": cfg.reasoning_effort,
-            "max_completion_tokens": max(512, int(cfg.max_completion_tokens)),
+            "max_completion_tokens": max(512, int(completion_budget)),
             "response_format": {"type": "json_object"},
         })
     else:
@@ -343,22 +357,22 @@ def _extract_json(content: str) -> dict[str, Any]:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < start:
         raise ValueError("AI director response did not contain a JSON object")
-    return json.loads(text[start:end+1])
+    result = json.loads(text[start:end+1])
+    if not isinstance(result, dict):
+        raise ValueError("AI director response JSON root was not an object")
+    return result
 
 
-def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
-    if not cfg.base_url or not cfg.model:
-        raise RuntimeError("--ai-director requires --ai-director-base-url and --ai-director-model")
-    payload = _request_payload(track, cfg, resource_manifest)
+def _request_completion(payload: dict[str, Any], cfg: AIDirectorConfig) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
-    api_key = resolve_llm_api_key(cfg.base_url, cfg.api_key)
+    api_key = resolve_llm_api_key(cfg.base_url or "", cfg.api_key)
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib.request.Request(_endpoint(cfg.base_url), data=body, headers=headers, method="POST")
+    request = urllib.request.Request(_endpoint(cfg.base_url or ""), data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=cfg.timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         try:
             response_body = exc.read().decode("utf-8", errors="replace").strip()
@@ -379,24 +393,111 @@ def _call_llm(track: TrackAnalysis, cfg: AIDirectorConfig, resource_manifest: di
     except urllib.error.URLError as exc:
         raise RuntimeError(f"AI director request failed: {exc}") from exc
 
-    choices = data.get("choices") or []
-    if not choices:
-        raise RuntimeError("AI director response has no choices")
 
-    choice = choices[0]
-    message = choice.get("message") or {}
-    content = str(message.get("content") or "")
-    if not content.strip():
-        usage = data.get("usage") or {}
-        completion_details = usage.get("completion_tokens_details") or {}
-        raise RuntimeError(
-            "AI director returned no content "
-            f"(finish_reason={choice.get('finish_reason')!r}, "
-            f"completion_tokens={usage.get('completion_tokens')!r}, "
-            f"reasoning_tokens={completion_details.get('reasoning_tokens')!r}). "
-            "The completion budget may have been exhausted before visible JSON was emitted."
+def _response_stats(data: dict[str, Any], choice: dict[str, Any]) -> str:
+    usage = data.get("usage") or {}
+    completion_details = usage.get("completion_tokens_details") or {}
+    return (
+        f"finish_reason={choice.get('finish_reason')!r}, "
+        f"completion_tokens={usage.get('completion_tokens')!r}, "
+        f"reasoning_tokens={completion_details.get('reasoning_tokens')!r}"
+    )
+
+
+def _next_retry_budget(current: int, configured: int) -> int:
+    cap = max(_DIRECTOR_RETRY_TOKEN_CAP, max(512, int(configured)))
+    return min(cap, max(current * 2, current + 4096))
+
+
+def _call_llm(
+    track: TrackAnalysis,
+    cfg: AIDirectorConfig,
+    resource_manifest: dict[str, Any] | None = None,
+    *,
+    progress=print,
+) -> dict[str, Any]:
+    if not cfg.base_url or not cfg.model:
+        raise RuntimeError("--ai-director requires --ai-director-base-url and --ai-director-model")
+
+    native_openai = _is_native_openai(cfg.base_url)
+    budget = max(512, int(cfg.max_completion_tokens))
+    retry_feedback: str | None = None
+
+    for attempt in range(_DIRECTOR_MAX_ATTEMPTS):
+        payload = _request_payload(
+            track,
+            cfg,
+            resource_manifest,
+            max_completion_tokens=budget,
+            retry_feedback=retry_feedback,
         )
-    return _extract_json(content)
+        data = _request_completion(payload, cfg)
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError("AI director response has no choices")
+
+        choice = choices[0]
+        message = choice.get("message") or {}
+        content = str(message.get("content") or "")
+        finish_reason = choice.get("finish_reason")
+        stats = _response_stats(data, choice)
+
+        if finish_reason == "length":
+            next_budget = _next_retry_budget(budget, cfg.max_completion_tokens) if native_openai else budget
+            if native_openai and attempt + 1 < _DIRECTOR_MAX_ATTEMPTS and next_budget > budget:
+                progress(
+                    f"AI director: response exhausted the {budget}-token completion budget; "
+                    f"retrying with {next_budget} tokens"
+                )
+                budget = next_budget
+                retry_feedback = (
+                    "The previous attempt hit its output limit. Return one COMPLETE JSON object and keep each "
+                    "section as a concise patch over its baseline; do not repeat unchanged fields."
+                )
+                continue
+            suggestion = max(budget * 2, budget + 4096)
+            raise RuntimeError(
+                "AI director response exceeded its completion budget "
+                f"({stats}, request_budget={budget}). "
+                f"Try --ai-director-max-completion-tokens {suggestion} or use larger section bars."
+            )
+
+        if finish_reason not in {None, "stop"}:
+            raise RuntimeError(f"AI director stopped before producing a usable plan ({stats})")
+
+        if not content.strip():
+            raise RuntimeError(
+                "AI director returned no content "
+                f"({stats}). The completion budget may have been exhausted before visible JSON was emitted."
+            )
+
+        try:
+            return _extract_json(content)
+        except (json.JSONDecodeError, ValueError) as exc:
+            if isinstance(exc, json.JSONDecodeError):
+                parse_detail = f"line {exc.lineno}, column {exc.colno}, char {exc.pos}: {exc.msg}"
+            else:
+                parse_detail = str(exc)
+            next_budget = _next_retry_budget(budget, cfg.max_completion_tokens) if native_openai else budget
+            if attempt + 1 < _DIRECTOR_MAX_ATTEMPTS:
+                if native_openai and next_budget > budget:
+                    progress(
+                        f"AI director: malformed JSON ({parse_detail}); retrying with {next_budget} tokens"
+                    )
+                    budget = next_budget
+                else:
+                    progress(f"AI director: malformed JSON ({parse_detail}); retrying once")
+                retry_feedback = (
+                    "The previous attempt was not parseable JSON. Return exactly one COMPLETE JSON object, "
+                    "with no markdown or commentary, and keep section patches concise."
+                )
+                continue
+            raise RuntimeError(
+                "AI director returned malformed JSON after retries "
+                f"({stats}; {parse_detail})."
+            ) from exc
+
+    raise RuntimeError("AI director failed to produce a usable whole-song plan")
 
 
 def _blend(base: SectionAIDirection, proposed: SectionAIDirection, strength: float) -> SectionAIDirection:
@@ -498,7 +599,7 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, res
         "base_url": config.base_url,
         "sections": _track_summary(track),
         "resources": resource_manifest or {},
-        "director_schema": 2,
+        "director_schema": 3,
     }, sort_keys=True).encode()).hexdigest()
     cache = root / f"{digest}.json"
     if cache.is_file() and not config.force:
@@ -506,7 +607,7 @@ def attach_llm_directions(track: TrackAnalysis, *, config: AIDirectorConfig, res
         progress("AI director: loaded cached whole-song plan")
     else:
         progress(f"AI director: requesting whole-song plan from {config.model}")
-        result = _call_llm(track, config, resource_manifest)
+        result = _call_llm(track, config, resource_manifest, progress=progress)
         tmp = cache.with_suffix(".tmp")
         tmp.write_text(json.dumps(result, indent=2, sort_keys=True))
         tmp.replace(cache)
