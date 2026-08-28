@@ -20,6 +20,8 @@ timeline format.
 >
 > Tubeviz started as a quick experiment to see whether video could be automatically cut to music. Then things escalated. It’s now a full video-analysis, composition, and rendering system—and it’s still very much a work in progress, so beware of rough edges and sudden changes.
 
+![Tubeviz Studio — Timeline](screenshots/screenshot-timeline-example.png)
+
 
 ## Sample videos
 
