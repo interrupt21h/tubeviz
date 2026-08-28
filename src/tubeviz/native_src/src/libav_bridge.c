@@ -4,4 +4,6 @@
 #ifdef TUBEVIZ_HAVE_PLACEBO
 #define PL_LIBAV_IMPLEMENTATION 1
 #include <libplacebo/utils/libav.h>
+#else
+typedef int tubeviz_libav_bridge_disabled;
 #endif

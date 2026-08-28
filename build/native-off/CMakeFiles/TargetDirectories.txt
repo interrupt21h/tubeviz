@@ -1,7 +1,0 @@
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/tubeviz-native-render.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/edit_cache.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/rebuild_cache.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/list_install_components.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/install.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/install/local.dir
-/home/runner/work/tubeviz/tubeviz/build/native-off/CMakeFiles/install/strip.dir

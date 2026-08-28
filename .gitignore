@@ -9,3 +9,5 @@ sample/machine-viz-test.mp4
 HF_TOKEN.txt
 .pytest_cache
 libraries
+
+build/

@@ -18,6 +18,7 @@ extern "C" {
 #include <libplacebo/log.h>
 #include <libplacebo/renderer.h>
 #include <libplacebo/shaders/custom.h>
+#define PL_LIBAV_IMPLEMENTATION 0
 #include <libplacebo/utils/libav.h>
 #include <libplacebo/vulkan.h>
 #endif

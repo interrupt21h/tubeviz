@@ -46,7 +46,7 @@ Args parse_args(int argc, char** argv) {
 #ifdef TUBEVIZ_HAVE_PLACEBO
             std::cout << "tubeviz-native-render 0.42.0 ffmpeg+vulkan/libplacebo";
 #else
-            std::cout << "tubeviz-native-render 0.41.0 ffmpeg";
+            std::cout << "tubeviz-native-render 0.42.0 ffmpeg";
 #endif
 #ifdef TUBEVIZ_HAVE_OPENMP
             std::cout << "+openmp";
