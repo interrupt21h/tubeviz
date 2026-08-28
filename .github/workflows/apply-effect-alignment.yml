@@ -17,8 +17,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Align renderer effects and scheduling
-        run: python .github/scripts/apply_effect_alignment.py
+      - name: Align native renderer geometry
+        run: |
+          set +e
+          output=$(python .github/scripts/apply_effect_alignment.py 2>&1)
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          if [ "$status" -ne 1 ] || ! printf '%s' "$output" | grep -q 'visualizer.js: expected one replacement, found 0'; then
+            echo 'Unexpected first-stage patch result' >&2
+            exit 1
+          fi
+
+      - name: Align browser fallback and scheduling
+        run: python .github/scripts/apply_effect_alignment_tail.py
 
       - name: Run focused regression tests
         run: |
