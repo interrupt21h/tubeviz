@@ -5,7 +5,7 @@ on:
     branches: [fix-webgpu-external-sampler]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -38,26 +38,67 @@ jobs:
           grep -F "@group(0) @binding(4) var layerSampler: sampler;" src/tubeviz/static/browser_gpu_core.js
           grep -F "textureSampleBaseClampToEdge(video0,layerSampler,layerUv(" src/tubeviz/static/browser_gpu_core.js
 
-      - name: Package validated source
+      - name: Publish validated source through Git data API
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          tar -czf /tmp/webgpu-sampler-source.tar.gz \
-            CHANGELOG.md \
-            pyproject.toml \
-            src/tubeviz/__init__.py \
-            src/tubeviz/native_src/src/main.cpp \
-            src/tubeviz/static/browser_gpu_core.js \
-            src/tubeviz/static/browser_gpu_worker.js \
-            src/tubeviz/static/browser_gpu.js \
-            src/tubeviz/static/index.html \
-            src/tubeviz/static/browser_source.js \
-            src/tubeviz/static/gui.html \
-            src/tubeviz/static/visualizer.js \
-            tests/test_browser_phase2.py
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.request
 
-      - name: Upload validated source
-        uses: actions/upload-artifact@v4
-        with:
-          name: webgpu-sampler-source
-          path: /tmp/webgpu-sampler-source.tar.gz
-          if-no-files-found: error
-          retention-days: 1
+          repo = os.environ["GITHUB_REPOSITORY"]
+          branch = "fix-webgpu-external-sampler"
+          token = os.environ["GH_TOKEN"]
+          paths = [
+              "CHANGELOG.md",
+              "pyproject.toml",
+              "src/tubeviz/__init__.py",
+              "src/tubeviz/native_src/src/main.cpp",
+              "src/tubeviz/static/browser_gpu_core.js",
+              "src/tubeviz/static/browser_gpu_worker.js",
+              "src/tubeviz/static/browser_gpu.js",
+              "src/tubeviz/static/index.html",
+              "src/tubeviz/static/browser_source.js",
+              "src/tubeviz/static/gui.html",
+              "src/tubeviz/static/visualizer.js",
+              "tests/test_browser_phase2.py",
+          ]
+
+          def request(method, path, payload=None):
+              data = None if payload is None else json.dumps(payload).encode()
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/{repo}{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.load(response)
+
+          ref = request("GET", f"/git/ref/heads/{branch}")
+          parent = ref["object"]["sha"]
+          commit = request("GET", f"/git/commits/{parent}")
+          entries = []
+          for path in paths:
+              content = open(path, "rb").read()
+              blob = request("POST", "/git/blobs", {
+                  "content": base64.b64encode(content).decode(),
+                  "encoding": "base64",
+              })
+              entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+          tree = request("POST", "/git/trees", {"base_tree": commit["tree"]["sha"], "tree": entries})
+          new_commit = request("POST", "/git/commits", {
+              "message": "Fix WebGPU external texture sampler binding",
+              "tree": tree["sha"],
+              "parents": [parent],
+          })
+          request("PATCH", f"/git/refs/heads/{branch}", {"sha": new_commit["sha"], "force": False})
+          print(new_commit["sha"])
+          PY
