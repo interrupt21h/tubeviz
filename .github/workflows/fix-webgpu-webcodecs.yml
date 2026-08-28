@@ -48,12 +48,12 @@ jobs:
 
       - name: Commit validated source fix
         run: |
-          git rm .github/scripts/fix_webgpu_webcodecs.py
-          git rm .github/workflows/fix-webgpu-webcodecs.yml
+          # CI expansion was validated above, but workflow files are deliberately
+          # left unchanged here because GITHUB_TOKEN may not rewrite workflows.
+          git checkout -- .github/workflows/ci.yml
           git add \
             pyproject.toml \
             CHANGELOG.md \
-            .github/workflows/ci.yml \
             tests/test_browser_phase2.py \
             src/tubeviz/__init__.py \
             src/tubeviz/native_src/src/main.cpp \
