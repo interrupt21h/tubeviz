@@ -1,0 +1,80 @@
+name: Validate AI director authority
+
+on:
+  push:
+    branches: [ai-director-authority]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Apply director authority patch
+        run: |
+          python .github/scripts/apply_ai_director_authority.py
+          python .github/scripts/fix_ai_effect_normalization.py
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Validate application
+        run: |
+          python -m compileall -q src/tubeviz
+          for f in src/tubeviz/static/*.js; do node --check "$f"; done
+          python -m pytest -ra --strict-config --strict-markers
+          grep -F 'version = "0.43.0"' pyproject.toml
+          grep -F 'class AIDirectorBeat' src/tubeviz/models.py
+          grep -F 'director_beats' src/tubeviz/ai_music_director.py
+          grep -F 'id="director-meta"' src/tubeviz/static/index.html
+          grep -F 'AI director active' src/tubeviz/static/visualizer.js
+          grep -F 'director shot focus' src/tubeviz/scene_selector.py
+
+      - name: Commit validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Scott Muller"
+          git config user.email "scott@21h.io"
+          git add \
+            CHANGELOG.md \
+            pyproject.toml \
+            src/tubeviz/__init__.py \
+            src/tubeviz/ai_edit_consultant.py \
+            src/tubeviz/ai_music_director.py \
+            src/tubeviz/ai_resources.py \
+            src/tubeviz/cli.py \
+            src/tubeviz/creative_effects.py \
+            src/tubeviz/gui.py \
+            src/tubeviz/models.py \
+            src/tubeviz/scene_selector.py \
+            src/tubeviz/native_src/src/main.cpp \
+            src/tubeviz/static/browser_gpu.js \
+            src/tubeviz/static/browser_gpu_worker.js \
+            src/tubeviz/static/browser_source.js \
+            src/tubeviz/static/gui.html \
+            src/tubeviz/static/index.html \
+            src/tubeviz/static/visualizer.js \
+            tests/test_ai_director_authority.py
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "Give AI director visible creative authority"
+          git push origin HEAD:ai-director-authority
