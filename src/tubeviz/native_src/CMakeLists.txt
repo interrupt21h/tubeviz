@@ -25,6 +25,7 @@ add_executable(tubeviz-native-render
     src/decoder.cpp
     src/effects.cpp
     src/gpu.cpp
+    src/libav_bridge.cpp
     src/resident_gpu.cpp
     src/renderer.cpp
 )
