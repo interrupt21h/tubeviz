@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tubeviz"
-version = "0.44.0"
+version = "0.44.1"
 description = "AI-directed music visualizer with a searchable local video clip library"
 readme = "README.md"
 authors = [

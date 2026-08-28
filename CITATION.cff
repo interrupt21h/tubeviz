@@ -7,8 +7,7 @@ type: software
 authors:
   - family-names: "Muller"
     given-names: "Scott"
-
-orcid: "https://orcid.org/0009-0001-2561-3255"
+    orcid: "https://orcid.org/0009-0001-2561-3255"
 
 abstract: >
   Tubeviz is an AI-directed, beat-synchronized music video generation system
@@ -16,7 +15,7 @@ abstract: >
   interactive timeline inspection, creative effects, and GPU-accelerated
   rendering to produce directed music videos from curated source footage.
 
-version: "0.44.0"
+version: "0.44.1"
 date-released: "2026-08-28"
 
 repository-code: "https://github.com/interrupt21h/tubeviz"

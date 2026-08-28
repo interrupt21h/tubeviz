@@ -1,3 +1,33 @@
+# 0.44.1 — Rendering and preview reliability
+
+## Preview and WebGPU
+
+- Prevent live WebGPU preview from accumulating stale GPU work when rendering cannot keep pace with playback; obsolete preview frames are dropped rather than queued behind the audio clock.
+- Decouple live preview timing from individual source-video decoder callbacks so source seeking, buffering, or decode stalls cannot freeze the entire visual preview.
+- Preserve responsive preview behavior under load with bounded in-flight GPU work while leaving deterministic offline/browser rendering and final native output unchanged.
+- Refresh browser module cache-bust identifiers and regression coverage for the updated preview path.
+
+## Visual effects and renderer parity
+
+- Replace the previous Cartesian ripple distortion with a true aspect-corrected radial displacement centered on the active visual target, producing concentric ripple/shockwave motion instead of dark swirl artifacts.
+- Separate vortex into a dedicated tangential rotational distortion rather than folding it into generic warp behavior.
+- Align ripple, vortex, beat-warp, chroma, RGB split, bloom, and related effect behavior across WebGPU, native GPU, native CPU, and Canvas2D fallback paths.
+- Apply ripple and vortex once at the native post-composite stage instead of repeatedly per source layer and again after composition.
+- Reduce excessive effect stacking with more conservative scheduling defaults, cooldowns, and occurrence gating so destructive effects act as musical punctuation rather than persistent wallpaper.
+
+## AI Director
+
+- Recover more reliably from truncated and malformed whole-song AI Director responses.
+- Retry incomplete responses with larger completion budgets and stricter complete-JSON guidance while keeping deterministic planning authoritative.
+- Reduce response size through sparse section patches over the deterministic baseline and improve diagnostics when a response cannot be recovered.
+
+## Project metadata and maintenance
+
+- Refresh README/demo media organization and project attribution/citation metadata.
+- Correct the CFF author ORCID placement and update release metadata for 0.44.1.
+- Expand regression coverage for preview timing, WebGPU backpressure, effect alignment, source decoding, and browser asset versioning.
+- Remove temporary implementation helpers used while aligning the effect renderers.
+
 # 0.44.0 — Studio workflow, Timeline, and preview reliability
 
 ## Studio workflow and navigation
