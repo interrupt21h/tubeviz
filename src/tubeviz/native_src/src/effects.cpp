@@ -348,15 +348,25 @@ void apply_reactive_effects(
                         }
                     }
                 }
+                const double aspect = static_cast<double>(width) / std::max(1, height);
                 if (vortex > .015) {
-                    px = u - cx; py = v - cy;
-                    const double angle = vortex * .018;
+                    double vx = (u - cx) * aspect, vy = v - cy;
+                    const double vr = std::hypot(vx, vy);
+                    const double q = smooth(.04, .95, vr);
+                    const double angle = vortex * .24 * (1.0 - q);
                     const double cs = std::cos(angle), sn = std::sin(angle);
-                    u = cx + cs * px - sn * py; v = cy + sn * px + cs * py;
+                    const double rx = cs * vx - sn * vy, ry = sn * vx + cs * vy;
+                    u = cx + rx / aspect; v = cy + ry;
                 }
                 if (ripple > .015) {
-                    u += std::sin(v * 24.0 + phase * 3.7 + u * 5.0) * ripple * .006;
-                    v += std::cos(u * 19.0 - phase * 3.1 + v * 4.0) * ripple * .0043;
+                    double rx = (u - cx) * aspect, ry = v - cy;
+                    const double rr = std::hypot(rx, ry);
+                    if (rr > 1e-6) {
+                        const double falloff = 1.0 - smooth(.03, 1.05, rr);
+                        const double disp = std::sin(rr * 34.0 - phase * 4.6) * ripple * .0105 * falloff;
+                        u += (rx / rr) * disp / aspect;
+                        v += (ry / rr) * disp;
+                    }
                 }
                 u = std::clamp(u, 0.0, 1.0); v = std::clamp(v, 0.0, 1.0);
                 const int ix = std::clamp(static_cast<int>(u * (width - 1) + 0.5), 0, width - 1);
@@ -436,9 +446,20 @@ void apply_post_transform_effects(
             double sx=x, sy=y;
             double nx=(x-cx)/std::max(1.0,cx), ny=(y-cy)/std::max(1.0,cy);
             double r=std::hypot(nx,ny), a=std::atan2(ny,nx);
-            if(vortex>.01){ const double q=vortex*.42*(1.0-std::min(1.0,r)); a-=q; sx=cx+std::cos(a)*r*cx; sy=cy+std::sin(a)*r*cy; }
+            if(vortex>.01){
+                const double ux=sx/std::max(1,width-1), uy=sy/std::max(1,height-1), aspect=static_cast<double>(width)/std::max(1,height);
+                double vx=(ux-.5)*aspect, vy=uy-.5; const double vr=std::hypot(vx,vy);
+                const double q0=std::clamp((vr-.04)/.91,0.0,1.0), q=q0*q0*(3.0-2.0*q0);
+                const double angle=vortex*.24*(1.0-q), cs=std::cos(angle), sn=std::sin(angle);
+                const double rx=cs*vx-sn*vy, ry=sn*vx+cs*vy;
+                sx=(.5+rx/aspect)*(width-1); sy=(.5+ry)*(height-1);
+            }
             if(tunnel>.01){ const double z=1.0 + tunnel*.16*std::sin(phase*2.1+r*12.0); sx=cx+(sx-cx)/z; sy=cy+(sy-cy)/z; }
-            if(ripple>.01){ sx += std::sin((sy/height)*26.0+phase*3.4)*width*.010*ripple; sy += std::cos((sx/width)*21.0-phase*2.9)*height*.007*ripple; }
+            if(ripple>.01){
+                double ux=sx/std::max(1,width-1), uy=sy/std::max(1,height-1), aspect=static_cast<double>(width)/std::max(1,height);
+                double rx=(ux-.5)*aspect, ry=uy-.5; const double rr=std::hypot(rx,ry);
+                if(rr>1e-6){const double q0=std::clamp((rr-.03)/1.02,0.0,1.0), falloff=1.0-q0*q0*(3.0-2.0*q0);const double disp=std::sin(rr*34.0-phase*4.6)*ripple*.0105*falloff;ux+=(rx/rr)*disp/aspect;uy+=(ry/rr)*disp;sx=ux*(width-1);sy=uy*(height-1);}
+            }
             if(kaleido>.01){
                 const int seg=3+static_cast<int>(kaleido*7.0); const double sector=6.28318530717958647692/seg;
                 double aa=std::fmod(a+6.28318530717958647692,sector); if(aa>sector*.5) aa=sector-aa;

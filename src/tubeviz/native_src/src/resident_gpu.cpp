@@ -458,6 +458,21 @@ constexpr std::string_view kFinalShader = R"SHADER(
 //!MINIMUM 0.5
 //!MAXIMUM 3.0
 1.0
+//!PARAM beat_variant
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 16.0
+0.0
+//!PARAM beat_phase
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.0
+//!PARAM beat_polarity
+//!TYPE DYNAMIC float
+//!MINIMUM -1.0
+//!MAXIMUM 1.0
+1.0
 //!PARAM ripple
 //!TYPE DYNAMIC float
 //!MINIMUM 0.0
@@ -593,10 +608,27 @@ vec4 hook(){
     vec2 drift=vec2(sin(progress*5.0+phase*.08)*drift_x*.010,sin(progress*4.0+phase*.07)*drift_y*.008)*camera;
     uv=center+(d-drift)/max(zoom,.2);
 
-    if(beat>.0001){vec2 bc=vec2(beat_center_x,beat_center_y),bp=uv-bc;float br=max(length(bp),.001);vec2 dir=vec2(cos(beat_direction),sin(beat_direction)),nrm=vec2(-dir.y,dir.x);float ba=beat*(.72+.20*beat_low+.13*beat_mid+.08*beat_high);if(beat_mode<1.5)uv-=bp*ba*.065*(1.0-smoothstep(.1,.85,br));else if(beat_mode<3.0)uv+=dir*sin(dot(bp,nrm)*28.0*beat_frequency+phase*8.0)*ba*.034;else if(beat_mode<4.5){float a=ba*.18*(1.0-smoothstep(.1,.8,br));float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}else if(beat_mode<6.0)uv+=vec2(bp.x*bp.y,(bp.x*bp.x-bp.y*bp.y)*.55)*ba*.26;else uv-=bp*ba*.08*(1.0-smoothstep(.05,.72,br));}
+    if (beat > .0001) {
+        vec2 bc=clamp(vec2(beat_center_x,beat_center_y),vec2(.08),vec2(.92));
+        vec2 bp=uv-bc; float br=length(bp);
+        float pol=beat_polarity>=0.0?1.0:-1.0;
+        vec2 dir=vec2(cos(beat_direction),sin(beat_direction)),nrm=vec2(-dir.y,dir.x);
+        float ba=beat*(.72+.20*beat_low+.13*beat_mid+.08*beat_high);
+        if(beat_mode<.5){float g=ba*.070*pol*(.72+.28*(1.0-smoothstep(.15,.82,br)));uv-=bp*g;}
+        else if(beat_mode<1.5){float g=ba*.060*pol*(.72+.28*(1.0-smoothstep(.12,.86,br)));uv+=bp*g;}
+        else if(beat_mode<2.5){float osc=sin(dot(bp,nrm)*28.0*beat_frequency+beat_phase*10.0+beat_variant*.57);uv+=dir*osc*ba*.035*pol*(.65+.35*beat_mid);}
+        else if(beat_mode<3.5){float a=ba*.20*pol*(1.0-smoothstep(.10,.78,br))*(.65+.35*sin(beat_phase*3.14159265));float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}
+        else if(beat_mode<4.5){float osc=sin(dot(bp,nrm)*24.0*beat_frequency+beat_phase*12.0+beat_variant*.83);float osc2=cos(dot(bp,dir)*17.0*beat_frequency-beat_phase*8.0);uv+=dir*osc*ba*.027*pol+nrm*osc2*ba*.011;}
+        else if(beat_mode<5.5){uv+=vec2(bp.x*bp.y,(bp.x*bp.x-bp.y*bp.y)*.58)*ba*.34*pol;}
+        else if(beat_mode<6.5){float lens=1.0-smoothstep(.04,.72,br);uv-=bp*ba*.095*pol*lens;}
+        else{float a=ba*.24*pol*(1.0-smoothstep(.05,.88,br));a+=sin(br*34.0*beat_frequency-beat_phase*11.0+beat_variant)*ba*.035;float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}
+        uv=clamp(uv,vec2(.001),vec2(.999));
+    }
 
-    if(vortex>.0001){vec2 vd=uv-center;float r=length(vd);float a=vortex*.075*(1.0-smoothstep(.06,.88,r));float cs=cos(a),sn=sin(a);uv=center+mat2(cs,-sn,sn,cs)*vd;}
-    float wave=flow*.010+ripple*.008;uv.x+=sin(uv.y*24.0+phase*3.7+uv.x*5.0)*wave;uv.y+=cos(uv.x*19.0-phase*3.1+uv.y*4.0)*wave*.72;
+    float aspect=max(.35,HOOKED_pt.y/max(HOOKED_pt.x,1e-6));
+    if(vortex>.0001){vec2 vp=uv-center;vp.x*=aspect;float vr=length(vp);float va=vortex*.24*(1.0-smoothstep(.04,.95,vr));float cs=cos(va),sn=sin(va);vp=mat2(cs,-sn,sn,cs)*vp;vp.x/=aspect;uv=center+vp;}
+    if(ripple>.0001){vec2 rp=uv-center;rp.x*=aspect;float rr=length(rp);vec2 radial=rp/max(rr,.0001);float ring=sin(rr*34.0-phase*4.6);float falloff=1.0-smoothstep(.03,1.05,rr);rp+=radial*ring*ripple*.0105*falloff;rp.x/=aspect;uv=center+rp;}
+    float wave=flow*.010;uv.x+=sin(uv.y*24.0+phase*3.7+uv.x*5.0)*wave;uv.y+=cos(uv.x*19.0-phase*3.1+uv.y*4.0)*wave*.72;
     vec4 reference=HOOKED_tex(clamp(p0,vec2(.001),vec2(.999)));
     float rl=dot(reference.rgb,vec3(.2126,.7152,.0722));float dep=clamp(.18+.56*(1.0-p0.y)+.06*(1.0-rl),0.0,1.0)-.5;uv+=vec2(drift_x*.018,drift_y*.014)*dep*depth;
 
@@ -848,8 +880,11 @@ bool ResidentGpuPipeline::render(
         set_param(impl_->layer_hook, "noise", static_cast<float>(t.noise));
         set_param(impl_->layer_hook, "pixelate", static_cast<float>(t.pixelate));
         set_param(impl_->layer_hook, "rgb_split", static_cast<float>(t.rgb_split));
-        set_param(impl_->layer_hook, "ripple", static_cast<float>(t.ripple));
-        set_param(impl_->layer_hook, "vortex", static_cast<float>(t.vortex));
+        // Ripple/vortex are post-composite spatial grammar. Applying them per
+        // source layer and again in the final pass doubled their strength and
+        // made layered scenes collapse into circular artifacts.
+        set_param(impl_->layer_hook, "ripple", 0.0f);
+        set_param(impl_->layer_hook, "vortex", 0.0f);
         set_param(impl_->layer_hook, "blur", static_cast<float>(t.blur_px));
         set_param(impl_->layer_hook, "comp_mode", static_cast<float>(composition_id(composition_mode)));
         set_param(impl_->layer_hook, "layer_index", static_cast<float>(i));
@@ -878,7 +913,10 @@ bool ResidentGpuPipeline::render(
     const double flow = (creative.flow_warp + creative.background_warp * .42) * curve4(creative.flow_warp_envelope, progress) + hero * .18;
     const double depth = creative.depth_parallax * curve4(creative.depth_envelope, progress) + hero * .20;
     const double symmetry = creative.local_symmetry * curve4(creative.symmetry_envelope, progress) + (creative.hero_kind == "time_prism" ? hero * .7 : 0.0);
-    const double bloom = creative.texture_bloom * curve4(creative.bloom_envelope, progress) + reactive.bloom * .85;
+    const double bloom = std::max(
+        creative.texture_bloom * curve4(creative.bloom_envelope, progress),
+        reactive.bloom * .75
+    );
     const double streaks = creative.texture_streaks * curve4(creative.streaks_envelope, progress);
     const double palette = creative.palette_strength * curve4(creative.palette_envelope, progress);
 
@@ -928,8 +966,11 @@ bool ResidentGpuPipeline::render(
     set_param(impl_->final_hook, "beat_center_y", static_cast<float>(reactive.beat_center_y));
     set_param(impl_->final_hook, "beat_direction", static_cast<float>(reactive.beat_direction));
     set_param(impl_->final_hook, "beat_frequency", static_cast<float>(reactive.beat_frequency));
-    set_param(impl_->final_hook, "ripple", static_cast<float>(post.ripple + reactive.ripple * .7 + reactive.tempo_warp * .55));
-    set_param(impl_->final_hook, "vortex", static_cast<float>(post.vortex + reactive.vortex));
+    set_param(impl_->final_hook, "beat_variant", static_cast<float>(reactive.beat_variant));
+    set_param(impl_->final_hook, "beat_phase", static_cast<float>(reactive.beat_phase()));
+    set_param(impl_->final_hook, "beat_polarity", static_cast<float>(reactive.beat_polarity));
+    set_param(impl_->final_hook, "ripple", static_cast<float>(std::max({post.ripple, reactive.ripple, reactive.tempo_warp * .55})));
+    set_param(impl_->final_hook, "vortex", static_cast<float>(std::max(post.vortex, reactive.vortex)));
     set_param(impl_->final_hook, "glitch", static_cast<float>(post.glitch));
     set_param(impl_->final_hook, "kaleido", static_cast<float>(std::max(post.kaleidoscope, reactive.kaleidoscope)));
     set_param(impl_->final_hook, "tiles", static_cast<float>(post.tiles));
@@ -943,11 +984,11 @@ bool ResidentGpuPipeline::render(
     set_param(impl_->final_hook, "mask_wipe", static_cast<float>(std::max(post.mask_wipe, reactive.mask)));
     set_param(impl_->final_hook, "solarize", static_cast<float>(std::max(post.solarize, reactive.solarize)));
     set_param(impl_->final_hook, "block", static_cast<float>(post.block_displace));
-    set_param(impl_->final_hook, "chroma", static_cast<float>(post.chroma_delay + reactive.chroma));
+    set_param(impl_->final_hook, "chroma", static_cast<float>(std::max(post.chroma_delay, reactive.chroma)));
     set_param(impl_->final_hook, "vhs", static_cast<float>(post.vhs_tracking));
     set_param(impl_->final_hook, "slice", static_cast<float>(std::max(post.slice_recursion, reactive.slice_recursion)));
     set_param(impl_->final_hook, "pixelate", static_cast<float>(post.pixelate));
-    set_param(impl_->final_hook, "rgb_split", static_cast<float>(post.rgb_split + creative.flow_rgb * curve4(creative.flow_rgb_envelope, progress)));
+    set_param(impl_->final_hook, "rgb_split", static_cast<float>(std::max(post.rgb_split, creative.flow_rgb * curve4(creative.flow_rgb_envelope, progress))));
     set_param(impl_->final_hook, "vector_kind", static_cast<float>(vid));
     set_param(impl_->final_hook, "vector_amount", static_cast<float>(vamount));
     set_param(impl_->final_hook, "vector_opacity", static_cast<float>(vopacity));

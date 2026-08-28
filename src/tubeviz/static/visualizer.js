@@ -1,4 +1,4 @@
-import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.44.0-previewfix1';
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.44.0-previewfix3';
 import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.44.0';
 import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.44.0';
 // SPDX-License-Identifier: Apache-2.0
@@ -638,9 +638,18 @@ function applyShutter(amount){
   fx.drawImage(holdCanvas,0,0);
 }
 function applyRipple(amount){
-  if(amount<=.025)return;snapshot();const slices=Math.max(12,Math.min(64,18+Math.floor(amount*55))),sh=height/slices,amp=width*(.004+.035*amount);
-  fx.save();fx.globalAlpha=.32+.45*amount;
-  for(let i=0;i<slices;i++){const y=i*sh,dx=Math.sin(i*.72+phase*13)*amp*(.35+.65*Math.sin(phase*3+i*.11)**2);fx.drawImage(scratch,0,y,width,sh+1,dx,y,width,sh+1);}
+  if(amount<=.025)return;
+  snapshot();
+  const {x:cx,y:cy}=creativeTarget(),maxR=Math.hypot(Math.max(cx,width-cx),Math.max(cy,height-cy));
+  const rings=12+Math.floor(amount*10),step=maxR/rings,time=clockSeconds();
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.16+.34*amount;
+  for(let i=rings-1;i>=0;i--){
+    const r0=i*step,r1=(i+1)*step,mid=(r0+r1)*.5,n=mid/Math.max(1,maxR);
+    const wave=Math.sin(n*34-time*4.6)*amount*.012*(1-Math.min(1,n));
+    if(Math.abs(wave)<.0002)continue;
+    fx.save();fx.beginPath();fx.arc(cx,cy,r1,0,Math.PI*2);fx.arc(cx,cy,r0,0,Math.PI*2,true);fx.clip('evenodd');
+    const scale=1+wave;fx.translate(cx,cy);fx.scale(scale,scale);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);fx.restore();
+  }
   fx.restore();
 }
 function applyTiles(amount){
@@ -952,12 +961,14 @@ function applyVhsTracking(amount){
 function applyVortex(amount){
   if(amount<=.03)return;
   snapshot();
-  const segments=10+Math.floor(amount*18),cx=width/2,cy=height/2,r=Math.hypot(width,height),step=Math.PI*2/segments;
-  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.055+.24*amount;
-  for(let i=0;i<segments;i++){
-    fx.save();fx.beginPath();fx.moveTo(cx,cy);fx.arc(cx,cy,r,i*step,(i+1)*step);fx.closePath();fx.clip();
-    fx.translate(cx,cy);fx.rotate(Math.sin(i*.9+phase*4)*amount*.20+i*step*.08);
-    const sc=1+.04*amount*Math.sin(i+phase*3);fx.scale(sc,sc);fx.drawImage(scratch,-width/2,-height/2);fx.restore();
+  const {x:cx,y:cy}=creativeTarget(),maxR=Math.hypot(Math.max(cx,width-cx),Math.max(cy,height-cy));
+  const rings=10+Math.floor(amount*8),step=maxR/rings;
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.14+.30*amount;
+  for(let i=rings-1;i>=0;i--){
+    const r0=i*step,r1=(i+1)*step,mid=(r0+r1)*.5,n=mid/Math.max(1,maxR),falloff=1-Math.min(1,n);
+    const angle=amount*.24*falloff;if(Math.abs(angle)<.001)continue;
+    fx.save();fx.beginPath();fx.arc(cx,cy,r1,0,Math.PI*2);fx.arc(cx,cy,r0,0,Math.PI*2,true);fx.clip('evenodd');
+    fx.translate(cx,cy);fx.rotate(angle);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);fx.restore();
   }
   fx.restore();
 }

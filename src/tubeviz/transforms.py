@@ -206,7 +206,7 @@ def plan_transform(
     vortex_gate = _stable_unit(salt + ":vortex")
     vortex = (
         _clamp(intensity * (0.03 + 0.04 * mutation + max(0.0, energy - 0.58) * 0.10 + tonal * 0.05), 0.0, 0.30)
-        if _density_gate(vortex_gate, .22, event_density, preferred="vortex" in preferred) else 0.0
+        if _density_gate(vortex_gate, .12, event_density, preferred="vortex" in preferred) else 0.0
     )
     motion_trails = _clamp(intensity * (0.02 + 0.12 * energy + 0.08 * density + 0.10 * tonal), 0.0, 0.48)
     slice_recursion = _clamp(intensity * max(0.0, density - 0.45) * (0.16 + 0.24 * energy), 0.0, 0.42)
@@ -242,19 +242,19 @@ def plan_transform(
     glitch = accent("horizontal glitch", glitch, .26, .10, aliases=("glitch",))
     pixelate = accent("pixelation", pixelate, .18, .08)
     rgb_split = accent("rgb displacement", rgb_split, .28, .08, retain=.08)
-    ripple = accent("ripple", ripple, .34, .09, retain=.18)
+    ripple = accent("ripple", ripple, .24, .09)
     tunnel = accent("tunnel", tunnel, .14, .07)
     posterize = accent("posterization", posterize, .22, .08)
     edge = accent("edge extraction", edge, .18, .07, aliases=("edge",))
     strobe = accent("strobe", strobe, .16, .08)
     shutter = accent("shutter", shutter, .14, .07)
-    slit_scan = accent("slit scan", slit_scan, .26, .09)
-    frame_echo = accent("frame echo", frame_echo, .32, .10, aliases=("temporal echo",), retain=.10)
-    datamosh = accent("datamosh-like block displacement", datamosh, .24, .10, aliases=("datamosh",))
+    slit_scan = accent("slit scan", slit_scan, .18, .09)
+    frame_echo = accent("frame echo", frame_echo, .26, .10, aliases=("temporal echo",), retain=.05)
+    datamosh = accent("datamosh-like block displacement", datamosh, .16, .10, aliases=("datamosh",))
     block_displace = accent("block displacement", block_displace, .28, .10)
-    chroma_delay = accent("chroma delay", chroma_delay, .28, .08, aliases=("temporal rgb displacement",), retain=.08)
+    chroma_delay = accent("chroma delay", chroma_delay, .24, .08, aliases=("temporal rgb displacement",), retain=.04)
     vhs_tracking = accent("vhs tracking", vhs_tracking, .22, .08)
-    motion_trails = accent("motion trails", motion_trails, .32, .10, retain=.12)
+    motion_trails = accent("motion trails", motion_trails, .26, .10, retain=.05)
     slice_recursion = accent("slice recursion", slice_recursion, .18, .09)
 
     style_options = {

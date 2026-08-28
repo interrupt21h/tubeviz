@@ -143,12 +143,12 @@ def attach_edit_plan(timeline: DirectedTimeline, config: EditConfig | None = Non
                     },
                     cooldown=max(0.10, beat_seconds * 0.65),
                 )
-                if accent > 0.46 or beat_ord % 2 == 1:
+                if beat_ord % 2 == 1 or (accent > 0.82 and beat_ord % 4 == 0):
                     add_effect(
                         event.time,
                         "video_edit_ripple",
                         {"amount": min(0.68, intensity * (0.08 + low * 0.38 + accent * 0.10))},
-                        cooldown=max(0.34, beat_seconds * 0.72),
+                        cooldown=max(0.48, beat_seconds * 1.25),
                     )
 
             # Treble punctuation is brief chromatic/temporal motion. Slit scan is
