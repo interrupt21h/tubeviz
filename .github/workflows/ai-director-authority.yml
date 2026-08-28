@@ -72,7 +72,8 @@ jobs:
             src/tubeviz/static/gui.html \
             src/tubeviz/static/index.html \
             src/tubeviz/static/visualizer.js \
-            tests/test_ai_director_authority.py
+            tests/test_ai_director_authority.py \
+            tests/test_browser_phase2.py
           if git diff --cached --quiet; then
             echo "No source changes to commit"
             exit 0
