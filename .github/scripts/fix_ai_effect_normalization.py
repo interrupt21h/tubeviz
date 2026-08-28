@@ -22,6 +22,11 @@ replace_once(
     '    for name in RASTER_EFFECTS:\n        if name.lower() == raw:\n            return name\n    return None\n',
     '    by_key = {\n        " ".join(name.strip().lower().replace("_", " ").replace("-", " ").split()): name\n        for name in RASTER_EFFECTS\n    }\n    return by_key.get(raw)\n',
 )
+replace_once(
+    "src/tubeviz/gui.py",
+    '            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .75))\n',
+    '            _flag(command, "--ai-director-strength", o.get("ai_director_strength", .95))\n',
+)
 
 test_path = ROOT / "tests/test_ai_director_authority.py"
 text = test_path.read_text()
@@ -29,4 +34,4 @@ addition = '''\n\ndef test_effect_name_normalization_accepts_canonical_hyphenate
 if "test_effect_name_normalization_accepts_canonical_hyphenated_names" not in text:
     test_path.write_text(text + addition)
 
-print("AI effect normalization patch applied")
+print("AI effect normalization and Studio default patch applied")
