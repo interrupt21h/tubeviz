@@ -1,0 +1,381 @@
+name: Apply cross-renderer effect alignment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-effect-alignment.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Align renderer effects and scheduling
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}\n--- old ---\n{old}")
+              p.write_text(text.replace(old, new, 1))
+
+          # ------------------------------------------------------------------
+          # Native resident GPU: use the same beat topology and radial geometry
+          # as WebGPU/fallback libplacebo, and apply spatial post effects once.
+          # ------------------------------------------------------------------
+          resident = "src/tubeviz/native_src/src/resident_gpu.cpp"
+
+          replace_once(
+              resident,
+              '''//!PARAM beat_frequency
+//!TYPE DYNAMIC float
+//!MINIMUM 0.5
+//!MAXIMUM 3.0
+1.0
+//!PARAM ripple''',
+              '''//!PARAM beat_frequency
+//!TYPE DYNAMIC float
+//!MINIMUM 0.5
+//!MAXIMUM 3.0
+1.0
+//!PARAM beat_variant
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 16.0
+0.0
+//!PARAM beat_phase
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.0
+//!PARAM beat_polarity
+//!TYPE DYNAMIC float
+//!MINIMUM -1.0
+//!MAXIMUM 1.0
+1.0
+//!PARAM ripple''',
+          )
+
+          replace_once(
+              resident,
+              '''    if(beat>.0001){vec2 bc=vec2(beat_center_x,beat_center_y),bp=uv-bc;float br=max(length(bp),.001);vec2 dir=vec2(cos(beat_direction),sin(beat_direction)),nrm=vec2(-dir.y,dir.x);float ba=beat*(.72+.20*beat_low+.13*beat_mid+.08*beat_high);if(beat_mode<1.5)uv-=bp*ba*.065*(1.0-smoothstep(.1,.85,br));else if(beat_mode<3.0)uv+=dir*sin(dot(bp,nrm)*28.0*beat_frequency+phase*8.0)*ba*.034;else if(beat_mode<4.5){float a=ba*.18*(1.0-smoothstep(.1,.8,br));float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}else if(beat_mode<6.0)uv+=vec2(bp.x*bp.y,(bp.x*bp.x-bp.y*bp.y)*.55)*ba*.26;else uv-=bp*ba*.08*(1.0-smoothstep(.05,.72,br));}
+
+    if(vortex>.0001){vec2 vd=uv-center;float r=length(vd);float a=vortex*.075*(1.0-smoothstep(.06,.88,r));float cs=cos(a),sn=sin(a);uv=center+mat2(cs,-sn,sn,cs)*vd;}
+    float wave=flow*.010+ripple*.008;uv.x+=sin(uv.y*24.0+phase*3.7+uv.x*5.0)*wave;uv.y+=cos(uv.x*19.0-phase*3.1+uv.y*4.0)*wave*.72;''',
+              '''    if (beat > .0001) {
+        vec2 bc=clamp(vec2(beat_center_x,beat_center_y),vec2(.08),vec2(.92));
+        vec2 bp=uv-bc; float br=length(bp);
+        float pol=beat_polarity>=0.0?1.0:-1.0;
+        vec2 dir=vec2(cos(beat_direction),sin(beat_direction)),nrm=vec2(-dir.y,dir.x);
+        float ba=beat*(.72+.20*beat_low+.13*beat_mid+.08*beat_high);
+        if(beat_mode<.5){float g=ba*.070*pol*(.72+.28*(1.0-smoothstep(.15,.82,br)));uv-=bp*g;}
+        else if(beat_mode<1.5){float g=ba*.060*pol*(.72+.28*(1.0-smoothstep(.12,.86,br)));uv+=bp*g;}
+        else if(beat_mode<2.5){float osc=sin(dot(bp,nrm)*28.0*beat_frequency+beat_phase*10.0+beat_variant*.57);uv+=dir*osc*ba*.035*pol*(.65+.35*beat_mid);}
+        else if(beat_mode<3.5){float a=ba*.20*pol*(1.0-smoothstep(.10,.78,br))*(.65+.35*sin(beat_phase*3.14159265));float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}
+        else if(beat_mode<4.5){float osc=sin(dot(bp,nrm)*24.0*beat_frequency+beat_phase*12.0+beat_variant*.83);float osc2=cos(dot(bp,dir)*17.0*beat_frequency-beat_phase*8.0);uv+=dir*osc*ba*.027*pol+nrm*osc2*ba*.011;}
+        else if(beat_mode<5.5){uv+=vec2(bp.x*bp.y,(bp.x*bp.x-bp.y*bp.y)*.58)*ba*.34*pol;}
+        else if(beat_mode<6.5){float lens=1.0-smoothstep(.04,.72,br);uv-=bp*ba*.095*pol*lens;}
+        else{float a=ba*.24*pol*(1.0-smoothstep(.05,.88,br));a+=sin(br*34.0*beat_frequency-beat_phase*11.0+beat_variant)*ba*.035;float cs=cos(a),sn=sin(a);uv=bc+mat2(cs,-sn,sn,cs)*bp;}
+        uv=clamp(uv,vec2(.001),vec2(.999));
+    }
+
+    float aspect=max(.35,HOOKED_pt.y/max(HOOKED_pt.x,1e-6));
+    if(vortex>.0001){vec2 vp=uv-center;vp.x*=aspect;float vr=length(vp);float va=vortex*.24*(1.0-smoothstep(.04,.95,vr));float cs=cos(va),sn=sin(va);vp=mat2(cs,-sn,sn,cs)*vp;vp.x/=aspect;uv=center+vp;}
+    if(ripple>.0001){vec2 rp=uv-center;rp.x*=aspect;float rr=length(rp);vec2 radial=rp/max(rr,.0001);float ring=sin(rr*34.0-phase*4.6);float falloff=1.0-smoothstep(.03,1.05,rr);rp+=radial*ring*ripple*.0105*falloff;rp.x/=aspect;uv=center+rp;}
+    float wave=flow*.010;uv.x+=sin(uv.y*24.0+phase*3.7+uv.x*5.0)*wave;uv.y+=cos(uv.x*19.0-phase*3.1+uv.y*4.0)*wave*.72;''',
+          )
+
+          replace_once(
+              resident,
+              '''        set_param(impl_->layer_hook, "rgb_split", static_cast<float>(t.rgb_split));
+        set_param(impl_->layer_hook, "ripple", static_cast<float>(t.ripple));
+        set_param(impl_->layer_hook, "vortex", static_cast<float>(t.vortex));
+        set_param(impl_->layer_hook, "blur", static_cast<float>(t.blur_px));''',
+              '''        set_param(impl_->layer_hook, "rgb_split", static_cast<float>(t.rgb_split));
+        // Ripple/vortex are post-composite spatial grammar. Applying them per
+        // source layer and again in the final pass doubled their strength and
+        // made layered scenes collapse into circular artifacts.
+        set_param(impl_->layer_hook, "ripple", 0.0f);
+        set_param(impl_->layer_hook, "vortex", 0.0f);
+        set_param(impl_->layer_hook, "blur", static_cast<float>(t.blur_px));''',
+          )
+
+          replace_once(
+              resident,
+              '''    const double bloom = creative.texture_bloom * curve4(creative.bloom_envelope, progress) + reactive.bloom * .85;''',
+              '''    const double bloom = std::max(
+        creative.texture_bloom * curve4(creative.bloom_envelope, progress),
+        reactive.bloom * .75
+    );''',
+          )
+
+          replace_once(
+              resident,
+              '''    set_param(impl_->final_hook, "beat_direction", static_cast<float>(reactive.beat_direction));
+    set_param(impl_->final_hook, "beat_frequency", static_cast<float>(reactive.beat_frequency));
+    set_param(impl_->final_hook, "ripple", static_cast<float>(post.ripple + reactive.ripple * .7 + reactive.tempo_warp * .55));
+    set_param(impl_->final_hook, "vortex", static_cast<float>(post.vortex + reactive.vortex));''',
+              '''    set_param(impl_->final_hook, "beat_direction", static_cast<float>(reactive.beat_direction));
+    set_param(impl_->final_hook, "beat_frequency", static_cast<float>(reactive.beat_frequency));
+    set_param(impl_->final_hook, "beat_variant", static_cast<float>(reactive.beat_variant));
+    set_param(impl_->final_hook, "beat_phase", static_cast<float>(reactive.beat_phase()));
+    set_param(impl_->final_hook, "beat_polarity", static_cast<float>(reactive.beat_polarity));
+    set_param(impl_->final_hook, "ripple", static_cast<float>(std::max({post.ripple, reactive.ripple, reactive.tempo_warp * .55})));
+    set_param(impl_->final_hook, "vortex", static_cast<float>(std::max(post.vortex, reactive.vortex)));''',
+          )
+
+          replace_once(
+              resident,
+              '''    set_param(impl_->final_hook, "chroma", static_cast<float>(post.chroma_delay + reactive.chroma));
+    set_param(impl_->final_hook, "vhs", static_cast<float>(post.vhs_tracking));
+    set_param(impl_->final_hook, "slice", static_cast<float>(std::max(post.slice_recursion, reactive.slice_recursion)));
+    set_param(impl_->final_hook, "pixelate", static_cast<float>(post.pixelate));
+    set_param(impl_->final_hook, "rgb_split", static_cast<float>(post.rgb_split + creative.flow_rgb * curve4(creative.flow_rgb_envelope, progress)));''',
+              '''    set_param(impl_->final_hook, "chroma", static_cast<float>(std::max(post.chroma_delay, reactive.chroma)));
+    set_param(impl_->final_hook, "vhs", static_cast<float>(post.vhs_tracking));
+    set_param(impl_->final_hook, "slice", static_cast<float>(std::max(post.slice_recursion, reactive.slice_recursion)));
+    set_param(impl_->final_hook, "pixelate", static_cast<float>(post.pixelate));
+    set_param(impl_->final_hook, "rgb_split", static_cast<float>(std::max(post.rgb_split, creative.flow_rgb * curve4(creative.flow_rgb_envelope, progress))));''',
+          )
+
+          # ------------------------------------------------------------------
+          # Native CPU fallback: same radial ripple/tangential vortex grammar.
+          # ------------------------------------------------------------------
+          effects = "src/tubeviz/native_src/src/effects.cpp"
+          replace_once(
+              effects,
+              '''                if (vortex > .015) {
+                    px = u - cx; py = v - cy;
+                    const double angle = vortex * .018;
+                    const double cs = std::cos(angle), sn = std::sin(angle);
+                    u = cx + cs * px - sn * py; v = cy + sn * px + cs * py;
+                }
+                if (ripple > .015) {
+                    u += std::sin(v * 24.0 + phase * 3.7 + u * 5.0) * ripple * .006;
+                    v += std::cos(u * 19.0 - phase * 3.1 + v * 4.0) * ripple * .0043;
+                }''',
+              '''                const double aspect = static_cast<double>(width) / std::max(1, height);
+                if (vortex > .015) {
+                    double vx = (u - cx) * aspect, vy = v - cy;
+                    const double vr = std::hypot(vx, vy);
+                    const double q = smooth(.04, .95, vr);
+                    const double angle = vortex * .24 * (1.0 - q);
+                    const double cs = std::cos(angle), sn = std::sin(angle);
+                    const double rx = cs * vx - sn * vy, ry = sn * vx + cs * vy;
+                    u = cx + rx / aspect; v = cy + ry;
+                }
+                if (ripple > .015) {
+                    double rx = (u - cx) * aspect, ry = v - cy;
+                    const double rr = std::hypot(rx, ry);
+                    if (rr > 1e-6) {
+                        const double falloff = 1.0 - smooth(.03, 1.05, rr);
+                        const double disp = std::sin(rr * 34.0 - phase * 4.6) * ripple * .0105 * falloff;
+                        u += (rx / rr) * disp / aspect;
+                        v += (ry / rr) * disp;
+                    }
+                }''',
+          )
+
+          replace_once(
+              effects,
+              '''            if(vortex>.01){ const double q=vortex*.42*(1.0-std::min(1.0,r)); a-=q; sx=cx+std::cos(a)*r*cx; sy=cy+std::sin(a)*r*cy; }
+            if(tunnel>.01){ const double z=1.0 + tunnel*.16*std::sin(phase*2.1+r*12.0); sx=cx+(sx-cx)/z; sy=cy+(sy-cy)/z; }
+            if(ripple>.01){ sx += std::sin((sy/height)*26.0+phase*3.4)*width*.010*ripple; sy += std::cos((sx/width)*21.0-phase*2.9)*height*.007*ripple; }''',
+              '''            if(vortex>.01){
+                const double ux=sx/std::max(1,width-1), uy=sy/std::max(1,height-1), aspect=static_cast<double>(width)/std::max(1,height);
+                double vx=(ux-.5)*aspect, vy=uy-.5; const double vr=std::hypot(vx,vy);
+                const double q0=std::clamp((vr-.04)/.91,0.0,1.0), q=q0*q0*(3.0-2.0*q0);
+                const double angle=vortex*.24*(1.0-q), cs=std::cos(angle), sn=std::sin(angle);
+                const double rx=cs*vx-sn*vy, ry=sn*vx+cs*vy;
+                sx=(.5+rx/aspect)*(width-1); sy=(.5+ry)*(height-1);
+            }
+            if(tunnel>.01){ const double z=1.0 + tunnel*.16*std::sin(phase*2.1+r*12.0); sx=cx+(sx-cx)/z; sy=cy+(sy-cy)/z; }
+            if(ripple>.01){
+                double ux=sx/std::max(1,width-1), uy=sy/std::max(1,height-1), aspect=static_cast<double>(width)/std::max(1,height);
+                double rx=(ux-.5)*aspect, ry=uy-.5; const double rr=std::hypot(rx,ry);
+                if(rr>1e-6){const double q0=std::clamp((rr-.03)/1.02,0.0,1.0), falloff=1.0-q0*q0*(3.0-2.0*q0);const double disp=std::sin(rr*34.0-phase*4.6)*ripple*.0105*falloff;ux+=(rx/rr)*disp/aspect;uy+=(ry/rr)*disp;sx=ux*(width-1);sy=uy*(height-1);}
+            }''',
+          )
+
+          # ------------------------------------------------------------------
+          # Canvas2D fallback: source-over concentric displacement/tangential
+          # rotation instead of screen-blended stripes/wedges.
+          # ------------------------------------------------------------------
+          visualizer = "src/tubeviz/static/visualizer.js"
+          replace_once(
+              visualizer,
+              '''function applyRipple(amount){
+  if(amount<=.025)return;
+  snapshot();
+  const slices=24,sh=height/slices;
+  fx.save();fx.globalAlpha=.08+.30*amount;
+  for(let i=0;i<slices;i++){
+    const y=i*sh,phase0=(i/slices)*Math.PI*4+phase*5;
+    const dx=Math.sin(phase0)*width*.018*amount;
+    fx.drawImage(scratch,0,y,width,sh+1,dx,y,width,sh+1);
+  }
+  fx.restore();
+}''',
+              '''function applyRipple(amount){
+  if(amount<=.025)return;
+  snapshot();
+  const {x:cx,y:cy}=creativeTarget(),maxR=Math.hypot(Math.max(cx,width-cx),Math.max(cy,height-cy));
+  const rings=12+Math.floor(amount*10),step=maxR/rings,time=clockSeconds();
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.16+.34*amount;
+  for(let i=rings-1;i>=0;i--){
+    const r0=i*step,r1=(i+1)*step,mid=(r0+r1)*.5,n=mid/Math.max(1,maxR);
+    const wave=Math.sin(n*34-time*4.6)*amount*.012*(1-Math.min(1,n));
+    if(Math.abs(wave)<.0002)continue;
+    fx.save();fx.beginPath();fx.arc(cx,cy,r1,0,Math.PI*2);fx.arc(cx,cy,r0,0,Math.PI*2,true);fx.clip('evenodd');
+    const scale=1+wave;fx.translate(cx,cy);fx.scale(scale,scale);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);fx.restore();
+  }
+  fx.restore();
+}''',
+          )
+
+          replace_once(
+              visualizer,
+              '''function applyVortex(amount){
+  if(amount<=.03)return;
+  snapshot();
+  const segments=10+Math.floor(amount*18),cx=width/2,cy=height/2,r=Math.hypot(width,height),step=Math.PI*2/segments;
+  fx.save();fx.globalCompositeOperation='screen';fx.globalAlpha=.055+.24*amount;
+  for(let i=0;i<segments;i++){
+    fx.save();fx.beginPath();fx.moveTo(cx,cy);fx.arc(cx,cy,r,i*step,(i+1)*step);fx.closePath();fx.clip();
+    fx.translate(cx,cy);fx.rotate(Math.sin(i*.9+phase*4)*amount*.20+i*step*.08);
+    const sc=1+.04*amount*Math.sin(i+phase*3);fx.scale(sc,sc);fx.drawImage(scratch,-width/2,-height/2);fx.restore();
+  }
+  fx.restore();
+}''',
+              '''function applyVortex(amount){
+  if(amount<=.03)return;
+  snapshot();
+  const {x:cx,y:cy}=creativeTarget(),maxR=Math.hypot(Math.max(cx,width-cx),Math.max(cy,height-cy));
+  const rings=10+Math.floor(amount*8),step=maxR/rings;
+  fx.save();fx.globalCompositeOperation='source-over';fx.globalAlpha=.14+.30*amount;
+  for(let i=rings-1;i>=0;i--){
+    const r0=i*step,r1=(i+1)*step,mid=(r0+r1)*.5,n=mid/Math.max(1,maxR),falloff=1-Math.min(1,n);
+    const angle=amount*.24*falloff;if(Math.abs(angle)<.001)continue;
+    fx.save();fx.beginPath();fx.arc(cx,cy,r1,0,Math.PI*2);fx.arc(cx,cy,r0,0,Math.PI*2,true);fx.clip('evenodd');
+    fx.translate(cx,cy);fx.rotate(angle);fx.translate(-cx,-cy);fx.drawImage(scratch,0,0,width,height);fx.restore();
+  }
+  fx.restore();
+}''',
+          )
+
+          replace_once(
+              visualizer,
+              "import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.44.0-previewfix1';",
+              "import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.44.0-previewfix3';",
+          )
+
+          # ------------------------------------------------------------------
+          # Persistent transform defaults: rare heavy accents, no always-on
+          # ripple residue, and lower retain for temporal/chromatic treatments.
+          # ------------------------------------------------------------------
+          transforms = "src/tubeviz/transforms.py"
+          replacements = {
+              'ripple = accent("ripple", ripple, .34, .09, retain=.18)': 'ripple = accent("ripple", ripple, .24, .09)',
+              'slit_scan = accent("slit scan", slit_scan, .26, .09)': 'slit_scan = accent("slit scan", slit_scan, .18, .09)',
+              'frame_echo = accent("frame echo", frame_echo, .32, .10, aliases=("temporal echo",), retain=.10)': 'frame_echo = accent("frame echo", frame_echo, .26, .10, aliases=("temporal echo",), retain=.05)',
+              'datamosh = accent("datamosh-like block displacement", datamosh, .24, .10, aliases=("datamosh",))': 'datamosh = accent("datamosh-like block displacement", datamosh, .16, .10, aliases=("datamosh",))',
+              'chroma_delay = accent("chroma delay", chroma_delay, .28, .08, aliases=("temporal rgb displacement",), retain=.08)': 'chroma_delay = accent("chroma delay", chroma_delay, .24, .08, aliases=("temporal rgb displacement",), retain=.04)',
+              'motion_trails = accent("motion trails", motion_trails, .32, .10, retain=.12)': 'motion_trails = accent("motion trails", motion_trails, .26, .10, retain=.05)',
+              '_density_gate(vortex_gate, .22, event_density, preferred="vortex" in preferred)': '_density_gate(vortex_gate, .12, event_density, preferred="vortex" in preferred)',
+          }
+          for old, new in replacements.items():
+              replace_once(transforms, old, new)
+
+          # Strong bass accents should not retrigger a full pressure wave on every
+          # quarter note at common dance tempos.
+          editing = "src/tubeviz/editing.py"
+          replace_once(
+              editing,
+              '''                if accent > 0.46 or beat_ord % 2 == 1:
+                    add_effect(
+                        event.time,
+                        "video_edit_ripple",
+                        {"amount": min(0.68, intensity * (0.08 + low * 0.38 + accent * 0.10))},
+                        cooldown=max(0.34, beat_seconds * 0.72),
+                    )''',
+              '''                if beat_ord % 2 == 1 or (accent > 0.82 and beat_ord % 4 == 0):
+                    add_effect(
+                        event.time,
+                        "video_edit_ripple",
+                        {"amount": min(0.68, intensity * (0.08 + low * 0.38 + accent * 0.10))},
+                        cooldown=max(0.48, beat_seconds * 1.25),
+                    )''',
+          )
+
+          # Cache-bust the visualizer itself so the new Canvas/WebGPU import chain
+          # cannot be hidden behind the previous module URL.
+          replace_once(
+              "src/tubeviz/static/index.html",
+              '<script type="module" src="/static/visualizer.js?v=0.44.0-timeline1"></script>',
+              '<script type="module" src="/static/visualizer.js?v=0.44.0-effects1"></script>',
+          )
+
+          # Regression coverage for the active resident path and fallbacks.
+          test = Path("tests/test_effect_alignment.py")
+          text = test.read_text()
+          text += '''
+
+
+def test_resident_native_gpu_uses_post_composite_radial_spatial_grammar():
+    source = Path("src/tubeviz/native_src/src/resident_gpu.cpp").read_text()
+    assert "float ring=sin(rr*34.0-phase*4.6)" in source
+    assert "float va=vortex*.24*(1.0-smoothstep(.04,.95,vr))" in source
+    assert 'set_param(impl_->layer_hook, "ripple", 0.0f)' in source
+    assert 'set_param(impl_->layer_hook, "vortex", 0.0f)' in source
+    assert 'set_param(impl_->final_hook, "beat_variant"' in source
+    assert 'set_param(impl_->final_hook, "beat_phase"' in source
+    assert 'set_param(impl_->final_hook, "beat_polarity"' in source
+    assert "float wave=flow*.010+ripple*.008" not in source
+
+
+def test_canvas_fallback_uses_radial_source_over_geometry():
+    source = Path("src/tubeviz/static/visualizer.js").read_text()
+    ripple = source.split("function applyRipple(amount){", 1)[1].split("function applyKaleidoscope", 1)[0]
+    vortex = source.split("function applyVortex(amount){", 1)[1].split("function applyMotionTrails", 1)[0]
+    assert "fx.clip('evenodd')" in ripple
+    assert "globalCompositeOperation='source-over'" in ripple
+    assert "n*34-time*4.6" in ripple
+    assert "fx.clip('evenodd')" in vortex
+    assert "globalCompositeOperation='source-over'" in vortex
+    assert "amount*.24*falloff" in vortex
+
+
+def test_persistent_heavy_effect_defaults_are_sparse():
+    source = Path("src/tubeviz/transforms.py").read_text()
+    assert 'ripple = accent("ripple", ripple, .24, .09)' in source
+    assert 'slit_scan = accent("slit scan", slit_scan, .18, .09)' in source
+    assert 'datamosh = accent("datamosh-like block displacement", datamosh, .16, .10' in source
+    assert '_density_gate(vortex_gate, .12, event_density' in source
+'''
+          test.write_text(text)
+          PY
+
+      - name: Run focused regression tests
+        run: |
+          python -m pip install -e '.[test]' >/dev/null
+          pytest -q tests/test_effect_alignment.py tests/test_editing.py tests/test_render_optimization.py
+
+      - name: Commit aligned effects
+        run: |
+          git config user.name "Scott Muller"
+          git config user.email "scott@21h.io"
+          git add src/tubeviz tests/test_effect_alignment.py
+          git commit -m "Align radial effects across renderers"
+          git push origin HEAD:main
