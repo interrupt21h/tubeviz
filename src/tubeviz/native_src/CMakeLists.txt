@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
-project(tubeviz_native LANGUAGES CXX)
+project(tubeviz_native LANGUAGES C CXX)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -25,7 +28,7 @@ add_executable(tubeviz-native-render
     src/decoder.cpp
     src/effects.cpp
     src/gpu.cpp
-    src/libav_bridge.cpp
+    src/libav_bridge.c
     src/resident_gpu.cpp
     src/renderer.cpp
 )
