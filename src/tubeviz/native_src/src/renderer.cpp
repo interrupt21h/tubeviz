@@ -2,9 +2,11 @@
 #include "tubeviz/renderer.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <iostream>
+#include <new>
 #include <set>
 #include <stdexcept>
 #include <thread>
@@ -16,9 +18,19 @@
 namespace tubeviz {
 namespace {
 
+using Clock = std::chrono::steady_clock;
+
+double elapsed_ms(Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+}
+
 bool temporal_hero(const CreativeEffect& c) {
     return c.hero_kind == "flow_melt" || c.hero_kind == "subject_echo" ||
            c.hero_kind == "time_prism" || c.hero_kind == "recursive_portal";
+}
+
+bool gpu_mode_enabled(const std::string& mode) {
+    return mode != "off" && mode != "none" && mode != "cpu";
 }
 
 } // namespace
@@ -48,7 +60,10 @@ Renderer::Renderer(
         omp_set_num_threads(threads_);
     }
 #endif
-    gpu_ = std::make_unique<GpuPostProcessor>(width_, height_, gpu_mode_);
+    resident_ = std::make_unique<ResidentGpuPipeline>(width_, height_, gpu_mode_);
+    if (!resident_->available()) {
+        gpu_ = std::make_unique<GpuPostProcessor>(width_, height_, gpu_mode_);
+    }
 }
 
 Decoder& Renderer::decoder_for(const std::string& path) {
@@ -68,12 +83,8 @@ Decoder& Renderer::decoder_for(const std::string& path) {
 }
 
 void Renderer::warm_shot(const Shot& shot) {
-    // Opening demuxer/codec state is surprisingly expensive for short,
-    // high-novelty edits. Keep current/next-shot decoders hot in the LRU cache.
     decoder_for(shot.primary.path);
-    for (const auto& layer : shot.companions) {
-        decoder_for(layer.path);
-    }
+    for (const auto& layer : shot.companions) decoder_for(layer.path);
 }
 
 void Renderer::trim_decoders(const Shot& shot) {
@@ -86,9 +97,8 @@ void Renderer::trim_decoders(const Shot& shot) {
         auto victim = decoders_.end();
         for (auto it = decoders_.begin(); it != decoders_.end(); ++it) {
             if (protected_paths.contains(it->first)) continue;
-            if (victim == decoders_.end() || it->second.last_used < victim->second.last_used) {
+            if (victim == decoders_.end() || it->second.last_used < victim->second.last_used)
                 victim = it;
-            }
         }
         if (victim == decoders_.end()) break;
         decoders_.erase(victim);
@@ -101,18 +111,18 @@ const Shot* Renderer::shot_at(double time, std::size_t& index) const {
     return &manifest_.shots[index];
 }
 
-std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot_time, double now, bool legacy_style) {
+double Renderer::layer_target(const Layer& layer, double shot_time, double now) const {
     const double span = std::max(0.001, layer.source_end - layer.source_start);
     const double elapsed = std::max(0.0, now - shot_time);
     double offset = std::fmod(elapsed * std::max(0.01, layer.transform.playback_rate), span);
     if (offset < 0.0) offset += span;
     double target = layer.source_start + offset;
     if (layer.transform.reverse) target = layer.source_end - offset;
-    target = std::clamp(target, layer.source_start, std::max(layer.source_start, layer.source_end - 0.001));
+    return std::clamp(target, layer.source_start, std::max(layer.source_start, layer.source_end - 0.001));
+}
 
-    // Decoder owns its reusable frame buffer. Copy once because shot-local transforms
-    // intentionally mutate this layer before composition.
-    auto frame = decoder_for(layer.path).frame_at(target);
+std::vector<std::uint8_t> Renderer::render_layer(const Layer& layer, double shot_time, double now, bool legacy_style) {
+    auto frame = decoder_for(layer.path).frame_at(layer_target(layer, shot_time, now));
     auto transform = layer.transform;
     if (legacy_style) transform.hue_degrees = 0.0;
     apply_transform(frame, width_, height_, transform, static_cast<std::uint64_t>(std::llround(now * fps_)));
@@ -152,38 +162,22 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
         effective_composition, width_, height_, composition_progress, now * 0.24
     );
 
-    // Canonical pre-FX color reference. Keep it as renderer state so the final
-    // chroma guard can run after every post-processing path.
     color_reference_ = output;
-
-    const double progress = std::clamp(
-        (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time),
-        0.0, 1.0
-    );
+    const double progress = composition_progress;
     const auto* previous = (has_previous_output_ && allow_previous_effects) ? &previous_output_ : nullptr;
 
-    // Phase-2 hybrid GPU path: one libplacebo/Vulkan shader fuses the expensive
-    // spatial/color Creative FX and reactive beat treatment. History-dependent
-    // temporal operations remain CPU-side because they consume previous_output_.
+    if (!gpu_ && gpu_mode_enabled(gpu_mode_))
+        gpu_ = std::make_unique<GpuPostProcessor>(width_, height_, gpu_mode_);
     if (gpu_ && gpu_->available()) {
         gpu_frame_used_ = gpu_->apply_spatial(output, shot.creative, reactive_, progress, now * 0.24);
     }
     if (gpu_frame_used_) {
-        apply_creative_temporal_effects(
-            output, previous, width_, height_, shot.creative, progress, now * 0.24
-        );
+        apply_creative_temporal_effects(output, previous, width_, height_, shot.creative, progress, now * 0.24);
     } else {
-        apply_creative_effects(
-            output, previous, width_, height_, shot.creative, progress, now * 0.24
-        );
+        apply_creative_effects(output, previous, width_, height_, shot.creative, progress, now * 0.24);
     }
 
-    // WebGPU parity layer: native always applies the timeline's video-first
-    // post-composite Transform effects, regardless of whether the creative
-    // spatial pass ran on Vulkan or CPU.
     auto post_transform = shot.primary.transform;
-    // Merge timed browser/editorial cue accents into the same post-composite
-    // vocabulary used by static transform planning.
     post_transform.ripple = std::max(post_transform.ripple, reactive_.tempo_warp * .75);
     post_transform.tunnel = std::max({post_transform.tunnel, reactive_.tunnel, reactive_.punch * .65});
     post_transform.kaleidoscope = std::max(post_transform.kaleidoscope, reactive_.kaleidoscope);
@@ -198,30 +192,107 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
     post_transform.motion_trails = std::max(post_transform.motion_trails, reactive_.motion_trails);
     post_transform.slice_recursion = std::max(post_transform.slice_recursion, reactive_.slice_recursion);
     post_transform.shutter = std::max(post_transform.shutter, reactive_.freeze);
-    apply_post_transform_effects(
-        output, previous, width_, height_, post_transform, progress, now * 0.24
-    );
+    apply_post_transform_effects(output, previous, width_, height_, post_transform, progress, now * 0.24);
 
     auto vector_effects = shot.vector_effects;
     if (legacy_style) {
         vector_effects.erase(
             std::remove_if(vector_effects.begin(), vector_effects.end(), [](const VectorEffect& e) {
                 return e.kind == "portal" && ((e.seed * 2654435761ULL + 71ULL) % 100ULL) < 90ULL;
-            }),
-            vector_effects.end()
+            }), vector_effects.end()
         );
     }
     apply_vector_effects(
-        output,
-        have_portal_companion ? &portal_companion : nullptr,
-        previous,
-        width_,
-        height_,
-        vector_effects,
-        progress,
-        now * 0.24
+        output, have_portal_companion ? &portal_companion : nullptr, previous,
+        width_, height_, vector_effects, progress, now * 0.24
     );
     return output;
+}
+
+bool Renderer::render_shot_resident(
+    const Shot& shot,
+    double now,
+    bool allow_previous_effects,
+    bool shot_changed,
+    std::vector<std::uint8_t>& output,
+    ResidentGpuTiming& timing,
+    double& decode_ms
+) {
+    if (!resident_ || !resident_->available() || resident_disabled_ || shot.creative.style_version < 2)
+        return false;
+
+    const auto decode_start = Clock::now();
+    std::vector<AVFrame*> owned;
+    std::vector<ResidentLayerFrame> layers;
+    owned.reserve(1 + shot.companions.size());
+    layers.reserve(1 + shot.companions.size());
+
+    auto append = [&](const Layer& layer) {
+        const AVFrame* decoded = decoder_for(layer.path).avframe_at(layer_target(layer, shot.time, now));
+        AVFrame* clone = av_frame_clone(decoded);
+        if (!clone) throw std::bad_alloc();
+        owned.push_back(clone);
+        ResidentLayerFrame resident_layer;
+        resident_layer.frame = clone;
+        resident_layer.transform = &layer.transform;
+        resident_layer.opacity = layer.opacity;
+        resident_layer.blend_mode = layer.blend_mode;
+        layers.push_back(std::move(resident_layer));
+    };
+
+    append(shot.primary);
+    for (const auto& layer : shot.companions) append(layer);
+    decode_ms = elapsed_ms(decode_start);
+
+    auto post = shot.primary.transform;
+    post.ripple = std::max(post.ripple, reactive_.tempo_warp * .75);
+    post.tunnel = std::max({post.tunnel, reactive_.tunnel, reactive_.punch * .65});
+    post.kaleidoscope = std::max(post.kaleidoscope, reactive_.kaleidoscope);
+    post.edge = std::max(post.edge, reactive_.edge);
+    post.strobe = std::max(post.strobe, reactive_.strobe);
+    post.slit_scan = std::max(post.slit_scan, reactive_.slit_scan);
+    post.frame_echo = std::max(post.frame_echo, reactive_.echo);
+    post.mirror_corridor = std::max(post.mirror_corridor, reactive_.corridor);
+    post.mask_wipe = std::max(post.mask_wipe, reactive_.mask);
+    post.solarize = std::max(post.solarize, reactive_.solarize);
+    post.datamosh = std::max(post.datamosh, reactive_.datamosh);
+    post.motion_trails = std::max(post.motion_trails, reactive_.motion_trails);
+    post.slice_recursion = std::max(post.slice_recursion, reactive_.slice_recursion);
+    post.shutter = std::max(post.shutter, reactive_.freeze);
+
+    const double progress = std::clamp(
+        (now - shot.time) / std::max(0.001, shot.timeline_end - shot.time), 0.0, 1.0
+    );
+    double crossfade_history = 0.0;
+    if (shot_changed && has_previous_output_ && shot.crossfade > 0.0) {
+        const double q = std::clamp((now - shot.time) / shot.crossfade, 0.0, 1.0);
+        crossfade_history = 1.0 - q;
+    }
+    const std::string composition = reactive_.switcher > 0.08 ? "swap" : shot.composition_mode;
+    const bool ok = resident_->render(
+        layers, composition, shot.creative, reactive_, post, shot.vector_effects,
+        progress, now * 0.24, allow_previous_effects, crossfade_history, output, &timing
+    );
+    for (AVFrame* frame : owned) av_frame_free(&frame);
+    return ok;
+}
+
+void Renderer::emit_perf(std::uint64_t frames) const {
+    const double resident_n = std::max<std::uint64_t>(1, resident_frames_);
+    const double fallback_n = std::max<std::uint64_t>(1, fallback_frames_);
+    const double all_n = std::max<std::uint64_t>(1, frames);
+    std::cerr
+        << "PERF\tframes=" << frames
+        << "\tresident=" << resident_frames_
+        << "\tfallback=" << fallback_frames_
+        << "\tdecode_ms=" << perf_decode_ms_ / resident_n
+        << "\tmap_ms=" << perf_map_ms_ / resident_n
+        << "\tcompose_ms=" << perf_compose_ms_ / resident_n
+        << "\tfx_ms=" << perf_effects_ms_ / resident_n
+        << "\tdownload_ms=" << perf_download_ms_ / resident_n
+        << "\tcpu_ms=" << perf_cpu_ms_ / fallback_n
+        << "\tpipe_ms=" << perf_pipe_ms_ / all_n
+        << '\n';
 }
 
 int Renderer::run() {
@@ -232,7 +303,8 @@ int Renderer::run() {
     std::cerr << "INFO\tdecoder_cache=" << decoder_cache_limit_
               << "\tthreads=" << threads_
               << "\thwdecode=" << hwdecode_mode_
-              << "\tgpu=" << (gpu_ && gpu_->available() ? gpu_->backend() : "off");
+              << "\tresident=" << (resident_ && resident_->available() ? resident_->backend() : "off")
+              << "\tgpu_fallback=" << (gpu_ && gpu_->available() ? gpu_->backend() : "lazy");
 #ifdef TUBEVIZ_HAVE_OPENMP
     std::cerr << "\topenmp=" << omp_get_max_threads();
 #else
@@ -243,57 +315,84 @@ int Renderer::run() {
     for (std::uint64_t frame_index = 0; frame_index < total_frames; ++frame_index) {
         const double now = static_cast<double>(frame_index) / fps_;
         reactive_.decay(fps_);
-        while (cue_index_ < manifest_.cues.size() && manifest_.cues[cue_index_].time <= now + 1e-9) {
+        while (cue_index_ < manifest_.cues.size() && manifest_.cues[cue_index_].time <= now + 1e-9)
             reactive_.apply(manifest_.cues[cue_index_++]);
-        }
 
         const Shot* shot = shot_at(now, shot_index);
         if (!shot) throw std::runtime_error("no shot at render time");
         if (shot_index != previous_shot_index_) {
             warm_shot(*shot);
-            // Also open the immediately upcoming shot while cache pressure is
-            // low. This removes most codec-open stalls at rapid scene cuts.
-            if (shot_index + 1 < manifest_.shots.size()) {
-                warm_shot(manifest_.shots[shot_index + 1]);
-            }
+            if (shot_index + 1 < manifest_.shots.size()) warm_shot(manifest_.shots[shot_index + 1]);
             trim_decoders(*shot);
         }
 
         const bool shot_changed = shot_index != previous_shot_index_;
         const bool allow_previous_effects = !shot_changed || temporal_hero(shot->creative) || shot->creative.history_inherit > 0.04;
-        auto output = render_shot(*shot, now, allow_previous_effects);
-        // GPU frames already received reactive treatment in the fused shader.
-        if (!gpu_frame_used_) {
-            apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
-        }
-        // Keep the final color contract after CPU temporal/vector work. This is
-        // intentionally retained even on GPU frames so later history/vector
-        // passes cannot reintroduce a global cast.
-        const double color_progress = std::clamp(
-            (now - shot->time) / std::max(0.001, shot->timeline_end - shot->time),
-            0.0, 1.0
-        );
-        apply_source_color_fidelity(
-            output, color_reference_, width_, height_, shot->creative, color_progress
+
+        std::vector<std::uint8_t> output;
+        ResidentGpuTiming resident_timing{};
+        double decode_ms = 0.0;
+        bool resident_ok = render_shot_resident(
+            *shot, now, allow_previous_effects, shot_changed, output, resident_timing, decode_ms
         );
 
-        if (shot_index != previous_shot_index_ && shot->crossfade > 0.0 && frame_index > 0 && !previous_output_.empty()) {
-            const double progress = std::clamp((now - shot->time) / shot->crossfade, 0.0, 1.0);
-            crossfade(output, previous_output_, progress);
+        // CUDA decode only helps when the hardware AVFrame can remain on the GPU.
+        // If direct mapping is unavailable, auto mode switches once to software
+        // decode and lets libplacebo upload native YUV directly. This avoids the
+        // much worse CUDA -> RGB CPU -> Vulkan round trip.
+        if (!resident_ok && resident_ && resident_->last_hardware_map_failed() && hwdecode_mode_ == "auto") {
+            if (!resident_cuda_fallback_reported_) {
+                std::cerr << "INFO\tresident CUDA/Vulkan mapping unavailable; retrying with software decode + GPU YUV upload\n";
+                resident_cuda_fallback_reported_ = true;
+            }
+            decoders_.clear();
+            hwdecode_mode_ = "off";
+            resident_ok = render_shot_resident(
+                *shot, now, allow_previous_effects, shot_changed, output, resident_timing, decode_ms
+            );
         }
 
-        if (std::fwrite(output.data(), 1, frame_bytes, stdout) != frame_bytes) {
-            return 2;
+        if (resident_ok) {
+            ++resident_frames_;
+            perf_decode_ms_ += decode_ms;
+            perf_map_ms_ += resident_timing.map_ms;
+            perf_compose_ms_ += resident_timing.compose_ms;
+            perf_effects_ms_ += resident_timing.effects_ms;
+            perf_download_ms_ += resident_timing.download_ms;
+        } else {
+            if (resident_ && resident_->available() && !resident_disabled_ && shot->creative.style_version >= 2) {
+                resident_disabled_ = true;
+                std::cerr << "WARN\tresident GPU fast path failed; using validated CPU/hybrid fallback for remaining frames\n";
+            }
+            const auto cpu_start = Clock::now();
+            output = render_shot(*shot, now, allow_previous_effects);
+            if (!gpu_frame_used_) apply_reactive_effects(output, width_, height_, reactive_, now * 0.24);
+            const double color_progress = std::clamp(
+                (now - shot->time) / std::max(0.001, shot->timeline_end - shot->time), 0.0, 1.0
+            );
+            apply_source_color_fidelity(output, color_reference_, width_, height_, shot->creative, color_progress);
+            if (shot_changed && shot->crossfade > 0.0 && frame_index > 0 && !previous_output_.empty()) {
+                const double q = std::clamp((now - shot->time) / shot->crossfade, 0.0, 1.0);
+                crossfade(output, previous_output_, q);
+            }
+            perf_cpu_ms_ += elapsed_ms(cpu_start);
+            ++fallback_frames_;
         }
-        // Avoid a 6+ MiB full-frame copy at 1080p. stdout consumed the current
-        // vector synchronously, so swap it into temporal history instead.
+
+        const auto pipe_start = Clock::now();
+        if (std::fwrite(output.data(), 1, frame_bytes, stdout) != frame_bytes) return 2;
+        perf_pipe_ms_ += elapsed_ms(pipe_start);
+
         previous_output_.swap(output);
         has_previous_output_ = true;
         previous_shot_index_ = shot_index;
 
-        if (frame_index == 0 || frame_index + 1 == total_frames || (frame_index + 1) % std::max<std::uint64_t>(1, static_cast<std::uint64_t>(fps_)) == 0) {
+        const auto progress_period = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(fps_));
+        if (frame_index == 0 || frame_index + 1 == total_frames || (frame_index + 1) % progress_period == 0)
             std::cerr << "PROGRESS\t" << (frame_index + 1) << '\t' << total_frames << '\n';
-        }
+        const auto perf_period = std::max<std::uint64_t>(1, static_cast<std::uint64_t>(fps_ * 5.0));
+        if (frame_index + 1 == total_frames || (frame_index + 1) % perf_period == 0)
+            emit_perf(frame_index + 1);
     }
     std::fflush(stdout);
     return 0;
