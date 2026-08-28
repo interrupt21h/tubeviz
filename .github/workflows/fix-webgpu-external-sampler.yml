@@ -5,7 +5,7 @@ on:
     branches: [fix-webgpu-external-sampler]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
@@ -13,8 +13,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -40,16 +38,26 @@ jobs:
           grep -F "@group(0) @binding(4) var layerSampler: sampler;" src/tubeviz/static/browser_gpu_core.js
           grep -F "textureSampleBaseClampToEdge(video0,layerSampler,layerUv(" src/tubeviz/static/browser_gpu_core.js
 
-      - name: Commit validated source
-        shell: bash
+      - name: Package validated source
         run: |
-          set -euo pipefail
-          git config user.name "Scott Muller"
-          git config user.email "scott@21h.io"
-          git add CHANGELOG.md pyproject.toml src/tubeviz tests/test_browser_phase2.py
-          if git diff --cached --quiet; then
-            echo "No source changes to commit"
-            exit 0
-          fi
-          git commit -m "Fix WebGPU external texture sampler binding"
-          git push origin HEAD:fix-webgpu-external-sampler
+          tar -czf /tmp/webgpu-sampler-source.tar.gz \
+            CHANGELOG.md \
+            pyproject.toml \
+            src/tubeviz/__init__.py \
+            src/tubeviz/native_src/src/main.cpp \
+            src/tubeviz/static/browser_gpu_core.js \
+            src/tubeviz/static/browser_gpu_worker.js \
+            src/tubeviz/static/browser_gpu.js \
+            src/tubeviz/static/index.html \
+            src/tubeviz/static/browser_source.js \
+            src/tubeviz/static/gui.html \
+            src/tubeviz/static/visualizer.js \
+            tests/test_browser_phase2.py
+
+      - name: Upload validated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: webgpu-sampler-source
+          path: /tmp/webgpu-sampler-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
