@@ -393,6 +393,7 @@ def create_app(
                 preview = await asyncio.to_thread(
                     prepare_preview_proxy, source, library.preview_dir,
                     max_height=int(height), max_fps=int(fps),
+                    start=float(layer.start), end=float(layer.end),
                 )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=f"source media unavailable: {exc}") from exc
@@ -491,6 +492,10 @@ def create_app(
         async def restore(position: float) -> None:
             cursor.reset(position)
             await websocket.send_json(_state_at(timeline, position))
+
+        # Resolve the first scene before the user presses Play/Seek. Without this,
+        # a cold preview starts with activeBank=-1 and an uninitialized black canvas.
+        await restore(0.0)
 
         try:
             while True:

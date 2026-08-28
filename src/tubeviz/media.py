@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -272,18 +273,31 @@ def normalize_video(
     encoder: str = "auto",
     progress: Callable[[str], None] | None = None,
     source_info: MediaInfo | None = None,
+    start_seconds: float | None = None,
+    duration_seconds: float | None = None,
 ) -> str:
     """Create an H.264/MP4 compatibility proxy and return the encoder used.
 
     width/height/fps default to zero, which preserves source geometry and frame
-    rate.  ``encoder=auto`` prefers NVIDIA NVENC only when a live one-frame
+    rate. ``encoder=auto`` prefers NVIDIA NVENC only when a live one-frame
     encode probe succeeds, and falls back to libx264 if an auto-selected NVENC
     transcode still fails at runtime.
+
+    ``start_seconds``/``duration_seconds`` optionally bound the transcode to a
+    source excerpt. Input-side ``-ss`` is used because this is a transcode:
+    FFmpeg's default accurate-seek behavior decodes/discards from the preceding
+    seek point while avoiding work over the rest of a long source clip.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temp = destination.with_suffix(".tmp.mp4")
     info = source_info or probe(source)
     filters = _video_filters(info, width=width, height=height, fps=fps)
+
+    segment_start = max(0.0, float(start_seconds or 0.0))
+    segment_duration = (
+        max(0.001, float(duration_seconds))
+        if duration_seconds is not None
+        else None
+    )
 
     requested = str(encoder or "auto").strip().lower()
     if requested not in {"auto", "nvenc", "x264", "libx264", "h264_nvenc"}:
@@ -291,72 +305,103 @@ def normalize_video(
 
     if requested in {"nvenc", "h264_nvenc"}:
         if not nvenc_usable():
-            raise MediaToolError("h264_nvenc was requested but no usable NVIDIA NVENC encoder was detected")
+            raise MediaToolError(
+                "h264_nvenc was requested but no usable NVIDIA NVENC encoder was detected"
+            )
         encoders = ["h264_nvenc"]
     elif requested in {"x264", "libx264"}:
         encoders = ["libx264"]
     else:
         encoders = ["h264_nvenc", "libx264"] if nvenc_usable() else ["libx264"]
 
+    # Unique temporary files make simultaneous lazy-preview/prewarm requests for
+    # the same cache key harmless. The final atomic replace is idempotent.
+    with tempfile.NamedTemporaryFile(
+        dir=destination.parent,
+        prefix=f".{destination.stem}.",
+        suffix=".tmp.mp4",
+        delete=False,
+    ) as handle:
+        temp = Path(handle.name)
+    temp.unlink(missing_ok=True)
+
+    progress_duration = (
+        segment_duration
+        if segment_duration is not None
+        else max(0.0, info.duration - segment_start)
+    )
+
     last_error: Exception | None = None
-    for index, selected_encoder in enumerate(encoders):
-        temp.unlink(missing_ok=True)
-        command = [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-i", str(source),
-            "-map", "0:v:0",
-        ]
-        if filters:
-            command += ["-vf", ",".join(filters)]
-        if selected_encoder == "h264_nvenc":
-            command += [
-                "-c:v", "h264_nvenc",
-                "-preset", "p4",
-                "-cq", str(crf),
-                "-b:v", "0",
-            ]
-        else:
-            command += [
-                "-c:v", "libx264",
-                "-preset", preset,
-                "-crf", str(crf),
-            ]
-        command += [
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-        ]
-        if keep_audio:
-            command += ["-map", "0:a?", "-c:a", "aac", "-b:a", "160k"]
-        else:
-            command += ["-an"]
-        command += [
-            "-progress", "pipe:1",
-            "-stats_period", "0.5",
-            "-nostats",
-            str(temp),
-        ]
-        try:
-            if progress:
-                progress(f"  transcode encoder: {selected_encoder}")
-            _run_ffmpeg_progress(
-                command,
-                duration=info.duration,
-                progress=progress,
-                label="transcode",
-            )
-            temp.replace(destination)
-            return selected_encoder
-        except Exception as exc:
-            last_error = exc
+    try:
+        for index, selected_encoder in enumerate(encoders):
             temp.unlink(missing_ok=True)
-            if requested == "auto" and selected_encoder == "h264_nvenc" and index + 1 < len(encoders):
+            command = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            ]
+            if segment_start > 0.0:
+                command += ["-ss", f"{segment_start:.6f}"]
+            command += ["-i", str(source)]
+            if segment_duration is not None:
+                command += ["-t", f"{segment_duration:.6f}"]
+            command += ["-map", "0:v:0"]
+
+            if filters:
+                command += ["-vf", ",".join(filters)]
+            if selected_encoder == "h264_nvenc":
+                command += [
+                    "-c:v", "h264_nvenc",
+                    "-preset", "p4",
+                    "-cq", str(crf),
+                    "-b:v", "0",
+                ]
+            else:
+                command += [
+                    "-c:v", "libx264",
+                    "-preset", preset,
+                    "-crf", str(crf),
+                ]
+            command += [
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+            ]
+            if keep_audio:
+                command += ["-map", "0:a?", "-c:a", "aac", "-b:a", "160k"]
+            else:
+                command += ["-an"]
+            command += [
+                "-progress", "pipe:1",
+                "-stats_period", "0.5",
+                "-nostats",
+                str(temp),
+            ]
+
+            try:
                 if progress:
-                    progress(f"  transcode: NVENC failed; falling back to libx264: {exc}")
-                continue
-            raise
-        finally:
-            if destination.exists():
+                    progress(f"  transcode encoder: {selected_encoder}")
+                _run_ffmpeg_progress(
+                    command,
+                    duration=progress_duration,
+                    progress=progress,
+                    label="transcode",
+                )
+                temp.replace(destination)
+                return selected_encoder
+            except Exception as exc:
+                last_error = exc
                 temp.unlink(missing_ok=True)
+                if (
+                    requested == "auto"
+                    and selected_encoder == "h264_nvenc"
+                    and index + 1 < len(encoders)
+                ):
+                    if progress:
+                        progress(
+                            f"  transcode: NVENC failed; falling back to libx264: {exc}"
+                        )
+                    continue
+                raise
+    finally:
+        temp.unlink(missing_ok=True)
 
     assert last_error is not None
     raise last_error
@@ -371,34 +416,61 @@ def prepare_preview_proxy(
     crf: int = 27,
     force: bool = False,
     progress: Callable[[str], None] | None = None,
+    start: float | None = None,
+    end: float | None = None,
 ) -> PreviewMedia:
     """Return a lightweight browser-preview source for ``source``.
 
-    Preview proxies are intentionally independent of normalized/final-render media.
-    They cap decode work at 720p/30fps by default, contain no audio, and use a
-    content-addressed cache so existing libraries gain the optimization lazily while
-    newly ingested clips can prepare it once. Small browser-compatible sources are
-    reused directly instead of being needlessly re-encoded.
+    With no range, small browser-compatible sources can still be reused directly.
+    When ``start``/``end`` is supplied, Tubeviz creates a zero-based scene-range
+    proxy. This avoids the old cold-start behavior where the first preview request
+    could transcode an entire long source video before a single frame was usable.
     """
     source = Path(source).resolve()
     info = probe(source)
     compatible, _ = is_browser_compatible(info)
     max_height = max(0, int(max_height))
     max_fps = max(0, int(max_fps))
+
+    segment_requested = start is not None or end is not None
+    segment_start = max(0.0, float(start or 0.0))
+    segment_end = (
+        min(info.duration, float(end))
+        if end is not None and info.duration > 0
+        else (float(end) if end is not None else info.duration)
+    )
+    if segment_requested:
+        if segment_end <= segment_start:
+            raise ValueError(
+                f"preview range must have end > start; got {segment_start:.6f}..{segment_end:.6f}"
+            )
+        segment_duration = segment_end - segment_start
+    else:
+        segment_duration = None
+
     height_ok = not max_height or info.height is None or info.height <= max_height
     fps_ok = not max_fps or info.fps is None or info.fps <= max_fps + 0.01
-    if compatible and height_ok and fps_ok:
-        return PreviewMedia(source, False, None, "source already preview-friendly", info)
+    if not segment_requested and compatible and height_ok and fps_ok:
+        return PreviewMedia(
+            source, False, None, "source already preview-friendly", info
+        )
 
     stat = source.stat()
-    key = json.dumps({
+    key_data = {
         "path": str(source),
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
         "max_height": max_height,
         "max_fps": max_fps,
         "format": 1,
-    }, sort_keys=True).encode()
+    }
+    if segment_requested:
+        key_data.update({
+            "start": round(segment_start, 6),
+            "end": round(segment_end, 6),
+            "format": 2,
+        })
+    key = json.dumps(key_data, sort_keys=True).encode()
     digest = hashlib.sha256(key).hexdigest()
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -414,12 +486,27 @@ def prepare_preview_proxy(
     target_fps = 0
     if max_fps:
         target_fps = min(max_fps, max(1, int(round(info.fps or max_fps))))
+
     encoder = normalize_video(
-        source, destination,
-        height=target_height, fps=target_fps, crf=crf, preset="veryfast",
-        keep_audio=False, encoder="auto", progress=progress, source_info=info,
+        source,
+        destination,
+        height=target_height,
+        fps=target_fps,
+        crf=crf,
+        preset="veryfast",
+        keep_audio=False,
+        encoder="auto",
+        progress=progress,
+        source_info=info,
+        start_seconds=segment_start if segment_requested else None,
+        duration_seconds=segment_duration,
     )
-    return PreviewMedia(destination, True, encoder, "generated bounded preview proxy", info)
+    reason = (
+        "generated scene-range preview proxy"
+        if segment_requested
+        else "generated bounded preview proxy"
+    )
+    return PreviewMedia(destination, True, encoder, reason, info)
 
 
 def prepare_media(

@@ -308,6 +308,13 @@ function layerUniforms(layerList,composition,width,height){
   return out;
 }
 
+function externalTextureSourceUsable(source){
+  if(!source)return false;
+  if(typeof source.readyState==='number')return source.readyState>=2&&!source.seeking&&Number(source.videoWidth)>0&&Number(source.videoHeight)>0;
+  const width=Number(source.displayWidth||source.codedWidth||source.width||0),height=Number(source.displayHeight||source.codedHeight||source.height||0);
+  return width>0&&height>0;
+}
+
 export class BrowserGpuRendererCore{
   constructor(canvas,device,context,format,pipeline,layerPipeline){
     this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.layerPipeline=layerPipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
@@ -361,7 +368,7 @@ export class BrowserGpuRendererCore{
   renderLayers(layerList,params={},composition={}){
     if(this.failed||!this.layerPipeline||!Array.isArray(layerList)||!layerList.length)return false;
     try{
-      const usable=layerList.filter(item=>item?.source).slice(0,4);if(!usable.length)return false;
+      const usable=layerList.filter(item=>item?.source&&externalTextureSourceUsable(item.source)).slice(0,4);if(!usable.length)return false;
       const source0=usable[0].source,actualCount=usable.length;
       const width=Math.max(1,Math.floor(Number(composition.width||this.canvas.width||source0.displayWidth||source0.videoWidth||source0.width||1)));
       const height=Math.max(1,Math.floor(Number(composition.height||this.canvas.height||source0.displayHeight||source0.videoHeight||source0.height||1)));

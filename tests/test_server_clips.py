@@ -122,3 +122,34 @@ def test_live_preview_routes_exist_without_offline_render_sink(tmp_path: Path, m
     assert "/api/preview-media/{scene_index}/{layer_index}" in paths
     assert "/api/browser-source/{scene_index}/{layer_index}" in paths
     assert "/api/offline-source/{scene_index}/{layer_index}" in paths
+
+
+
+def test_live_websocket_sends_initial_state_without_play_or_seek(tmp_path: Path):
+    track = TrackAnalysis(source="/tmp/song.wav", duration=2.0, sample_rate=22050, hop_length=512, tempo_bpm=120.0, beats=[], bars=[], events=[], sections=[])
+    timeline_path = tmp_path / "timeline.json"
+    timeline_path.write_text(DirectedTimeline(track=track, cues=[]).model_dump_json())
+    client = TestClient(create_app(timeline_path))
+    with client.websocket_connect("/ws") as ws:
+        state = ws.receive_json()
+    assert state["type"] == "state"
+    assert state["time"] == 0.0
+
+
+def test_preview_route_requests_only_scene_source_range(tmp_path: Path, monkeypatch):
+    library = ClipLibrary(tmp_path / "library"); library.initialize()
+    clip_id = library.upsert_discovery(source="youtube", source_id="range", source_url="https://youtu.be/range", term="x", rank=1, metadata={"title": "Range"})
+    media = library.normalized_dir / "range.mp4"; media.write_bytes(b"preview-source")
+    library.mark_ready_media(clip_id, media, sha256_file(media)); library.replace_scenes(clip_id, [(12.0, 15.5, None)])
+    track = TrackAnalysis(source="/tmp/song.wav", duration=3.5, sample_rate=22050, hop_length=512, tempo_bpm=120.0, beats=[], bars=[], events=[], sections=[Section(index=0, start=0.0, end=3.5, energy=.5, label="drive")])
+    timeline_path = tmp_path / "timeline.json"; timeline_path.write_text(DirectedTimeline(track=track, cues=[]).model_dump_json())
+    captured = {}
+    def fake_preview(source, cache_dir, **kwargs):
+        captured.update(kwargs); return PreviewMedia(Path(source), False, None, "test", None)
+    monkeypatch.setattr(server_module, "prepare_preview_proxy", fake_preview)
+    client = TestClient(create_app(timeline_path, library_path=library.root))
+    response = client.get("/api/preview-media/0/0?height=360&fps=30")
+    assert response.status_code == 200
+    assert captured["start"] == 12.0
+    assert captured["end"] == 15.5
+    assert captured["max_height"] == 360

@@ -151,3 +151,24 @@ def test_preview_module_graph_is_release_cache_busted():
     assert "/static/browser_source.js?v=0.43.0" in visualizer
     assert "/static/browser_gpu_core.js?v=0.43.0" in gpu
     assert "/static/browser_source_worker.js?v=0.43.0" in source
+
+
+
+def test_preview_cold_start_contracts_are_present():
+    visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
+    gpu = Path("src/tubeviz/static/browser_gpu.js").read_text()
+    gpu_core = Path("src/tubeviz/static/browser_gpu_core.js").read_text()
+    gpu_worker = Path("src/tubeviz/static/browser_gpu_worker.js").read_text()
+    index = Path("src/tubeviz/static/index.html").read_text()
+    assert "videoFrameUsable" in visualizer
+    assert "seekDecodedVideoFrame" in visualizer
+    assert "primary ready · loading" in visualizer
+    assert "prewarmUpcomingPrimaries(sceneIndex,2)" in visualizer
+    assert "externalTextureSourceUsable" in gpu_core
+    assert "item?.source&&externalTextureSourceUsable(item.source)" in gpu_core
+    cache_bust = "0.43.0-previewfix1"
+    assert f"visualizer.js?v={cache_bust}" in index
+    assert f"browser_gpu.js?v={cache_bust}" in visualizer
+    assert f"browser_gpu_core.js?v={cache_bust}" in gpu
+    assert f"browser_gpu_worker.js?v={cache_bust}" in gpu
+    assert f"browser_gpu_core.js?v={cache_bust}" in gpu_worker

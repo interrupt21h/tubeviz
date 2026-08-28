@@ -1,4 +1,4 @@
-import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.43.0';
+import {createBrowserGpuFinalizer} from '/static/browser_gpu.js?v=0.43.0-previewfix1';
 import {WebCodecsSceneSource, probeWebCodecsSourceDecoder, prewarmWebCodecsScene} from '/static/browser_source.js?v=0.43.0';
 import {createWorkerVideoEncoderTransport} from '/static/browser_encode.js?v=0.43.0';
 // SPDX-License-Identifier: Apache-2.0
@@ -41,7 +41,7 @@ const responsivePreview=!offlineMode&&previewProfile!=='full';
 const adaptivePreviewSteps=responsivePreview?[360,480,540,720]:[540,720,1080];
 let adaptivePreviewHeight=responsivePreview?540:720,renderPixelRatio=1,previewFrameEma=0,previewLastResize=0;
 let previewFrameIntervalEma=0,previewMeasuredFps=0,previewLastStatus=0,lastLiveRenderAt=0;
-let liveSourceDecodeMode='video',liveSourceDecodeReason='initializing',previewVisibleLayers=0,previewAvailableLayers=0;
+let liveSourceDecodeMode='video',liveSourceDecodeReason='initializing',previewVisibleLayers=0,previewAvailableLayers=0,previewLoadState='initializing',previewStartupReady=false;
 let gpuInit={finalizer:null,reason:'not initialized'};
 try{
   gpuInit=await createBrowserGpuFinalizer(gpuCanvas,browserGpuMode,{preferWorker:offlineMode});
@@ -68,8 +68,10 @@ function updateRendererStatus(extra=''){
   const direct=responsivePreview&&browserGpuFinalizer?.renderLayers?' · direct GPU layers':'';
   const decode=!offlineMode?` · decode ${liveSourceDecodeMode}`:'';
   const layers=previewAvailableLayers>0?` · layers ${previewVisibleLayers}/${previewAvailableLayers}`:'';
-  renderMeta.textContent=`Preview renderer: ${renderer}${direct} · ${profile} · ${size} · ${fps}${cpu}${decode}${layers}${reason?` · ${reason}`:''}`;
+  const loading=previewLoadState&&previewLoadState!=='ready'?` · ${previewLoadState}`:'';
+  renderMeta.textContent=`Preview renderer: ${renderer}${direct} · ${profile} · ${size} · ${fps}${cpu}${decode}${layers}${loading}${reason?` · ${reason}`:''}`;
 }
+function setPreviewLoadState(state='ready'){previewLoadState=state||'ready';updateRendererStatus();}
 function disableBrowserGpu(reason){
   const old=browserGpuFinalizer;
   browserGpuFinalizer=null;browserGpuActive=false;
@@ -243,12 +245,55 @@ if(!offlineMode){
   audio.addEventListener('seeked',()=>send('seek',{position:clockSeconds()}));
 }
 
-function waitMetadata(v){if(v.readyState>=1)return Promise.resolve();return new Promise((res,rej)=>{const ok=()=>{clean();res();},bad=()=>{clean();rej(v.error||new Error('metadata load failed'));},clean=()=>{v.removeEventListener('loadedmetadata',ok);v.removeEventListener('error',bad);};v.addEventListener('loadedmetadata',ok,{once:true});v.addEventListener('error',bad,{once:true});});}
+function waitMediaEvent(v,names,timeoutMs=5000){
+  names=Array.isArray(names)?names:[names];
+  return new Promise((resolve,reject)=>{
+    let settled=false;
+    const cleanup=()=>{clearTimeout(timer);for(const name of names)v.removeEventListener(name,onReady);v.removeEventListener('error',onError);};
+    const finish=(error=null)=>{if(settled)return;settled=true;cleanup();error?reject(error):resolve();};
+    const onReady=()=>finish();
+    const onError=()=>finish(v.error||new Error(`media load failed: ${v.currentSrc||v.src||'unknown source'}`));
+    const timer=setTimeout(()=>finish(new Error(`media event timeout (${names.join('/')})`)),timeoutMs);
+    for(const name of names)v.addEventListener(name,onReady,{once:true});
+    v.addEventListener('error',onError,{once:true});
+  });
+}
+function waitMetadata(v){if(v.readyState>=1)return Promise.resolve();return waitMediaEvent(v,'loadedmetadata');}
+function videoFrameUsable(v){return !!v&&v.readyState>=2&&!v.seeking&&Number(v.videoWidth)>0&&Number(v.videoHeight)>0;}
+async function waitDecodedVideoFrame(v,timeoutMs=5000){
+  if(!videoFrameUsable(v))await waitMediaEvent(v,['loadeddata','canplay'],timeoutMs);
+  if(typeof v.requestVideoFrameCallback==='function'){
+    await new Promise(resolve=>{
+      let done=false,callbackId=null;
+      const finish=()=>{if(done)return;done=true;clearTimeout(timer);if(callbackId!==null&&typeof v.cancelVideoFrameCallback==='function'){try{v.cancelVideoFrameCallback(callbackId);}catch(_){}}resolve();};
+      const timer=setTimeout(finish,120);
+      try{callbackId=v.requestVideoFrameCallback(()=>finish());}catch(_){finish();}
+    });
+  }
+  if(!videoFrameUsable(v))throw new Error(`decoded video frame unavailable (${v.readyState}, ${v.videoWidth}x${v.videoHeight}, seeking=${v.seeking})`);
+}
+async function seekDecodedVideoFrame(v,target){
+  const duration=Number.isFinite(v.duration)&&v.duration>0?v.duration:Number.POSITIVE_INFINITY;
+  const maxTime=Number.isFinite(duration)?Math.max(0,duration-.02):Math.max(0,target);
+  const clamped=Math.max(0,Math.min(maxTime,target));
+  if(v.seeking||Math.abs(v.currentTime-clamped)>.012){
+    const done=waitMediaEvent(v,'seeked',5000);v.currentTime=clamped;await done;
+  }
+  await waitDecodedVideoFrame(v);return clamped;
+}
 function mediaUrl(layer){if(layer.media_url)return layer.media_url;const parts=String(layer.media_file||"").split("/");const root=parts[0]==="originals"?"/originals/":"/media/";if(parts[0]==="originals"||parts[0]==="normalized")parts.shift();return root+parts.map(encodeURIComponent).join("/");}
-function previewMediaUrl(sceneIndex,layerIndex){return `/api/preview-media/${sceneIndex}/${layerIndex}?height=720&fps=30`;}
+function previewMediaHeight(){
+  if(!responsivePreview)return 720;if(!previewStartupReady)return 360;
+  if(previewQuality==='360p')return 360;if(previewQuality==='540p')return 540;if(previewQuality==='720p')return 720;if(previewQuality==='1080p'||previewQuality==='native')return 1080;
+  return Math.max(360,Math.min(720,adaptivePreviewHeight));
+}
+function previewMediaUrl(sceneIndex,layerIndex,{height=null}={}){const h=Math.max(240,Math.min(1080,Number(height??previewMediaHeight())||360));return `/api/preview-media/${sceneIndex}/${layerIndex}?height=${h}&fps=30`;}
 function allLayers(scene){return [{...scene,role:'primary',opacity:scene.opacity??.92,blend_mode:scene.transform?.blend_mode??'normal'},...(scene.layers??[])].slice(0,4);}
 
+const bankLoadGeneration=[0,0];
+const previewPrewarmKeys=new Set();
 function closeBankSources(bankIndex){
+  bankLoadGeneration[bankIndex]++;
   const states=bankState[bankIndex]??[];bankState[bankIndex]=[];
   for(const st of states)try{st.source?.close();}catch(_){}
 }
@@ -257,39 +302,78 @@ async function loadHtmlLayer(v,layer,scene,i,sceneIndex=null){
   const url=useProxy?previewMediaUrl(sceneIndex,i):mediaUrl(layer),abs=new URL(url,location.href).href;
   if(v.src!==abs){v.src=url;v.load();}
   await waitMetadata(v);
-  const start=Number(layer.start??0),end=Number(layer.end??v.duration),span=Math.max(.05,end-start);
-  const resume=i===0&&Number.isFinite(scene.resume_at)?scene.resume_at:start;
-  v.currentTime=Math.max(start,Math.min(end-.02,resume));
+  const sourceStart=Number(layer.start??0),declaredEnd=Number(layer.end??0);
+  const sourceEnd=declaredEnd>sourceStart?declaredEnd:sourceStart+Math.max(.05,Number(v.duration)||.05),sourceSpan=Math.max(.05,sourceEnd-sourceStart);
+  const sourceResume=i===0&&Number.isFinite(scene.resume_at)?Number(scene.resume_at):sourceStart;
+  let start=sourceStart,end=sourceEnd,resume=sourceResume;
+  if(useProxy){
+    const proxyDuration=Number.isFinite(v.duration)&&v.duration>0?v.duration:sourceSpan;
+    start=0;end=Math.max(.03,Math.min(sourceSpan,proxyDuration));resume=Math.max(start,Math.min(Math.max(start,end-.02),sourceResume-sourceStart));
+  }
+  await seekDecodedVideoFrame(v,Math.max(start,Math.min(Math.max(start,end-.02),resume)));
   const t=layer.transform??{};v.playbackRate=t.materialized?1:(t.playback_rate??1);
   if(!audio.paused&&!offlineMode)v.play().catch(()=>{});
-  return{video:v,source:null,frame:null,layer,start,end,span,transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,previewProxy:useProxy};
+  return{video:v,source:null,frame:null,layer,start,end,span:Math.max(.03,end-start),transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,previewProxy:useProxy,sourceStart,sourceEnd};
+}
+async function loadSceneLayer(v,layer,scene,i,sceneIndex,useLiveWebCodecs,useOfflineWebCodecs){
+  const start=Number(layer.start??0),declaredEnd=Number(layer.end??0),t=layer.transform??{};
+  if((useLiveWebCodecs||useOfflineWebCodecs)&&Number.isInteger(sceneIndex)){
+    try{
+      v.pause();v.removeAttribute('src');v.load();
+      const fps=useOfflineWebCodecs?offlineFps:Math.min(30,previewTargetFps());
+      const source=await WebCodecsSceneSource.open(sceneIndex,i,{fps,strict:useOfflineWebCodecs&&offlineSourceStrict});
+      const end=declaredEnd>start?declaredEnd:start+source.frameCount/source.fps,span=Math.max(.05,end-start);
+      const resume=i===0&&Number.isFinite(scene.resume_at)?Math.max(0,scene.resume_at-start):0;
+      const frame=await source.frameAt(Math.min(span-.002,resume));
+      return{video:null,source,frame,layer,start,end,span,transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,framePending:null};
+    }catch(error){
+      if(useOfflineWebCodecs&&offlineSourceStrict)throw error;if(useOfflineWebCodecs)offlineSourceFallbacks++;
+      console.warn(`WebCodecs source ${sceneIndex}/${i} unavailable; using HTMLVideoElement`,error);
+    }
+  }
+  return loadHtmlLayer(v,layer,scene,i,sceneIndex);
 }
 async function loadBank(bankIndex,scene,sceneIndex=null){
   closeBankSources(bankIndex);
-  const layers=allLayers(scene),vids=banks[bankIndex];
+  const generation=bankLoadGeneration[bankIndex],layers=allLayers(scene),vids=banks[bankIndex];
   for(let i=layers.length;i<vids.length;i++){const v=vids[i];v.pause();v.removeAttribute('src');v.load();}
+  if(!layers.length){bankMode[bankIndex]='single';return false;}
   const useLiveWebCodecs=!offlineMode&&responsivePreview&&liveSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex);
   const useOfflineWebCodecs=offlineMode&&offlineSourceDecodeMode==='webcodecs'&&Number.isInteger(sceneIndex);
-  const tasks=layers.map(async(layer,i)=>{
-    const v=vids[i],start=Number(layer.start??0),declaredEnd=Number(layer.end??0),t=layer.transform??{};
-    if((useLiveWebCodecs||useOfflineWebCodecs)&&Number.isInteger(sceneIndex)){
-      try{
-        v.pause();v.removeAttribute('src');v.load();
-        const fps=useOfflineWebCodecs?offlineFps:Math.min(30,previewTargetFps());
-        const source=await WebCodecsSceneSource.open(sceneIndex,i,{fps,strict:useOfflineWebCodecs&&offlineSourceStrict});
-        const end=declaredEnd>start?declaredEnd:start+source.frameCount/source.fps,span=Math.max(.05,end-start);
-        const resume=i===0&&Number.isFinite(scene.resume_at)?Math.max(0,scene.resume_at-start):0;
-        const frame=await source.frameAt(Math.min(span-.002,resume));
-        return{video:null,source,frame,layer,start,end,span,transform:t,offlineBias:0,liveBias:0,sceneTime:Number(scene.time??0),sceneIndex,layerIndex:i,framePending:null};
-      }catch(error){
-        if(useOfflineWebCodecs&&offlineSourceStrict)throw error;
-        if(useOfflineWebCodecs)offlineSourceFallbacks++;
-        console.warn(`WebCodecs source ${sceneIndex}/${i} unavailable; using HTMLVideoElement`,error);
-      }
+  if(offlineMode){
+    bankState[bankIndex]=await Promise.all(layers.map((layer,i)=>loadSceneLayer(vids[i],layer,scene,i,sceneIndex,useLiveWebCodecs,useOfflineWebCodecs)));
+    if(generation!==bankLoadGeneration[bankIndex]){for(const state of bankState[bankIndex]??[])try{state.source?.close();}catch(_){}bankState[bankIndex]=[];return false;}
+    bankMode[bankIndex]=scene.composition_mode??'single';return true;
+  }
+  const primary=await loadSceneLayer(vids[0],layers[0],scene,0,sceneIndex,useLiveWebCodecs,useOfflineWebCodecs);
+  if(generation!==bankLoadGeneration[bankIndex]){try{primary.source?.close();}catch(_){}return false;}
+  bankState[bankIndex]=[primary];bankMode[bankIndex]=scene.composition_mode??'single';previewStartupReady=true;
+  setPreviewLoadState(layers.length>1?`primary ready · loading ${layers.length-1} companion${layers.length===2?'':'s'}`:'ready');
+  let remaining=Math.max(0,layers.length-1);
+  for(let i=1;i<layers.length;i++){
+    void loadSceneLayer(vids[i],layers[i],scene,i,sceneIndex,useLiveWebCodecs,useOfflineWebCodecs).then(state=>{
+      if(generation!==bankLoadGeneration[bankIndex]||bankState[bankIndex]?.[0]!==primary){try{state.source?.close();}catch(_){}return;}
+      const current=bankState[bankIndex];if(!current.some(item=>item.layerIndex===i)){current.push(state);current.sort((a,b)=>a.layerIndex-b.layerIndex);}
+    }).catch(error=>console.warn(`preview companion ${sceneIndex}/${i} unavailable`,error)).finally(()=>{
+      remaining=Math.max(0,remaining-1);if(generation!==bankLoadGeneration[bankIndex])return;
+      const ready=bankState[bankIndex]?.length??0;setPreviewLoadState(remaining?`${ready}/${layers.length} layers ready`:'ready');
+    });
+  }
+  return true;
+}
+function prewarmUpcomingPrimaries(sceneIndex,count=2){
+  if(!responsivePreview||sceneIndex<0)return;
+  if(liveSourceDecodeMode==='webcodecs'){
+    for(let offset=1;offset<=count;offset++){const index=sceneIndex+offset;if(index>=timeline.scene_plan.length)break;const key=`wc:${index}`;if(previewPrewarmKeys.has(key))continue;previewPrewarmKeys.add(key);void prewarmWebCodecsScene(index,1,{fps:Math.min(30,previewTargetFps())}).catch(()=>{});}return;
+  }
+  if(!previewProxyEnabled)return;
+  void (async()=>{
+    for(let offset=1;offset<=count;offset++){
+      const index=sceneIndex+offset;if(index>=timeline.scene_plan.length)break;
+      const url=previewMediaUrl(index,0),key=`proxy:${url}`;if(previewPrewarmKeys.has(key))continue;previewPrewarmKeys.add(key);
+      try{const response=await fetch(url,{headers:{Range:'bytes=0-65535'},cache:'force-cache'});await response.body?.cancel?.();}catch(error){console.debug(`preview prewarm ${index} skipped`,error);}
     }
-    return loadHtmlLayer(v,layer,scene,i,sceneIndex);
-  });
-  bankState[bankIndex]=await Promise.all(tasks);bankMode[bankIndex]=scene.composition_mode??'single';
+  })();
 }
 
 let activationGeneration=0;
@@ -298,7 +382,8 @@ async function activateScene(scene,{immediate=false}={}){
   const gen=++activationGeneration,next=activeBank<0?0:1-activeBank;
   try{
     const sceneIndex=sceneIndexAt(Number(scene.time??clockSeconds()));
-    await loadBank(next,scene,sceneIndex);if(gen!==activationGeneration)return;
+    setPreviewLoadState(`loading primary · scene ${Math.max(0,sceneIndex)+1}/${timeline.scene_plan.length}`);
+    const loaded=await loadBank(next,scene,sceneIndex);if(!loaded||gen!==activationGeneration)return;
     const duration=immediate?0:Math.max(0,scene.crossfade_seconds??1.25);
     transition=activeBank<0?null:{from:activeBank,to:next,start:clockNowMs(),duration:duration*1000};
     if(activeBank<0||duration===0){if(activeBank>=0)banks[activeBank].forEach(v=>v.pause());activeBank=next;transition=null;}
@@ -308,11 +393,7 @@ async function activateScene(scene,{immediate=false}={}){
     const inheritHistory=Number(scene?.direction?.creative?.history_inherit??0)>.04;
     resetTemporalFxState(temporalHero||inheritHistory);
     activeScene={...scene};focusLayer=0;resetVectorMotionState();
-    if(responsivePreview&&sceneIndex>=0&&sceneIndex+1<timeline.scene_plan.length){
-      const upcoming=timeline.scene_plan[sceneIndex+1];
-      if(liveSourceDecodeMode==='webcodecs')void prewarmWebCodecsScene(sceneIndex+1,allLayers(upcoming).length,{fps:Math.min(30,previewTargetFps())});
-      else if(previewProxyEnabled){for(let i=0;i<allLayers(upcoming).length;i++)void fetch(previewMediaUrl(sceneIndex+1,i),{headers:{Range:'bytes=0-0'},cache:'force-cache'}).then(r=>r.body?.cancel?.()).catch(()=>{});}
-    }
+    prewarmUpcomingPrimaries(sceneIndex,2);
     const t=scene.transform??{};
     const fxNames=['ripple','kaleidoscope','tiles','tunnel','posterize','edge','strobe','shutter','slit_scan','frame_echo','mirror_corridor','mask_wipe','solarize','datamosh','block_displace','chroma_delay','vhs_tracking','vortex','motion_trails','slice_recursion'].filter(k=>(t[k]??0)>.08).join(',');
     const d=scene.direction??{},align=d.rhythm_alignment?` · sync ${(d.rhythm_alignment*100).toFixed(0)}%`:'';const family=d.effect_family?` · ${d.effect_family}`:'';const vectors=d.vector_effects?.length?` · ${d.vector_effects.length} vector fx`:'';
@@ -326,7 +407,7 @@ async function activateScene(scene,{immediate=false}={}){
         directorMeta.style.display='block';directorMeta.textContent=`AI director · ${ai.strategy||'direct'} · ${ai.visual_world||ai.source_focus||'section plan'}${beat}${hero}${hold}`;
       }else{directorMeta.style.display='none';directorMeta.textContent='';}
     }
-  }catch(e){console.warn('scene activation failed',e);clipMeta.textContent=`Clip group unavailable: ${scene.title??scene.source_id}`;}
+  }catch(e){console.warn('scene activation failed',e);setPreviewLoadState(`load failed · ${String(e?.message||e)}`);clipMeta.textContent=`Clip group unavailable: ${scene.title??scene.source_id}`;}
 }
 
 function updateLiveSourceFrames(){
@@ -1793,6 +1874,8 @@ function gpuCompositionMode(mode){
 }
 function gpuLayerDescriptor(state,alpha=1){
   const source=state?.frame??state?.video;if(!source)return null;
+  if(state?.video&&!videoFrameUsable(state.video))return null;
+  if(state?.frame&&Math.max(Number(state.frame.displayWidth||state.frame.codedWidth||0),Number(state.frame.displayHeight||state.frame.codedHeight||0))<=0)return null;
   const t=state.transform??{},creative=activeScene?.direction?.creative??{},p=directedProgress();
   const camera=Math.min(1,creativeValue('camera_energy',creative.camera_energy??0)*liveFx.motion);
   const cameraZoom=1+camera*(.018+.052*(.5-.5*Math.cos(Math.PI*Math.min(1,p))))+punch*.065;

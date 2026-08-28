@@ -1,3 +1,14 @@
+# Unreleased — Preview cold-start reliability
+
+- Send an initial timeline state immediately when the browser preview WebSocket connects, so a cold preview resolves the first scene before Play/Seek instead of opening on an uninitialized black canvas.
+- Replace all-layer activation barriers with primary-first loading: the primary shot becomes visible as soon as its first decoded frame is ready, while companion layers join progressively in the background.
+- Generate lazy HTML preview proxies only for the scene's source range rather than transcoding an entire long clip. Startup begins at 360p and subsequent sources promote with the adaptive preview resolution.
+- Wait for seek completion and at least `HAVE_CURRENT_DATA` before exposing an `HTMLVideoElement` to Canvas/WebGPU; use `requestVideoFrameCallback()` opportunistically before GPU import.
+- Reject zero-size/seeking media before `GPUDevice.importExternalTexture()`, preventing a transient cold-start decode state from poisoning the WebGPU renderer and forcing a permanent Canvas2D fallback.
+- Prewarm the next two primary shots after the current primary is visible, de-duplicate prewarm requests, use unique temporary transcode files for concurrent lazy requests, and expose preview-loading progress in the renderer HUD.
+- Cache-bust the patched visualizer/WebGPU module chain so an existing 0.43.0 browser cache cannot silently keep the old cold-start code after the server restarts.
+- Add regression coverage for initial WebSocket state, scene-range FFmpeg seeking, scene-range preview routing, browser cold-start contracts, and the preview module cache-bust chain.
+
 # 0.43.0 — AI director authority and visible creative intent
 
 - Promote the whole-song LLM from a mostly invisible scalar bias to a bounded creative director that can author section strategies and 1–4 normalized director beats per section.
