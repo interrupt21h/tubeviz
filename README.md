@@ -11,7 +11,7 @@ AI-directed music video. It can acquire and curate footage, detect scenes, analy
 plan an edit, apply visual treatments, preview the result interactively, and render a
 finished video.
 
-The project supports both a browser-based **Studio** workflow and a full command-line
+Tubeviz provides both a browser-based **Studio** workflow and a full command-line
 interface. Both operate on the same persistent media library and the same directed
 timeline format.
 
@@ -155,7 +155,7 @@ footage rather than replacing it with a standalone audio-reactive shader.
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Studio](#studio)
-- [AI configuration](#ai-configuration)
+- [Settings and AI configuration](#settings-and-ai-configuration)
 - [Building a footage library](#building-a-footage-library)
 - [Curating the library](#curating-the-library)
 - [Analyzing music and creating a timeline](#analyzing-music-and-creating-a-timeline)
@@ -168,7 +168,6 @@ footage rather than replacing it with a standalone audio-reactive shader.
 - [Recommended workflow](#recommended-workflow)
 - [Troubleshooting](#troubleshooting)
 - [Command overview](#command-overview)
-- [Development](#development)
 - [License](#license)
 
 ## Quick start
@@ -329,7 +328,9 @@ tubeviz codec doctor
 
 ## Studio
 
-Studio provides a browser interface over the same workflows exposed by the CLI.
+Studio is the easiest way to work with tubeviz interactively. It organizes the workflow into
+focused workspaces while keeping the current project paths and library state available as you
+move between stages.
 
 ```bash
 tubeviz gui \
@@ -345,57 +346,101 @@ tubeviz gui --library ./library --no-open
 tubeviz gui --host 0.0.0.0 --port 8090
 ```
 
-> When binding Studio to a non-loopback address, treat it as a local development service
-> and place it behind appropriate network controls if other systems can reach it.
+> When binding Studio to a non-loopback address, place it behind appropriate network
+> controls if other systems can reach it.
 
-### Create
+### Project
 
-The **Create** interface covers the main production workflow:
+The **Project** workspace defines the files and directories used by the current production:
+the footage library, music track, directed timeline, and rendered output. It also provides a
+compact overview of project state and shortcuts into the rest of the workflow.
 
-- AI-assisted footage acquisition;
-- manual YouTube URL ingest;
-- music analysis and timeline generation;
-- interactive preview;
-- final rendering;
-- native renderer build and diagnostics.
+![tubeviz Studio — Project](screenshots/screenshot-project.png)
 
-![tubeviz Studio — Create](screenshots/screenshot-create.png)
+### Ingest
+
+The **Ingest** workspace is used to build and expand the footage library. Choose the
+acquisition method that matches the material you have:
+
+- **AI Discovery** starts from a visual brief and searches for footage that fits it;
+- **Search Terms** uses explicit visual concepts or a search-term file;
+- **YouTube URLs** imports known sources directly.
+
+Download quality, source filtering, scene detection, media preparation, and optional
+analysis controls are shared across the ingest workflow.
+
+![tubeviz Studio — Ingest](screenshots/screenshot-ingest.png)
 
 ### Library
 
-The **Library** interface is used to inspect and curate source footage. It supports:
+The **Library** workspace is where source footage is reviewed and curated before it is used
+in an edit. It supports:
 
 - filtering and browsing clips;
 - video playback;
 - non-destructive In/Out trimming;
 - rejection and restoration;
 - permanent deletion;
-- scene and metadata inspection;
-- visual and AI analysis review.
+- tags and output-pool selection;
+- scene, visual, semantic, and AI metadata inspection.
 
-![tubeviz Studio — Library](screenshots/screenshot-library.png)
+![tubeviz Studio — Library](screenshots/screenshot-library-cropped.png)
 
-The clip detail view places the trim controls beside the media so the usable range can
-be adjusted while viewing the source.
+The clip detail view keeps playback and trim controls together so usable source ranges can be
+adjusted while watching the footage.
 
 ![tubeviz Studio — Library clip details](screenshots/screenshot-library-detail.png)
 
+### Timeline
+
+The **Timeline** workspace combines music analysis, editorial direction, interactive preview,
+and inspection of the generated edit. The timeline beneath the preview shows the structure of
+the production over time, including musical sections, energy, beats, selected clips,
+transitions, creative effects, vector or codec treatments, and AI Director events when used.
+
+Clicking timeline items exposes details about the selected shot or event, and the preview can
+be scrubbed alongside the timeline or opened in a separate window.
+
+![tubeviz Studio — Timeline](screenshots/screenshot-timeline-example.png)
+
+### Render
+
+The **Render** workspace turns a directed timeline into the finished video. It provides the
+output resolution, frame rate, codec, quality, backend, and acceleration controls needed for
+browser or native rendering.
+
+For normal use, the automatic backend and acceleration settings are a good starting point;
+the explicit controls are available when a particular renderer or hardware path is required.
+
+![tubeviz Studio — Render](screenshots/screenshot-render.png)
+
 ### Jobs
 
-Long-running operations appear in the **Jobs** panel with live output, progress,
-elapsed time, and cancellation controls when supported.
+Long-running work is tracked in the **Jobs** workspace. It shows current and previous jobs,
+progress, elapsed time, estimated completion when available, complete arguments, captured
+output, and cancellation controls for supported operations.
+
+A compact activity bar also reports foreground work while you use other Studio tabs.
 
 ![tubeviz Studio — Jobs](screenshots/screenshot-jobs.png)
 
-### Command Center
+### Settings
 
-The **Command Center** exposes CLI commands and their arguments from inside Studio. It is
-useful for advanced operations that are not part of the curated Create or Library
-panels.
+The **Settings** workspace contains application-wide AI and model configuration, including
+the master AI switch, OpenAI-compatible endpoint and model settings, credentials, image
+analysis limits, timeouts, and video-understanding options.
 
-![tubeviz Studio — Command Center](screenshots/screenshot-command.png)
+![tubeviz Studio — Settings](screenshots/screenshot-settings.png)
 
-For exact command syntax, the CLI remains the authoritative reference:
+### Advanced
+
+The **Advanced** workspace provides the Command Center for users who want direct access to
+tubeviz commands and their full argument sets without leaving Studio. It is useful for
+specialized workflows and for reproducing a Studio operation from the command line.
+
+![tubeviz Studio — Advanced](screenshots/screenshot-advanced.png)
+
+For exact command syntax, the CLI help is the authoritative reference:
 
 ```bash
 tubeviz --help
@@ -403,12 +448,10 @@ tubeviz analyze --help
 tubeviz render --help
 ```
 
-## AI configuration
+## Settings and AI configuration
 
-Studio's **AI Settings** page is the central configuration surface for optional learned
-and API-backed features.
-
-![tubeviz Studio — AI Settings](screenshots/screenshot-ai.png)
+Studio's **Settings** workspace is the central configuration surface for optional learned
+and API-backed capabilities.
 
 Configuration includes:
 
@@ -853,7 +896,7 @@ tubeviz serve timelines/song.json \
   --audio audio/song.mp3
 ```
 
-Studio also provides a managed preview action from the Create interface.
+Studio also provides a managed preview directly in the Timeline workspace.
 
 The interactive preview uses a responsive pipeline by default. Tubeviz prepares a
 lightweight 720p/30fps preview-media cache independently of final-render media, adapts
@@ -1444,7 +1487,7 @@ python -c 'import tubeviz, inspect; print(inspect.getfile(tubeviz))'
 tubeviz --help
 ```
 
-When developing from a checkout, activate the intended virtual environment before
+When running from a local checkout, activate the intended virtual environment before
 launching Studio or rendering.
 
 ## Command overview
@@ -1480,39 +1523,6 @@ tubeviz render --help
 tubeviz codec --help
 tubeviz native --help
 ```
-
-## Development
-
-Install the development dependencies:
-
-```bash
-pip install -e '.[dev,semantic,audio-ai,render]'
-```
-
-Run the test suite:
-
-```bash
-pytest
-```
-
-Useful focused diagnostics include:
-
-```bash
-tubeviz native doctor
-tubeviz codec doctor
-tubeviz audio-ai doctor
-tubeviz music-ai doctor
-```
-
-Studio screenshots can be generated with the Playwright helper. For example, to capture the complete Library item inspector:
-
-```bash
-python scripts/screenshot_studio.py --tab library-details --full-details
-```
-
-Release history and implementation-specific changes are documented in
-[`CHANGELOG.md`](CHANGELOG.md). The README is intended to describe the current user
-workflow and supported capabilities.
 
 ## License
 
