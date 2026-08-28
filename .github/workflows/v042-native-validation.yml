@@ -1,0 +1,48 @@
+name: v0.42 native GPU validation
+
+on:
+  push:
+    branches: [v042-native-gpu]
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        placebo: [OFF, ON]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ pkg-config ffmpeg libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libplacebo-dev libvulkan-dev
+      - name: Build native renderer
+        run: |
+          cmake -S src/tubeviz/native_src -B build/native-${{ matrix.placebo }} -DTUBEVIZ_WITH_PLACEBO=${{ matrix.placebo }} -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/native-${{ matrix.placebo }} --parallel 2
+          build/native-${{ matrix.placebo }}/tubeviz-native-render --version
+          build/native-${{ matrix.placebo }}/tubeviz-native-render --help
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+      - name: Test
+        run: |
+          pytest -q
+          python -m compileall -q src/tubeviz
+          node --check src/tubeviz/static/gui.js
+          node --check src/tubeviz/static/visualizer.js
