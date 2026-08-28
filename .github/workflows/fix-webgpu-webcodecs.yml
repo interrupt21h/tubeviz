@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply browser rendering fixes
-        run: python .github/scripts/fix_webgpu_webcodecs.py
+        run: |
+          python .github/scripts/fix_webgpu_webcodecs.py
+          sed -i '/python -m compileall -q src\/tubeviz/a\          node --check src/tubeviz/static/gui.js' .github/workflows/ci.yml
 
       - name: Install test dependencies
         run: |
