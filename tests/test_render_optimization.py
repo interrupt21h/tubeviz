@@ -55,10 +55,10 @@ def test_studio_defaults_to_responsive_preview_profile():
     assert 'id="previewMode"' in html
     assert '<option value="responsive">responsive · optimized live FX</option>' in html
     assert "auto · adaptive 360p–720p" in html
-    assert "preview_profile=" in gui
+    assert 'searchParams.set("preview_profile"' in gui
     assert 'profile:value("previewMode")||"responsive"' in gui
     assert 'id="previewDecode"' in html
-    assert "preview_decode=" in gui
+    assert 'searchParams.set("preview_decode"' in gui
 
 
 def test_responsive_preview_throttles_expensive_live_paths():

@@ -166,8 +166,9 @@ def test_preview_cold_start_contracts_are_present():
     assert "prewarmUpcomingPrimaries(sceneIndex,2)" in visualizer
     assert "externalTextureSourceUsable" in gpu_core
     assert "item?.source&&externalTextureSourceUsable(item.source)" in gpu_core
+    entry_cache_bust = "0.43.0-timeline1"
     cache_bust = "0.43.0-previewfix1"
-    assert f"visualizer.js?v={cache_bust}" in index
+    assert f"visualizer.js?v={entry_cache_bust}" in index
     assert f"browser_gpu.js?v={cache_bust}" in visualizer
     assert f"browser_gpu_core.js?v={cache_bust}" in gpu
     assert f"browser_gpu_worker.js?v={cache_bust}" in gpu

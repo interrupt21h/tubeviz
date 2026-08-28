@@ -6,7 +6,9 @@ from pathlib import Path
 from playwright.sync_api import Page, sync_playwright
 
 
-TABS = ("create", "library", "library-details", "command", "jobs", "ai")
+CANONICAL_TABS = ("project", "ingest", "library", "library-details", "timeline", "render", "jobs", "settings", "advanced")
+TAB_ALIASES = {"create": "project", "ai": "settings", "command": "advanced"}
+TABS = CANONICAL_TABS + tuple(TAB_ALIASES)
 
 
 def build_parser() -> ArgumentParser:
@@ -26,7 +28,7 @@ def build_parser() -> ArgumentParser:
     parser.add_argument(
         "--tab",
         choices=TABS,
-        default="create",
+        default="project",
         help=(
             "Studio view to capture. 'library-details' opens a playable Library "
             "clip and captures its detail/trim modal."
@@ -34,6 +36,22 @@ def build_parser() -> ArgumentParser:
     )
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument(
+        "--ingest-mode",
+        choices=("ai", "search", "urls"),
+        default="ai",
+        help="For --tab ingest, select which acquisition mode is visible.",
+    )
+    parser.add_argument(
+        "--timeline-path",
+        default=None,
+        help="For --tab timeline, set the Studio Timeline path before capture.",
+    )
+    parser.add_argument(
+        "--start-preview",
+        action="store_true",
+        help="For --tab timeline, start the embedded browser preview and wait for it before capture.",
+    )
     parser.add_argument(
         "--clip-match",
         default=None,
@@ -95,6 +113,10 @@ def install_screenshot_styles(page: Page) -> None:
             }
 
             .studio-tooltip {
+                display: none !important;
+            }
+
+            .global-activity {
                 display: none !important;
             }
         """
@@ -327,6 +349,42 @@ def expand_library_details(page: Page) -> None:
         )
 
 
+def prepare_timeline(page: Page, args: Namespace) -> None:
+    """Prepare the Timeline tab without making screenshots depend on a preview by default."""
+    if args.timeline_path:
+        page.locator("#timelinePath").fill(args.timeline_path)
+
+    timeline_path = page.locator("#timelinePath").input_value().strip()
+    if timeline_path:
+        page.locator("#refreshTimeline").click()
+        try:
+            page.wait_for_function(
+                """
+                () => {
+                    const status = document.querySelector('#timelineStatus');
+                    if (!status) return false;
+                    const text = (status.textContent || '').trim();
+                    return text && !text.startsWith('Loading ');
+                }
+                """,
+                timeout=20_000,
+            )
+        except Exception:
+            pass
+
+    if args.start_preview:
+        if not timeline_path:
+            raise SystemExit("--start-preview requires --timeline-path or a populated Studio Timeline field")
+        page.locator("#previewBtn").click()
+        page.locator("#timelinePreviewShell.ready").wait_for(state="visible", timeout=30_000)
+        frame = page.locator("#timelinePreviewFrame")
+        try:
+            frame.wait_for(state="visible", timeout=10_000)
+            page.wait_for_timeout(1200)
+        except Exception:
+            pass
+
+
 def main() -> None:
     args = build_parser().parse_args()
     default_tab_name = "library-detail" if args.tab == "library-details" else args.tab
@@ -344,14 +402,30 @@ def main() -> None:
 
         page.goto(args.url, wait_until="networkidle")
 
-        ui_tab = "library" if args.tab == "library-details" else args.tab
+        requested_tab = args.tab
+        ui_tab = "library" if requested_tab == "library-details" else TAB_ALIASES.get(requested_tab, requested_tab)
         page.locator(f'.tab[data-tab="{ui_tab}"]').click()
         page.locator(f"#{ui_tab}.panel.active").wait_for()
+
+        if ui_tab == "advanced":
+            page.locator("#advanced .command-card").wait_for(state="visible")
+            try:
+                page.wait_for_function(
+                    "() => (document.querySelector('#cliArguments')?.children.length || 0) > 0",
+                    timeout=10_000,
+                )
+            except Exception:
+                pass
+        elif ui_tab == "ingest":
+            page.locator(f'.ingest-mode-button[data-ingest-mode="{args.ingest_mode}"]').click()
+            page.wait_for_timeout(100)
 
         install_screenshot_styles(page)
 
         if args.tab in {"library", "library-details"}:
             load_library(page)
+        elif args.tab == "timeline":
+            prepare_timeline(page, args)
 
         if args.tab == "library":
             warm_library_images(page)
@@ -364,6 +438,17 @@ def main() -> None:
             full_page=(args.tab != "library-details" or not args.viewport_details),
             animations="disabled",
         )
+
+        if args.tab == "timeline" and args.start_preview:
+            # This helper owns the preview serve job it launched. Shut it down
+            # after capture so screenshot automation never leaves a server behind.
+            try:
+                page.evaluate(
+                    "async () => { if (typeof stopTimelinePreviewJob === 'function') await stopTimelinePreviewJob(); }"
+                )
+                page.wait_for_timeout(150)
+            except Exception:
+                pass
 
         browser.close()
 

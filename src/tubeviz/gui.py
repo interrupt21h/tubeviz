@@ -764,6 +764,32 @@ def create_gui_app(
             },
         }
 
+    @app.get("/api/gui/timeline")
+    async def timeline_state(timeline: str = Query(..., min_length=1)) -> dict[str, Any]:
+        raw = timeline.strip()
+        if not raw:
+            raise HTTPException(400, "timeline path is required")
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = root / path
+        path = path.resolve()
+        if not path.is_file():
+            raise HTTPException(404, f"timeline not found: {path}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, f"invalid timeline JSON: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(400, "timeline JSON root must be an object")
+        track = payload.get("track")
+        if not isinstance(track, dict):
+            raise HTTPException(400, "timeline JSON is missing a track object")
+        return {
+            "path": str(path),
+            "modified_ns": path.stat().st_mtime_ns,
+            "timeline": payload,
+        }
+
     @app.get("/api/gui/ai-settings")
     async def get_ai_settings() -> dict[str, Any]:
         return load_settings().public_dict()

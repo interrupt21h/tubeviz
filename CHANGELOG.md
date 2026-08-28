@@ -1,3 +1,33 @@
+# Unreleased — Studio navigation refinement
+
+- Promote **Advanced** to a dedicated top-level Studio workspace and move the full **Command Center** there, keeping Settings focused on configuration rather than developer tooling.
+- Remove legacy numeric prefixes such as `01`, `01B`, and `02` from visible card subtitles/kickers while retaining meaningful workflow sequencing where it is intentionally presented as a process.
+- Update Studio tab hooks and compatibility routing so the legacy `command` target now opens **Advanced**, while the legacy `ai` target continues to open **Settings**.
+- Update screenshot automation and focused UI regression coverage for the new **Advanced** tab and simplified subtitles.
+
+# Unreleased — Studio workflow and activity cleanup
+
+- Replace the overloaded **Create** tab with a focused seven-workspace flow: **Project → Ingest → Library → Timeline → Render → Jobs → Settings**.
+- Keep Project limited to project identity and paths, add a persistent cross-workspace project-context bar, and provide direct workflow shortcuts without mixing acquisition, analysis, or rendering controls into project setup.
+- Consolidate acquisition under **Ingest** with explicit **AI Discovery**, **Search Terms**, and **YouTube URLs** modes while preserving the existing shared download, quality, media-preparation, filtering, and scene-analysis controls.
+- Keep the dedicated Timeline workspace focused on analysis, direction, generated-edit inspection, and preview; move final renderer configuration into its own **Render** workspace.
+- Rename AI Settings to **Settings** and move the full CLI **Command Center** under a collapsed Advanced / Developer Tools section instead of presenting it as a peer creative workflow.
+- Remove visible terminal/progress panels from task workspaces. A fixed global activity strip now shows the current foreground task, determinate/indeterminate progress, ETA, cancellation, completion/failure state, and a direct **View Jobs** action.
+- Make **Jobs** the canonical full-detail surface for background work, including complete captured command output, argument vectors, progress, timing, cancellation, and history.
+- Fix compact contextual-help buttons so the 16px circular icon cannot shrink or distort, including the Timeline Zoom control's flex layout.
+- Update screenshot automation for the new Project/Ingest/Render/Settings tabs, retain Create/AI/Command as compatibility aliases, and add selectable AI/Search/URL Ingest captures.
+
+# Unreleased — Studio Timeline workspace
+
+- Move analysis and browser preview out of the Create project card into a dedicated **Timeline** tab, preserving the existing analysis controls while making the generated edit itself the primary inspection surface.
+- Embed the live browser renderer above a synchronized, horizontally zoomable timeline with musical sections, section energy, bar/beat markers, clip blocks, crossfades, creative FX, vector/codec treatments, and AI Director events.
+- Add click-to-seek inspection for generated decisions, including source excerpt timing, composition/layering, transition duration, effect vocabulary, rhythm/selection scores when available, and section/shot AI direction.
+- Add Timeline playback, scrub, zoom, refresh and preview controls plus an optional muted popout that follows the embedded preview through a cross-port `postMessage` playback bridge.
+- Add a local Studio timeline JSON endpoint so the GUI can inspect the currently selected timeline without duplicating planner logic or depending on the preview server's in-memory state.
+- Keep the preview server's fresh-port lifecycle and responsive/full, quality, GPU, decode, and codec-materialization controls intact while changing the default presentation from a separate window to the Timeline workspace.
+- Update the Studio screenshot helper with a `timeline` target, optional timeline path, and optional embedded-preview startup for documentation captures.
+- Add focused API/static-contract tests and cache-bust the modified preview visualizer entry asset; Studio static assets continue to use the existing no-cache middleware.
+
 # Unreleased — Preview cold-start reliability
 
 - Send an initial timeline state immediately when the browser preview WebSocket connects, so a cold preview resolves the first scene before Play/Seek instead of opening on an uninitialized black canvas.

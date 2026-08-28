@@ -99,7 +99,7 @@ const STATIC_HELP={
   codec:"Final video encoder used by FFmpeg.",nativePreset:"FFmpeg/native encoder speed-quality preset.",decoderCache:"Number of native decoder contexts retained across cuts to reduce reopen/decode overhead.",nativeThreads:"Native effect worker count. Zero lets the runtime choose automatically.",
   buildMissing:"Build the native C++ renderer automatically when the executable is missing.",codecRenderMaterialize:"Materialize scheduled FFglitch effects before final rendering.",
   visualBrief:"Describe the desired visual world in natural language. Tubeviz converts this prose into short YouTube-native searches; the brief itself is never used as a search query.",
-  openaiModel:"Shared OpenAI model used for storyboard/clip understanding, acquisition planning, and whole-song AI directing. Configure it once here; Create workflows inherit it automatically.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minSourceHeight:"Reject sources whose best reported height is below this value. The default requires 1080p footage.",maxSourceHeight:"Highest source format Tubeviz will download. The default caps acquisition at 1080p even when 1440p or 4K is available; zero disables the cap.",manualMinSourceHeight:"Reject a manual source when its reported height is below this value.",manualMaxSourceHeight:"Highest format downloaded for a manual source. The default caps acquisition at 1080p without forcing a later downscale.",mediaPrep:"Auto reuses H.264/MP4, VP8/VP9/WebM, and AV1 sources directly and creates an H.264 proxy only for incompatible media. Source never transcodes. Normalize forces the legacy proxy behavior.",normalizeEncoder:"Encoder used only when a compatibility proxy is required. Auto tests NVENC at runtime and otherwise uses libx264.",manualMediaPrep:"Choose whether manual ingest reuses compatible source media or creates an H.264 compatibility proxy.",manualNormalizeEncoder:"Compatibility-proxy encoder; Auto prefers working NVIDIA NVENC and falls back to libx264.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
+  openaiModel:"Shared OpenAI model used for storyboard/clip understanding, acquisition planning, and whole-song AI directing. Configure it once here; Ingest and Timeline workflows inherit it automatically.",termsPath:"Optional legacy text file containing one discovery search concept per line.",resultsPerTerm:"Target number of READY clips to ingest per seed search term.",hardMaxDuration:"Maximum library clip/segment length. Search results longer than this are not discarded when long-video sampling is enabled; Tubeviz downloads only a selected time range.",minSourceHeight:"Reject sources whose best reported height is below this value. The default requires 1080p footage.",maxSourceHeight:"Highest source format Tubeviz will download. The default caps acquisition at 1080p even when 1440p or 4K is available; zero disables the cap.",manualMinSourceHeight:"Reject a manual source when its reported height is below this value.",manualMaxSourceHeight:"Highest format downloaded for a manual source. The default caps acquisition at 1080p without forcing a later downscale.",mediaPrep:"Auto reuses H.264/MP4, VP8/VP9/WebM, and AV1 sources directly and creates an H.264 proxy only for incompatible media. Source never transcodes. Normalize forces the legacy proxy behavior.",normalizeEncoder:"Encoder used only when a compatibility proxy is required. Auto tests NVENC at runtime and otherwise uses libx264.",manualMediaPrep:"Choose whether manual ingest reuses compatible source media or creates an H.264 compatibility proxy.",manualNormalizeEncoder:"Compatibility-proxy encoder; Auto prefers working NVIDIA NVENC and falls back to libx264.",minDynamicScore:"Hard dynamicness floor after optical-flow analysis.",maxTextOverlay:"Maximum average frame area occupied by detected text-like regions.",maxPersistentText:"Maximum frame area occupied by text that persists across sampled frames.",minMotionCoverage:"Minimum fraction of the image participating in optical-flow motion; rejects tiny animated overlays on static scenes.",minTemporalDiversity:"Minimum actual frame-to-frame visual change.",maxFaceDominance:"Maximum frame area dominated by detected faces; helps reject talking-head footage.",minAestheticScore:"Minimum sharpness/exposure/saturation quality heuristic.",longVideoAttempts:"How many stratified randomized regions of a long source Tubeviz probes before choosing the strongest segment.",longVideoExcerptSeconds:"Length of the yt-dlp range downloaded around the best long-video probe.",sampleLongVideos:"Keep long finite videos eligible by probing randomized regions and downloading only the strongest bounded segment.",aiDevice:"Device used for AI pre-download candidate ranking.",aiCandidates:"Number of discovered candidates scored by AI before downloads are selected.",aiQueries:"Number of query variants generated/used per seed term.",cookiesBrowser:"Optional browser whose cookies yt-dlp should load, e.g. chrome or firefox.",aiDiscovery:"Use OpenCLIP/AI signals to rank candidate videos before downloading them.",visualIndexScenes:"After scene detection, index motion, palette, complexity, and natural visual accents.",manualSemanticDevice:"Device for OpenCLIP embedding and zero-shot classification of manually ingested scenes.",manualSemanticModel:"OpenCLIP architecture used to embed and classify manually ingested scene thumbnails.",manualSemanticPretrained:"OpenCLIP pretrained weights used for manual scene classification.",manualNoSemanticIndex:"Disable semantic embeddings for manually added URLs. Leave unchecked for automatic semantic scene retrieval.",manualNoSceneClassification:"Disable automatic zero-shot labels such as crowd, dancing, nightlife, city, tunnel, abstract, lights, text-heavy, and talking-head.",
   manualUrls:"Paste one hand-picked YouTube URL per line. Each accepted video enters the normal tubeviz download, normalization, scene-detection, visual-index, and duplicate-detection pipeline.",
   manualTerm:"Search/provenance tag assigned to manually ingested videos so they can be filtered and selected as a coherent source family.",manualCookies:"Optional browser cookies for manual yt-dlp ingestion.",manualMinDuration:"Reject manually supplied videos shorter than this duration. Zero disables.",manualHardMaxDuration:"Reject manually supplied videos longer than this duration. Zero disables, which is the manual-ingest default.",manualMinWidth:"Reject sources narrower than this width. Zero disables.",manualWidth:"Compatibility-proxy width. Zero preserves source geometry.",manualHeight:"Compatibility-proxy height. Zero preserves source geometry.",manualFps:"Compatibility-proxy frame rate. Zero preserves source timing.",manualSceneThreshold:"FFmpeg scene-change sensitivity used when detecting shot boundaries.",manualMinScene:"Minimum detected scene duration retained in the library.",manualSocketTimeout:"yt-dlp network socket timeout in seconds.",manualFragments:"Number of fragmented-media pieces yt-dlp may download concurrently.",manualRetries:"Number of overall download retries.",manualFragmentRetries:"Number of retries for individual media fragments.",manualKeepAudio:"Keep AAC audio when a compatibility proxy is created. Direct source media is never re-encoded merely to strip audio.",manualNoScenes:"Skip scene detection and scene thumbnails for these manually added videos.",manualNoVisualIndex:"Skip motion/palette/visual-accent indexing for these videos.",manualForce:"Redownload/reprocess even when the source already exists in the library.",manualVerbose:"Show verbose yt-dlp diagnostics in the job log.",
   statusFilter:"Filter Library cards by clip processing status.",termFilter:"Filter Library cards by provenance/search term.",tagFilter:"Filter Library cards by editable user tag.",trimIn:"Saved start of the usable source region. Material before this point is excluded from future scene selection.",trimOut:"Saved end of the usable source region. Material after this point is excluded from future scene selection.",loopTrim:"Loop only the highlighted usable range while editing a clip.",
@@ -336,8 +336,9 @@ document.querySelectorAll(".tab").forEach(btn=>btn.onclick=()=>{
   btn.classList.add("active");
   $(btn.dataset.tab).classList.add("active");
   if(btn.dataset.tab==="library") loadClips();
+  if(btn.dataset.tab==="timeline"&&!timelineWorkspaceData) loadTimelineWorkspace({quiet:true});
   if(btn.dataset.tab==="jobs") refreshJobs();
-  if(btn.dataset.tab==="command"&&!cliSchema) loadCliSchema();
+  if(btn.dataset.tab==="advanced"&&!cliSchema) loadCliSchema();
 });
 
 async function refreshLibrarySummary(){
@@ -483,69 +484,13 @@ $("visualIndexBtn").onclick=()=>startJob("visual-index",{library:value("libraryP
 $("codecDoctorBtn").onclick=()=>startJob("codec-doctor",{library:value("libraryPath"),options:{}});
 $("codecMaterializeBtn").onclick=()=>startJob("codec-materialize",{...projectBase(),output:(value("timelinePath")||"timeline").replace(/\.json$/,".codec.json"),options:{}});
 $("codecMotionBtn").onclick=()=>startJob("codec-motion-index",{library:value("libraryPath"),options:{force:false}});
-async function startPreview(){
-  const timeline=value("timelinePath");
-  if(!timeline){
-    $("jobLog").textContent="Preview error: select a timeline first.";
-    return;
-  }
-  const preview=window.open("about:blank","tubevizPreview");
-  if(preview){
-    preview.document.write(`<title>tubeviz preview</title><body style="background:#080b10;color:#d9e6ef;font:16px system-ui;padding:30px">Starting preview for <code>${escapeHtml(timeline)}</code>…</body>`);
-  }
-  try{
-    // port=0 asks Studio to allocate a fresh port. This prevents an old
-    // in-memory timeline on :8080 from being mistaken for the current one.
-    const job=await api("/api/gui/jobs",{
-      method:"POST",
-      body:JSON.stringify({
-        kind:"preview",
-        ...projectBase(),
-        options:{port:0,host:"127.0.0.1",codec_materialize:checked("codecPreviewMaterialize")}
-      })
-    });
-    activeJob=job.id;
-    $("cancelJob").disabled=false;
-    updateLiveLog($("jobLog"),job.log,{forceFollow:true});
-    renderJobProgress(job);
-    waitForPreview(job.id,job.preview_url,preview,{profile:value("previewMode")||"responsive",quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto",decode:value("previewDecode")||"auto"});
-    pollActiveJob();
-  }catch(e){
-    $("jobLog").textContent=`Preview error: ${e.message}`;
-    if(preview)preview.close();
-  }
-}
-async function waitForPreview(jobId,url,previewWindow,previewOptions={}){
-  const deadline=Date.now()+20000;
-  while(Date.now()<deadline){
-    try{
-      const job=await api(`/api/gui/jobs/${jobId}?tail=100`);
-      const log=(job.log||[]).join("\n");
-      if(job.status==="failed"||job.status==="complete"){
-        if(previewWindow&&!previewWindow.closed){
-          previewWindow.document.body.textContent=`Preview failed: ${log.split("\n").slice(-8).join(" | ")}`;
-        }
-        return;
-      }
-      if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
-        if(previewWindow&&!previewWindow.closed){
-          const sep=url.includes("?")?"&":"?";
-          previewWindow.location=`${url}${sep}studio_preview=${encodeURIComponent(jobId)}&preview_profile=${encodeURIComponent(previewOptions.profile||"responsive")}&preview=${encodeURIComponent(previewOptions.quality||"auto")}&gpu=${encodeURIComponent(previewOptions.gpu||"auto")}&preview_decode=${encodeURIComponent(previewOptions.decode||"auto")}&t=${Date.now()}`;
-        }
-        return;
-      }
-    }catch(e){}
-    await new Promise(resolve=>setTimeout(resolve,200));
-  }
-  if(previewWindow&&!previewWindow.closed){
-    previewWindow.document.body.textContent="Preview server did not become ready within 20 seconds. Check the Studio job log.";
-  }
-}
-$("previewBtn").onclick=startPreview;
+// Preview launcher is implemented by the Timeline workspace below.
 $("refreshLibrary").onclick=()=>{refreshLibrarySummary();loadClips()};
 $("cancelJob").onclick=async()=>{
   if(!activeJob)return;
+  const cancelledJob=activeJob;
   await api(`/api/gui/jobs/${activeJob}/cancel`,{method:"POST"});
+  if(cancelledJob===timelinePreviewJobId){timelinePreviewJobId=null;invalidateTimelinePreview("Preview cancelled.");}
 };
 
 function updateLiveLog(element, lines, {forceFollow=false}={}){
@@ -563,6 +508,7 @@ async function pollActiveJob(){
   try{
     const job=await api(`/api/gui/jobs/${activeJob}?tail=4000`);
     renderJobProgress(job);
+    if(job.kind==="analyze"){const pct=Number.isFinite(job.progress_percent)?` · ${job.progress_percent.toFixed(1)}%`:"";timelineSetStatus(`${job.stage||"Analyzing"}${pct}`); }
     updateLiveLog($("jobLog"),job.log);
     const running=["queued","running","cancelling"].includes(job.status);
     $("cancelJob").disabled=!running;
@@ -571,6 +517,7 @@ async function pollActiveJob(){
     }else{
       refreshLibrarySummary();
       refreshJobs();
+      if(job.kind==="analyze"){if(job.status==="complete"&&value("timelinePath")) void loadTimelineWorkspace({quiet:false});else if(job.status!=="complete") timelineSetStatus(`Analysis ${job.status}. Check the job log.`,"error");}
       activeJob=null;
     }
   }catch(e){
@@ -1035,3 +982,464 @@ function installIntuitiveSliders(){
   });
 }
 installIntuitiveSliders();
+
+// Tubeviz Timeline workspace — timeline-tab-v1
+let timelineWorkspaceData=null;
+let timelineWorkspacePath="";
+let timelineWorkspaceDuration=0;
+let timelineWorkspaceZoom=1;
+let timelinePreviewUrl=null;
+let timelinePreviewJobId=null;
+let timelinePreviewPopup=null;
+let timelinePreviewState={time:0,duration:0,playing:false,scene_index:-1};
+let timelineLastPopupSync=0;
+
+function timelineSetStatus(message,kind=""){
+  const el=$("timelineStatus");if(!el)return;
+  el.textContent=message;el.className=`timeline-status${kind?` ${kind}`:""}`;
+}
+function timelineDuration(){return Math.max(.001,Number(timelineWorkspaceData?.track?.duration??timelineWorkspaceDuration??0)||.001)}
+function timelineSceneStart(scene){return Math.max(0,Number(scene?.time??scene?.timeline_start??0)||0)}
+function timelineSceneEnd(scene,index){
+  const scenes=timelineWorkspaceData?.scene_plan??[],start=timelineSceneStart(scene);
+  const next=index+1<scenes.length?timelineSceneStart(scenes[index+1]):timelineDuration();
+  const explicit=Number(scene?.timeline_end??scene?.end_time??0);
+  return Math.max(start+.02,Number.isFinite(explicit)&&explicit>start?Math.min(explicit,timelineDuration()):Math.min(next,timelineDuration()));
+}
+function timelinePercent(seconds){return Math.max(0,Math.min(100,100*Number(seconds||0)/timelineDuration()))}
+function timelineWidthPx(){
+  const viewport=$("timelineScroll")?.clientWidth||980;
+  return Math.max(760,viewport-113)*Math.max(1,timelineWorkspaceZoom);
+}
+function timelineLabel(text,fallback="untitled"){const value=String(text??"").trim();return value||fallback}
+function timelineEffectNames(scene){
+  const t=scene?.transform??{},out=[];
+  const scalar=[
+    ["zoom",v=>Number(v)>1.035],["rotation_degrees",v=>Math.abs(Number(v))>.3],["feedback",v=>Number(v)>.08],["glitch",v=>Number(v)>.08],
+    ["noise",v=>Number(v)>.08],["pixelate",v=>Number(v)>.08],["rgb_split",v=>Number(v)>.08],["scanlines",v=>Number(v)>.08],
+    ["ripple",v=>Number(v)>.08],["kaleidoscope",v=>Number(v)>.08],["tiles",v=>Number(v)>.08],["tunnel",v=>Number(v)>.08],
+    ["posterize",v=>Number(v)>.08],["edge",v=>Number(v)>.08],["strobe",v=>Number(v)>.08],["shutter",v=>Number(v)>.08],
+    ["slit_scan",v=>Number(v)>.08],["frame_echo",v=>Number(v)>.08],["mirror_corridor",v=>Number(v)>.08],["mask_wipe",v=>Number(v)>.08],
+    ["solarize",v=>Number(v)>.08],["datamosh",v=>Number(v)>.08],["block_displace",v=>Number(v)>.08],["chroma_delay",v=>Number(v)>.08],
+    ["vhs_tracking",v=>Number(v)>.08],["vortex",v=>Number(v)>.08],["motion_trails",v=>Number(v)>.08],["slice_recursion",v=>Number(v)>.08]
+  ];
+  scalar.forEach(([key,test])=>{if(test(t[key]))out.push(key.replaceAll("_"," "))});
+  const creative=scene?.direction?.creative??{};
+  if(creative.hero_kind)out.unshift(`hero: ${creative.hero_kind.replaceAll("_"," ")}`);
+  const family=scene?.direction?.effect_family;if(family&&family!=="cinematic")out.push(`${family} family`);
+  return [...new Set(out)];
+}
+function timelineVectorCodecNames(scene){
+  const vector=(scene?.direction?.vector_effects??[]).map(item=>timelineLabel(item?.kind??item,"vector").replaceAll("_"," "));
+  const codec=(scene?.direction?.codec_effects??[]).map(item=>timelineLabel(item?.kind??item,"codec").replaceAll("_"," "));
+  if(scene?.codec_materialization?.materialized)codec.unshift("materialized codec");
+  return [...new Set([...vector,...codec])];
+}
+function timelineAutomationRange(curves){
+  const points=[];for(const curve of Object.values(curves??{})){if(!Array.isArray(curve))continue;for(const point of curve){if(Array.isArray(point)&&point.length>=2&&Math.abs(Number(point[1]))>.025&&Number.isFinite(Number(point[0])))points.push(Math.max(0,Math.min(1,Number(point[0]))));}}
+  if(!points.length)return[0,1];return[Math.max(0,Math.min(...points)-.03),Math.min(1,Math.max(...points)+.03)];
+}
+function timelineSceneRangeFromProgress(scene,index,startProgress=0,endProgress=1){const start=timelineSceneStart(scene),end=timelineSceneEnd(scene,index),span=Math.max(.02,end-start);return[start+span*Math.max(0,Math.min(1,Number(startProgress)||0)),start+span*Math.max(0,Math.min(1,Number(endProgress)||1))];}
+function timelineCreativeEffectItems(scene,index){
+  const items=[],creative=scene?.direction?.creative??{},sceneStart=timelineSceneStart(scene),sceneEnd=timelineSceneEnd(scene,index);
+  for(const [name,curve] of Object.entries(creative.automation??{})){const [a,b]=timelineAutomationRange({[name]:curve});const [start,end]=timelineSceneRangeFromProgress(scene,index,a,b);items.push({start,end,label:name.replaceAll("_"," ")});}
+  for(const [name,curve] of Object.entries(scene?.direction?.automation??{})){const [a,b]=timelineAutomationRange({[name]:curve});const [start,end]=timelineSceneRangeFromProgress(scene,index,a,b);items.push({start,end,label:name.replaceAll("_"," ")});}
+  if(creative.hero_kind&&Number(creative.hero_amount||0)>.02){const [start,end]=timelineSceneRangeFromProgress(scene,index,creative.hero_start??0,creative.hero_end??1);items.push({start,end,label:`hero: ${String(creative.hero_kind).replaceAll("_"," ")}`});}
+  if(!items.length){const names=timelineEffectNames(scene);if(names.length)items.push({start:sceneStart,end:sceneEnd,label:names.slice(0,3).join(" · ")});}
+  return items;
+}
+function timelineVectorCodecItems(scene,index){
+  const items=[];
+  for(const effect of scene?.direction?.vector_effects??[]){const [a,b]=timelineAutomationRange(effect?.automation??{}),[start,end]=timelineSceneRangeFromProgress(scene,index,a,b);items.push({start,end,label:String(effect?.kind||"vector").replaceAll("_"," ")});}
+  for(const effect of scene?.direction?.codec_effects??[]){const [start,end]=timelineSceneRangeFromProgress(scene,index,effect?.start??0,effect?.end??1);items.push({start,end,label:String(effect?.kind||"codec").replaceAll("_"," ")});}
+  if(scene?.codec_materialization?.materialized&&!items.length)items.push({start:timelineSceneStart(scene),end:timelineSceneEnd(scene,index),label:"materialized codec"});
+  return items;
+}
+function timelineScoreRows(scene){
+  const rows=[];
+  const candidates=[
+    ["Visual match",scene?.visual_match_score??scene?.visual_score],["Semantic",scene?.semantic_score],
+    ["Audio ↔ visual",scene?.audio_visual_score??scene?.audio_visual_match],["Selection",scene?.selection_score??scene?.score],
+    ["Transition score",scene?.transition_score],["Rhythm sync",scene?.direction?.rhythm_alignment]
+  ];
+  for(const [label,val] of candidates){const n=Number(val);if(Number.isFinite(n))rows.push([label,Math.abs(n)<=1.001?`${(n*100).toFixed(0)}%`:n.toFixed(3)]);}
+  return rows;
+}
+function timelineItem(kind,ref,start,end,label,extraClass=""){
+  const left=timelinePercent(start),width=Math.max(.12,timelinePercent(end)-left);
+  return `<button type="button" class="timeline-item ${extraClass||kind}" data-timeline-ref="${escapeHtml(ref)}" style="left:${left.toFixed(4)}%;width:${width.toFixed(4)}%" title="${escapeHtml(label)} · ${formatTime(start)} → ${formatTime(end)}">${escapeHtml(label)}</button>`;
+}
+function timelinePlayhead(){return '<div class="timeline-playhead" aria-hidden="true"></div>'}
+function timelineLane(label,body,{klass=""}={}){
+  return `<div class="timeline-lane ${klass}"><div class="timeline-lane-label">${escapeHtml(label)}</div><div class="timeline-track" style="width:${timelineWidthPx()}px">${body}${timelinePlayhead()}</div></div>`;
+}
+function timelineRuler(){
+  const duration=timelineDuration(),zoom=timelineWorkspaceZoom;
+  let step=duration>360?60:duration>180?30:duration>90?15:10;
+  if(zoom>=2)step=Math.max(5,step/2);if(zoom>=4)step=Math.max(2,step/2);if(zoom>=7)step=Math.max(1,step/2);
+  let body="";
+  for(let t=0;t<=duration+.001;t+=step)body+=`<div class="timeline-tick" style="left:${timelinePercent(t).toFixed(4)}%"><span>${escapeHtml(formatTime(t).replace(/\.000$/, ""))}</span></div>`;
+  return timelineLane("Time",body,{klass:"ruler-lane"});
+}
+function timelineBeatLane(){
+  const track=timelineWorkspaceData?.track??{},beats=track.beats??[],bars=track.bars??[];
+  const source=timelineWorkspaceZoom>=1.75?beats:bars,kind=timelineWorkspaceZoom>=1.75?"beat":"bar";
+  const max=1200,stride=Math.max(1,Math.ceil(source.length/max));let body="";
+  for(let i=0;i<source.length;i+=stride){const t=Number(source[i]);if(Number.isFinite(t))body+=`<span class="timeline-marker ${kind}" style="left:${timelinePercent(t).toFixed(4)}%"></span>`;}
+  return timelineLane(timelineWorkspaceZoom>=1.75?"Beats":"Bars",body);
+}
+function renderTimelineWorkspace(){
+  const lanes=$("timelineLanes");if(!lanes)return;
+  const data=timelineWorkspaceData;
+  if(!data){lanes.innerHTML='<div class="timeline-empty">No timeline loaded.</div>';return;}
+  const track=data.track??{},sections=track.sections??[],scenes=data.scene_plan??[];
+  let html=timelineRuler();
+  html+=timelineLane("Sections",sections.map((section,index)=>timelineItem("section",`section:${index}`,Number(section.start||0),Number(section.end||0),`${timelineLabel(section.label,`Section ${index+1}`)} · ${Math.round(Number(section.energy||0)*100)}%`,"section")).join(""));
+  let energy="";
+  sections.forEach((section,index)=>{const start=Number(section.start||0),end=Number(section.end||start),level=Math.max(.06,Math.min(1,Number(section.energy||0)));energy+=`<button type="button" class="timeline-energy-block" data-timeline-ref="section:${index}" aria-label="${escapeHtml(timelineLabel(section.label,`Section ${index+1}`))} energy ${Math.round(level*100)} percent" style="left:${timelinePercent(start).toFixed(4)}%;width:${Math.max(.12,timelinePercent(end)-timelinePercent(start)).toFixed(4)}%;height:${Math.round(5+level*30)}px"></button>`});
+  html+=timelineLane("Energy",energy);
+  html+=timelineBeatLane();
+  html+=timelineLane("Clips",scenes.map((scene,index)=>timelineItem("scene",`scene:${index}`,timelineSceneStart(scene),timelineSceneEnd(scene,index),timelineLabel(scene.title??scene.term??scene.source_id,`Scene ${index+1}`),"clip")).join(""));
+  const transitions=[];scenes.forEach((scene,index)=>{if(index===0)return;const fade=Math.max(0,Number(scene.crossfade_seconds||0));if(fade>.02){const start=timelineSceneStart(scene);transitions.push(timelineItem("transition",`transition:${index}`,start,Math.min(timelineDuration(),start+fade),`crossfade ${fade.toFixed(2)}s`,"transition"));}});
+  html+=timelineLane("Transitions",transitions.join(""));
+  const fx=[];scenes.forEach((scene,index)=>{for(const item of timelineCreativeEffectItems(scene,index))fx.push(timelineItem("fx",`fx:${index}`,item.start,item.end,item.label,"effect"));});
+  html+=timelineLane("Creative FX",fx.join(""));
+  const vectorCodec=[];scenes.forEach((scene,index)=>{for(const item of timelineVectorCodecItems(scene,index))vectorCodec.push(timelineItem("vector",`vector:${index}`,item.start,item.end,item.label,"vector"));});
+  html+=timelineLane("Vector / Codec",vectorCodec.join(""));
+  const ai=[];
+  sections.forEach((section,index)=>{const direction=section?.ai_direction??{};if(direction.provenance==="llm"){const label=direction.strategy||direction.visual_world||direction.source_focus||"AI section direction";ai.push(timelineItem("ai",`ai-section:${index}`,Number(section.start||0),Number(section.end||0),`AI · ${label}`,"ai"));(direction.director_beats??[]).forEach((beat,beatIndex)=>{const start=Number(section.start||0)+Math.max(0,Math.min(1,Number(beat.at||0)))*(Number(section.end||0)-Number(section.start||0));const end=Math.min(Number(section.end||start+.35),start+Math.max(.16,(Number(section.end||0)-Number(section.start||0))*.025));ai.push(timelineItem("ai",`ai-beat:${index}:${beatIndex}`,start,end,beat.purpose||beat.source_query||beat.hero_kind||"directed moment","ai"));});}});
+  scenes.forEach((scene,index)=>{const authored=scene.ai_director??{};if(authored.beat_applied){const start=timelineSceneStart(scene),end=Math.min(timelineSceneEnd(scene,index),start+.8);ai.push(timelineItem("ai",`scene-ai:${index}`,start,end,authored.purpose||authored.source_query||authored.hero_kind||"applied AI moment","ai"));}});
+  html+=timelineLane("AI Director",ai.join(""));
+  lanes.innerHTML=html;
+  updateTimelinePlayhead(timelinePreviewState.time||0);
+}
+function timelineInspectorRows(rows){return `<dl class="timeline-inspector-grid">${rows.filter(([,v])=>v!==undefined&&v!==null&&String(v)!=="").map(([k,v])=>`<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join("")}</dl>`}
+function timelineChips(items){const values=(items||[]).filter(Boolean);return values.length?`<div class="timeline-chip-row">${values.map(item=>`<span class="timeline-chip">${escapeHtml(String(item).replaceAll("_"," "))}</span>`).join("")}</div>`:""}
+function inspectTimelineRef(ref){
+  if(!timelineWorkspaceData||!ref)return;
+  const parts=String(ref).split(":"),kind=parts[0],index=Number(parts[1]);
+  const scenes=timelineWorkspaceData.scene_plan??[],sections=timelineWorkspaceData.track?.sections??[];
+  let title="Timeline item",intro="",rows=[],chips=[],seek=0;
+  if(kind==="section"||kind==="ai-section"){
+    const section=sections[index];if(!section)return;seek=Number(section.start||0);const ai=section.ai_direction??{};
+    title=kind==="ai-section"?"AI section direction":timelineLabel(section.label,`Section ${index+1}`);
+    intro=kind==="ai-section"?(ai.strategy||ai.notes||ai.visual_world||"Whole-song director section plan."):`${timelineLabel(section.vibe,"neutral")} musical section`;
+    rows=[["Time",`${formatTime(section.start)} → ${formatTime(section.end)}`],["Energy",`${Math.round(Number(section.energy||0)*100)}%`],["Tempo",`${Number(section.local_tempo_bpm||timelineWorkspaceData.track?.tempo_bpm||0).toFixed(1)} BPM`],["Key",section.key||timelineWorkspaceData.track?.key||"—"],["Vibe",section.vibe],["AI provenance",ai.provenance],["Visual world",ai.visual_world],["Motion style",ai.motion_style],["Palette",ai.palette],["Strategy",ai.strategy],["Source focus",ai.source_focus],["Transition style",ai.transition_style],["Director strength",Number.isFinite(Number(ai.director_strength))?`${Math.round(Number(ai.director_strength)*100)}%`:""]];
+    chips=[...(ai.preferred_effects??[]),ai.effect_family,ai.preferred_composition];
+  }else if(kind==="ai-beat"){
+    const section=sections[index],beat=section?.ai_direction?.director_beats?.[Number(parts[2])];if(!section||!beat)return;seek=Number(section.start||0)+Number(beat.at||0)*(Number(section.end||0)-Number(section.start||0));title="AI director moment";intro=beat.purpose||"Authored section-local creative moment.";rows=[["Time",formatTime(seek)],["Source query",beat.source_query],["Composition",beat.composition],["Hero",beat.hero_kind],["History",beat.history_mode],["Hold clean",beat.hold?"yes":"no"],["Effect bias",beat.effect_bias]];chips=beat.preferred_effects??[];
+  }else{
+    const scene=scenes[index];if(!scene)return;seek=timelineSceneStart(scene);const end=timelineSceneEnd(scene,index),effects=timelineEffectNames(scene),vectors=timelineVectorCodecNames(scene),authored=scene.ai_director??{};
+    if(kind==="transition"){title="Clip transition";intro=`Transition into ${timelineLabel(scene.title??scene.term??scene.source_id,`Scene ${index+1}`)}.`;rows=[["Starts",formatTime(seek)],["Duration",`${Number(scene.crossfade_seconds||0).toFixed(3)} s`],["From scene",index],["To scene",index+1],["Section",scene.section_index]];}
+    else if(kind==="fx"){title="Applied creative effects";intro=effects.join(" · ")||"No explicit post effects.";rows=[["Scene",timelineLabel(scene.title??scene.term??scene.source_id)],["Time",`${formatTime(seek)} → ${formatTime(end)}`],["Effect family",scene.direction?.effect_family],["Hero",scene.direction?.creative?.hero_kind],["Source fidelity",scene.direction?.creative?.source_fidelity]];chips=effects;}
+    else if(kind==="vector"){title="Vector / codec effects";intro=vectors.join(" · ");rows=[["Scene",timelineLabel(scene.title??scene.term??scene.source_id)],["Time",`${formatTime(seek)} → ${formatTime(end)}`],["Vector effects",scene.direction?.vector_effects?.length||0],["Codec effects",scene.direction?.codec_effects?.length||0],["Materialized",scene.codec_materialization?.materialized?"yes":"no"]];chips=vectors;}
+    else if(kind==="scene-ai"){title="Applied AI director moment";intro=authored.purpose||authored.source_query||"AI-authored shot-local creative instruction.";rows=[["Scene",timelineLabel(scene.title??scene.term??scene.source_id)],["Time",`${formatTime(seek)} → ${formatTime(end)}`],["Source query",authored.source_query],["Composition",authored.composition_mode],["Hero",authored.hero_kind],["Hold clean",authored.hold?"yes":"no"]];chips=authored.preferred_effects??[];}
+    else{title=timelineLabel(scene.title??scene.term??scene.source_id,`Scene ${index+1}`);intro=scene.term?`Selected for “${scene.term}”`:`Generated scene ${index+1}`;rows=[["Time",`${formatTime(seek)} → ${formatTime(end)}`],["Source",scene.source_id],["Source excerpt",`${formatTime(scene.start??0)} → ${formatTime(scene.end??0)}`],["Section",scene.section_index],["Composition",scene.composition_mode],["Layers",1+(scene.layers?.length??0)],["Transition",scene.crossfade_seconds?`${Number(scene.crossfade_seconds).toFixed(2)} s crossfade`:"cut"],["Motif",scene.motif_id?`${scene.motif_id}${scene.occurrence?` #${scene.occurrence}`:""}`:""],["Effect family",scene.direction?.effect_family],...timelineScoreRows(scene)];chips=[...effects,...vectors];}
+  }
+  $("timelineInspector").innerHTML=`<div class="timeline-inspector-kicker">INSPECTOR</div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(intro)}</p>${timelineInspectorRows(rows)}${timelineChips(chips)}`;
+  document.querySelectorAll("[data-timeline-ref]").forEach(el=>el.classList.toggle("selected",el.dataset.timelineRef===ref));
+  timelineSeek(seek);
+}
+function updateTimelineSummary(){
+  const box=$("timelineSummary");if(!box)return;
+  if(!timelineWorkspaceData){box.innerHTML="";return;}
+  const track=timelineWorkspaceData.track??{},scenes=timelineWorkspaceData.scene_plan??[],sections=track.sections??[];
+  const fxScenes=scenes.filter(scene=>timelineEffectNames(scene).length).length;
+  const directed=sections.filter(section=>section?.ai_direction?.provenance==="llm").length;
+  box.innerHTML=`<span><b>${scenes.length}</b> scenes</span><span><b>${sections.length}</b> sections</span><span><b>${fxScenes}</b> FX shots</span><span><b>${directed}</b> AI-directed sections</span><span><b>${formatTime(track.duration||0)}</b></span>`;
+}
+async function loadTimelineWorkspace({quiet=false}={}){
+  const path=value("timelinePath");
+  if(!path){timelineWorkspaceData=null;timelineWorkspacePath="";renderTimelineWorkspace();updateTimelineSummary();if(!quiet)timelineSetStatus("Choose a timeline in Project first.","error");return false;}
+  if(!quiet)timelineSetStatus(`Loading ${path}…`);
+  try{
+    const payload=await api(`/api/gui/timeline?${qs({timeline:path})}`);
+    timelineWorkspaceData=payload.timeline;timelineWorkspacePath=path;timelineWorkspaceDuration=Number(payload.timeline?.track?.duration||0);timelineWorkspaceZoom=Number($("timelineZoom")?.value||1);
+    $("timelineScrub").disabled=timelineWorkspaceDuration<=0;renderTimelineWorkspace();updateTimelineSummary();timelineSetStatus(`Loaded ${payload.path}`,"ok");return true;
+  }catch(error){timelineWorkspaceData=null;timelineWorkspacePath="";renderTimelineWorkspace();updateTimelineSummary();timelineSetStatus(`Timeline unavailable: ${error.message}`,"error");return false;}
+}
+function updateTimelinePlayhead(seconds){
+  const duration=timelineDuration(),time=Math.max(0,Math.min(duration,Number(seconds)||0));timelinePreviewState.time=time;
+  const left=timelinePercent(time);document.querySelectorAll("#timelineLanes .timeline-playhead").forEach(el=>el.style.left=`${left}%`);
+  if($("timelineScrub")&&!$("timelineScrub").matches(":active"))$("timelineScrub").value=String(Math.round(1000*time/duration));
+  $("timelineTime").textContent=`${formatTime(time)} / ${formatTime(duration)}`;
+}
+function timelinePreviewTargets(){
+  const targets=[];const frame=$("timelinePreviewFrame");if(frame?.contentWindow)targets.push(frame.contentWindow);
+  if(timelinePreviewPopup&&!timelinePreviewPopup.closed)targets.push(timelinePreviewPopup);
+  return targets;
+}
+function timelineCommand(command,extra={}){const payload={type:"tubeviz-preview-command",command,...extra};timelinePreviewTargets().forEach(target=>{try{target.postMessage(payload,"*")}catch(_){}});}
+function timelineSeek(seconds){const target=Math.max(0,Math.min(timelineDuration(),Number(seconds)||0));updateTimelinePlayhead(target);timelineCommand("seek",{position:target});}
+function timelinePreviewLaunchUrl(baseUrl,jobId,previewOptions={},role="embedded"){
+  const url=new URL(baseUrl,location.href);url.searchParams.set("studio_preview",jobId);url.searchParams.set("preview_profile",previewOptions.profile||"responsive");url.searchParams.set("preview",previewOptions.quality||"auto");url.searchParams.set("gpu",previewOptions.gpu||"auto");url.searchParams.set("preview_decode",previewOptions.decode||"auto");url.searchParams.set("studio","1");url.searchParams.set("studio_role",role);url.searchParams.set("t",String(Date.now()));return url.toString();
+}
+function invalidateTimelinePreview(message="Preview stopped."){
+  try{timelinePreviewPopup?.close?.();}catch(_){}timelinePreviewPopup=null;timelinePreviewUrl=null;timelinePreviewState={time:0,duration:timelineWorkspaceDuration||0,playing:false,scene_index:-1};
+  const frame=$("timelinePreviewFrame"),shell=$("timelinePreviewShell"),placeholder=$("timelinePreviewPlaceholder");if(frame)frame.removeAttribute("src");shell?.classList.remove("ready");if(placeholder)placeholder.innerHTML=`<div class="timeline-preview-glyph">▶</div><b>Preview is stopped</b><span>${escapeHtml(message)}</span>`;
+  if($("timelinePopout")){$("timelinePopout").disabled=true;$("timelinePopout").textContent="Pop Out";}if($("timelinePlayPause")){$("timelinePlayPause").disabled=true;$("timelinePlayPause").textContent="▶";}if($("previewBtn"))$("previewBtn").textContent="Start Preview";updateTimelinePlayhead(0);
+}
+async function stopTimelinePreviewJob(){const id=timelinePreviewJobId;timelinePreviewJobId=null;if(!id)return;try{await api(`/api/gui/jobs/${id}/cancel`,{method:"POST"});}catch(_){}}
+async function startPreview(){
+  const timeline=value("timelinePath");if(!timeline){timelineSetStatus("Preview error: select a timeline first.","error");$("jobLog").textContent="Preview error: select a timeline first.";return;}
+  await loadTimelineWorkspace({quiet:true});timelineSetStatus(`Starting preview for ${timeline}…`);
+  const shell=$("timelinePreviewShell"),placeholder=$("timelinePreviewPlaceholder"),frame=$("timelinePreviewFrame");shell.classList.remove("ready");frame.removeAttribute("src");placeholder.innerHTML='<div class="timeline-preview-glyph">…</div><b>Starting preview</b><span>Launching a fresh preview server for the selected timeline.</span>';
+  try{
+    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind:"preview",...projectBase(),options:{port:0,host:"127.0.0.1",codec_materialize:checked("codecPreviewMaterialize")}})});
+    activeJob=job.id;timelinePreviewJobId=job.id;$("cancelJob").disabled=false;updateLiveLog($("jobLog"),job.log,{forceFollow:true});renderJobProgress(job);
+    const options={profile:value("previewMode")||"responsive",quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto",decode:value("previewDecode")||"auto"};
+    void waitForPreview(job.id,job.preview_url,null,options);pollActiveJob();
+  }catch(error){timelineSetStatus(`Preview error: ${error.message}`,"error");$("jobLog").textContent=`Preview error: ${error.message}`;placeholder.innerHTML='<div class="timeline-preview-glyph">!</div><b>Preview failed</b><span>Check the Studio job log for details.</span>';}
+}
+async function waitForPreview(jobId,url,_unusedWindow,previewOptions={}){
+  const deadline=Date.now()+20000;
+  while(Date.now()<deadline){
+    try{
+      const job=await api(`/api/gui/jobs/${jobId}?tail=100`),log=(job.log||[]).join("\n");
+      if(job.status==="failed"||job.status==="complete"){
+        timelinePreviewJobId=null;const tail=log.split("\n").slice(-4).join(" | ");timelineSetStatus(`Preview failed: ${tail||job.status}`,"error");$("timelinePreviewPlaceholder").innerHTML=`<div class="timeline-preview-glyph">!</div><b>Preview failed</b><span>${escapeHtml(tail||job.status)}</span>`;return false;
+      }
+      if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
+        timelinePreviewUrl=timelinePreviewLaunchUrl(url,jobId,previewOptions,"embedded");const frame=$("timelinePreviewFrame");frame.src=timelinePreviewUrl;$("timelinePreviewShell").classList.add("ready");$("timelinePopout").disabled=false;$("timelinePlayPause").disabled=false;$("previewBtn").textContent="Restart Preview";timelineSetStatus(`Preview ready · ${job.preview_timeline||value("timelinePath")}`,"ok");
+        frame.addEventListener("load",()=>timelineCommand("query_state"),{once:true});return true;
+      }
+    }catch(_){ }
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+  timelinePreviewJobId=null;timelineSetStatus("Preview server did not become ready within 20 seconds. Check the Studio job log.","error");return false;
+}
+function openTimelinePopout(){
+  if(timelinePreviewPopup&&!timelinePreviewPopup.closed){timelinePreviewPopup.close();timelinePreviewPopup=null;$("timelinePopout").textContent="Pop Out";return;}
+  if(!timelinePreviewUrl)return;const url=new URL(timelinePreviewUrl);url.searchParams.set("studio_role","popout");url.searchParams.set("t",String(Date.now()));timelinePreviewPopup=window.open(url.toString(),"tubevizTimelinePreview","popup=yes,width=1280,height=760,resizable=yes");
+  if(!timelinePreviewPopup){timelineSetStatus("Popout was blocked by the browser.","error");return;}$("timelinePopout").textContent="Close Popout";
+  setTimeout(()=>{try{timelinePreviewPopup.postMessage({type:"tubeviz-preview-command",command:"sync",position:timelinePreviewState.time,playing:timelinePreviewState.playing},"*")}catch(_){}},650);
+}
+function handleTimelinePreviewMessage(event){
+  const data=event.data;if(!data||data.type!=="tubeviz-preview-state")return;
+  const frameSource=$("timelinePreviewFrame")?.contentWindow,popupSource=timelinePreviewPopup&&!timelinePreviewPopup.closed?timelinePreviewPopup:null;
+  if(event.source!==frameSource&&event.source!==popupSource)return;
+  if(event.source===popupSource&&frameSource)return; // embedded preview is authoritative
+  timelinePreviewState={...timelinePreviewState,...data};if(Number(data.duration)>0&&!timelineWorkspaceDuration)timelineWorkspaceDuration=Number(data.duration);
+  $("timelinePlayPause").textContent=data.playing?"❚❚":"▶";$("timelinePlayPause").setAttribute("aria-label",data.playing?"Pause preview":"Play preview");updateTimelinePlayhead(Number(data.time)||0);
+  const now=Date.now();if(event.source===frameSource&&popupSource&&now-timelineLastPopupSync>900){timelineLastPopupSync=now;try{popupSource.postMessage({type:"tubeviz-preview-command",command:"sync",position:Number(data.time)||0,playing:!!data.playing},"*")}catch(_){}}
+}
+function timelineTrackClick(event){
+  const item=event.target.closest("[data-timeline-ref]");if(item){inspectTimelineRef(item.dataset.timelineRef);return;}
+  const track=event.target.closest(".timeline-track");if(!track)return;const rect=track.getBoundingClientRect();if(rect.width<=0)return;timelineSeek((event.clientX-rect.left)/rect.width*timelineDuration());
+}
+function initializeTimelineWorkspace(){
+  $("refreshTimeline").onclick=()=>loadTimelineWorkspace();$("previewBtn").onclick=startPreview;$("timelinePopout").onclick=openTimelinePopout;
+  const analyzeHandler=$("analyzeBtn").onclick;$("analyzeBtn").onclick=async event=>{if(timelinePreviewJobId){timelineSetStatus("Stopping the stale preview before rebuilding the timeline…");await stopTimelinePreviewJob();invalidateTimelinePreview("Timeline is being rebuilt. Start Preview when analysis completes.");}return analyzeHandler?.call($("analyzeBtn"),event);};
+  $("timelineAnalysisToggle").onclick=()=>{const details=$("timelineAnalysisDetails");details.open=true;details.scrollIntoView({behavior:"smooth",block:"start"});};
+  $("timelineLanes").addEventListener("click",timelineTrackClick);
+  $("timelinePlayPause").onclick=()=>timelineCommand(timelinePreviewState.playing?"pause":"play",{position:timelinePreviewState.time});
+  $("timelineScrub").addEventListener("input",event=>updateTimelinePlayhead(Number(event.target.value)/1000*timelineDuration()));
+  $("timelineScrub").addEventListener("change",event=>timelineSeek(Number(event.target.value)/1000*timelineDuration()));
+  $("timelineZoom").addEventListener("input",event=>{timelineWorkspaceZoom=Number(event.target.value)||1;$("timelineZoomValue").textContent=`${timelineWorkspaceZoom.toFixed(2)}×`;document.querySelectorAll("#timelineLanes .timeline-track").forEach(track=>track.style.width=`${timelineWidthPx()}px`);});
+  $("timelineZoom").addEventListener("change",()=>renderTimelineWorkspace());
+  window.addEventListener("message",handleTimelinePreviewMessage);
+  window.addEventListener("resize",()=>{if(timelineWorkspaceData)renderTimelineWorkspace()});
+  $("timelinePath").addEventListener("change",()=>{if(value("timelinePath")!==timelineWorkspacePath){timelineWorkspaceData=null;renderTimelineWorkspace();updateTimelineSummary();timelineSetStatus("Timeline path changed · refresh to inspect it.");}});
+}
+initializeTimelineWorkspace();
+
+// Tubeviz Studio workflow cleanup — studio-workflow-cleanup-v1
+var studioProjectStats=null;
+var studioProjectPool=null;
+var studioForegroundJobId=null;
+var studioActivityDismissTimer=null;
+var selectedJobDetailId=null;
+var studioJobsPollTimer=null;
+var ingestWorkspaceMode="ai";
+
+function studioBasename(pathValue,fallback="not selected"){
+  const raw=String(pathValue??"").trim();if(!raw)return fallback;
+  const parts=raw.replaceAll("\\","/").split("/").filter(Boolean);return parts[parts.length-1]||raw;
+}
+function switchStudioTab(name){
+  const aliases={create:"project",ai:"settings",command:"advanced"},target=aliases[name]||name;
+  const button=document.querySelector(`.tab[data-tab="${target}"]`);if(button)button.click();
+}
+function updateProjectContext(){
+  const audio=$("projectContextAudio"),library=$("projectContextLibrary"),timelineEl=$("projectContextTimeline"),output=$("projectContextOutput");
+  if(audio)audio.textContent=studioBasename($("audioPath")?.value);
+  if(timelineEl)timelineEl.textContent=studioBasename($("timelinePath")?.value);
+  if(output)output.textContent=studioBasename($("outputPath")?.value);
+  if(library){
+    const ready=Number(studioProjectStats?.ready);
+    const total=Number(studioProjectStats?.total);
+    const selected=Number(studioProjectPool?.count||0);
+    const bits=[];
+    if(Number.isFinite(ready))bits.push(`${ready} ready`);else if(Number.isFinite(total))bits.push(`${total} clips`);
+    if(selected>0)bits.push(`${selected} selected`);
+    library.textContent=bits.length?bits.join(" · "):studioBasename($("libraryPath")?.value,"library");
+  }
+  const renderSummary=$("renderProjectSummary");if(renderSummary){
+    const timelinePath=$("timelinePath")?.value?.trim(),outputPath=$("outputPath")?.value?.trim();
+    renderSummary.textContent=timelinePath?`${studioBasename(timelinePath)} → ${studioBasename(outputPath,"choose output")}`:"Select a timeline in Project.";
+  }
+}
+
+async function refreshLibrarySummary(){
+  try{
+    const data=await api(`/api/gui/library?${qs({library:value("libraryPath"),limit:1})}`);
+    studioProjectStats=data.stats||{};studioProjectPool=data.output_selection||{};
+    if($("projectStats"))setStats($("projectStats"),data.stats);
+    if($("libraryStats"))setStats($("libraryStats"),data.stats);
+    updateProjectContext();
+  }catch(e){if($("projectStats"))$("projectStats").textContent=e.message;updateProjectContext();}
+}
+
+function markIngestScope(ids,klass){
+  for(const id of ids){const control=$(id);if(!control)continue;const label=control.closest("label");if(label)label.classList.add(klass);}
+}
+function setIngestMode(mode,{focus=false}={}){
+  ingestWorkspaceMode=["ai","search","urls"].includes(mode)?mode:"ai";
+  const workspace=$("ingestWorkspace");if(workspace)workspace.dataset.mode=ingestWorkspaceMode;
+  document.querySelectorAll(".ingest-mode-button").forEach(btn=>{const active=btn.dataset.ingestMode===ingestWorkspaceMode;btn.classList.toggle("active",active);btn.setAttribute("aria-selected",active?"true":"false");});
+  const description=$("ingestModeDescription");
+  const copy={
+    ai:"Describe the visual world you want; Tubeviz generates and ranks YouTube-native searches before ingesting the strongest candidates.",
+    search:"Provide your own search concepts while retaining Tubeviz quality gates, optional AI candidate ranking, scene analysis, and library preparation.",
+    urls:"Paste hand-picked YouTube URLs. Each accepted source enters the same scene-detection, semantic-classification, visual-index, and library pipeline."
+  };
+  if(description)description.textContent=copy[ingestWorkspaceMode];
+  if($("ingestBtn"))$("ingestBtn").textContent=ingestWorkspaceMode==="ai"?"Discover + Ingest":"Search + Ingest";
+  if(ingestWorkspaceMode==="ai"&&$("aiDiscovery"))$("aiDiscovery").checked=true;
+  try{sessionStorage.setItem("tubeviz.ingestMode",ingestWorkspaceMode);}catch(_){}
+  if(focus){const target=ingestWorkspaceMode==="urls"?$("manualUrls"):(ingestWorkspaceMode==="ai"?$("visualBrief"):$("termsPath"));target?.focus?.();}
+}
+function configureIngestWorkspace(){
+  markIngestScope(["visualBrief","aiQueries","acquisitionQueries","targetClips"],"ingest-ai-only");
+  markIngestScope(["termsPath"],"ingest-search-only");
+  document.querySelectorAll(".ingest-mode-button").forEach(btn=>btn.addEventListener("click",()=>setIngestMode(btn.dataset.ingestMode,{focus:true})));
+  let stored="ai";try{stored=sessionStorage.getItem("tubeviz.ingestMode")||"ai";}catch(_){}setIngestMode(stored);
+}
+
+function jobKindLabel(kind){return({analyze:"Analyze timeline",ingest:"Ingest footage","ingest-url":"Ingest URLs",render:"Render video",cli:"Command",preview:"Start preview","ai-describe":"AI library enhancement","native-build":"Build native renderer","audio-ai-doctor":"Audio AI doctor","music-ai-doctor":"Music AI doctor","visual-index":"Visual index","codec-materialize":"Codec materialization","codec-motion-index":"Codec motion index","codec-doctor":"Codec doctor"})[kind]||String(kind||"Job").replaceAll("-"," ");}
+function clearActivityDismissTimer(){if(studioActivityDismissTimer){clearTimeout(studioActivityDismissTimer);studioActivityDismissTimer=null;}}
+function hideGlobalActivity(){clearActivityDismissTimer();$("globalActivity")?.classList.add("hidden");document.body.classList.remove("activity-visible");}
+function scheduleActivityHide(delay=5500){clearActivityDismissTimer();studioActivityDismissTimer=setTimeout(()=>hideGlobalActivity(),delay);}
+function renderGlobalActivity(job,{message=null}={}){
+  const strip=$("globalActivity");if(!strip||!job)return;clearActivityDismissTimer();strip.classList.remove("hidden","complete","failed","indeterminate");document.body.classList.add("activity-visible");
+  const running=["queued","running","cancelling"].includes(job.status),failed=job.status==="failed",complete=job.status==="complete";
+  if(failed)strip.classList.add("failed");if(complete)strip.classList.add("complete");
+  const pct=Number.isFinite(job.progress_percent)?Math.max(0,Math.min(100,job.progress_percent)):null;if(running&&pct===null)strip.classList.add("indeterminate");
+  $("activityIcon").textContent=failed?"!":complete?"✓":"●";$("activityTitle").textContent=job.stage||jobKindLabel(job.kind);
+  const count=job.progress_total!=null?`${job.progress_current||0} / ${job.progress_total}`:"";$("activityText").textContent=message??(pct===null?(job.status||""):`${pct.toFixed(1)}%${count?` · ${count}`:""}`);
+  $("activityBar").style.width=pct===null?(running?"34%":complete?"100%":"0%"):`${pct}%`;
+  const timing=[];if(job.elapsed_seconds!=null)timing.push(compactDuration(job.elapsed_seconds));if(job.progress_eta_seconds!=null&&running)timing.push(`ETA ${compactDuration(job.progress_eta_seconds)}`);$("activityTiming").textContent=timing.join(" · ");
+  $("activityCancel").disabled=!running;$("activityCancel").style.display=running?"":"none";
+  if(complete)scheduleActivityHide();
+}
+function showActivityError(title,message){const strip=$("globalActivity");if(!strip)return;strip.classList.remove("hidden","complete","indeterminate");strip.classList.add("failed");document.body.classList.add("activity-visible");$("activityIcon").textContent="!";$("activityTitle").textContent=title;$("activityText").textContent=message;$("activityBar").style.width="0%";$("activityTiming").textContent="";$("activityCancel").style.display="none";}
+
+async function startJob(kind,payload){
+  try{
+    const hfToken=value("hfToken")||null;
+    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind,...payload,hf_token:hfToken})});
+    activeJob=job.id;studioForegroundJobId=job.id;renderGlobalActivity(job);pollActiveJob();void refreshJobs();return job;
+  }catch(e){showActivityError(jobKindLabel(kind),e.message);throw e;}
+}
+async function pollActiveJob(){
+  if(pollTimer)clearTimeout(pollTimer);const id=activeJob;if(!id)return;
+  try{
+    const job=await api(`/api/gui/jobs/${id}?tail=250`);if(activeJob!==id)return;renderGlobalActivity(job);
+    if(selectedJobDetailId===id&&document.querySelector('#jobs.panel.active'))void loadJobDetail(id,{quiet:true});
+    const running=["queued","running","cancelling"].includes(job.status);
+    if(running){pollTimer=setTimeout(pollActiveJob,700);return;}
+    if(job.kind==="analyze"){
+      if(job.status==="complete"&&value("timelinePath"))void loadTimelineWorkspace({quiet:false});
+      else if(job.status!=="complete")timelineSetStatus(`Analysis ${job.status}. Open Jobs for details.`,"error");
+    }
+    if(commandJobId===id)commandJobId=null;activeJob=null;void refreshLibrarySummary();void refreshJobs();
+    if(job.status==="failed")showActivityError(jobKindLabel(job.kind),job.stage||"Job failed · open Jobs for output");
+  }catch(e){showActivityError("Job status",e.message);}
+}
+async function cancelForegroundJob(){
+  const id=activeJob||studioForegroundJobId;if(!id)return;try{const job=await api(`/api/gui/jobs/${id}/cancel`,{method:"POST"});renderGlobalActivity(job,{message:"Cancelling…"});if(activeJob!==id)activeJob=id;pollActiveJob();}catch(e){showActivityError("Cancel failed",e.message);}
+}
+
+async function startCommandJob(){
+  const argv=buildCliArgv();if(!argv.length)return;
+  try{
+    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind:"cli",library:value("libraryPath"),hf_token:value("hfToken")||null,options:{argv}})});
+    commandJobId=job.id;activeJob=job.id;studioForegroundJobId=job.id;renderGlobalActivity(job);pollActiveJob();void refreshJobs();
+  }catch(e){showActivityError("Command",e.message);}
+}
+async function pollCommandJob(){if(commandJobId){activeJob=commandJobId;studioForegroundJobId=commandJobId;pollActiveJob();}}
+
+function jobProgressText(job){const pct=Number.isFinite(job.progress_percent)?`${job.progress_percent.toFixed(0)}%`:"";return pct||job.status||"";}
+function renderJobsList(jobs){
+  const list=$("jobsList");if(!list)return;
+  if(!jobs.length){list.innerHTML='<div class="job-detail-empty">No jobs yet.</div>';return;}
+  list.innerHTML=jobs.map(job=>`<div class="job-list-item${job.id===selectedJobDetailId?" selected":""}" data-job-id="${escapeHtml(job.id)}"><div class="job-list-main"><div class="job-list-heading"><b>${escapeHtml(jobKindLabel(job.kind))}</b><span class="status-${escapeHtml(job.status)}">${escapeHtml(job.status)}</span><code>${escapeHtml(job.id)}</code></div><div class="job-list-meta">${escapeHtml(job.stage||job.command?.join(" ")||"")}</div></div><div class="job-list-progress">${escapeHtml(jobProgressText(job))}</div></div>`).join("");
+}
+async function refreshJobs(){
+  try{
+    const jobs=await api("/api/gui/jobs");renderJobsList(jobs);
+    if(selectedJobDetailId&&!jobs.some(job=>job.id===selectedJobDetailId))selectedJobDetailId=null;
+    if(!selectedJobDetailId&&jobs.length){selectedJobDetailId=(jobs.find(job=>["queued","running","cancelling"].includes(job.status))||jobs[0]).id;renderJobsList(jobs);}
+    if(selectedJobDetailId&&document.querySelector('#jobs.panel.active'))void loadJobDetail(selectedJobDetailId,{quiet:true});
+  }catch(e){if($("jobsList"))$("jobsList").textContent=e.message;}
+}
+async function loadJobDetail(id,{quiet=false}={}){
+  const detail=$("jobDetail");if(!detail||!id)return;selectedJobDetailId=id;if(!quiet)detail.innerHTML='<div class="job-detail-empty">Loading job…</div>';
+  try{
+    const job=await api(`/api/gui/jobs/${encodeURIComponent(id)}?tail=4000`),running=["queued","running","cancelling"].includes(job.status),pct=Number.isFinite(job.progress_percent)?Math.max(0,Math.min(100,job.progress_percent)):null;
+    const timing=[];if(job.elapsed_seconds!=null)timing.push(`Elapsed ${compactDuration(job.elapsed_seconds)}`);if(job.progress_eta_seconds!=null&&running)timing.push(`ETA ${compactDuration(job.progress_eta_seconds)}`);
+    const command=(job.command||[]).join(" "),log=(job.log||[]).join("\n");
+    detail.innerHTML=`<div class="job-detail-header"><div><div class="card-kicker">JOB DETAILS</div><h2>${escapeHtml(jobKindLabel(job.kind))}</h2><div class="job-detail-status status-${escapeHtml(job.status)}">${escapeHtml(job.status)} · ${escapeHtml(job.id)}</div></div><button id="cancelSelectedJob" class="danger" ${running?"":"disabled"}>Cancel</button></div><div><b>${escapeHtml(job.stage||job.status||"Job")}</b></div><div class="job-detail-progress-track"><div style="width:${pct===null?(running?35:job.status==="complete"?100:0):pct}%"></div></div><div class="job-detail-meta"><span>${escapeHtml(pct===null?job.status:`${pct.toFixed(1)}%`)}</span><span>${escapeHtml(timing.join(" · "))}</span></div><div class="job-detail-command">${escapeHtml(command)}</div><pre class="job-detail-log">${escapeHtml(log||"No output captured yet.")}</pre>`;
+    $("cancelSelectedJob")?.addEventListener("click",async()=>{try{const updated=await api(`/api/gui/jobs/${encodeURIComponent(id)}/cancel`,{method:"POST"});renderGlobalActivity(updated,{message:"Cancelling…"});activeJob=id;studioForegroundJobId=id;pollActiveJob();void loadJobDetail(id);}catch(e){showActivityError("Cancel failed",e.message);}});
+    document.querySelectorAll(".job-list-item").forEach(item=>item.classList.toggle("selected",item.dataset.jobId===id));
+  }catch(e){detail.innerHTML=`<div class="job-detail-empty"><h2>Unable to load job</h2><p>${escapeHtml(e.message)}</p></div>`;}
+}
+window.watchJob=(id,kind)=>{selectedJobDetailId=id;switchStudioTab("jobs");void loadJobDetail(id);};
+function stopJobsWorkspacePoll(){if(studioJobsPollTimer){clearTimeout(studioJobsPollTimer);studioJobsPollTimer=null;}}
+async function pollJobsWorkspace(){stopJobsWorkspacePoll();if(!document.querySelector('#jobs.panel.active'))return;await refreshJobs();if(document.querySelector('#jobs.panel.active'))studioJobsPollTimer=setTimeout(pollJobsWorkspace,1400);}
+
+async function startPreview(){
+  const timeline=value("timelinePath");if(!timeline){timelineSetStatus("Preview error: select a timeline in Project first.","error");switchStudioTab("project");return;}
+  await stopTimelinePreviewJob();invalidateTimelinePreview("Starting the selected timeline…");
+  const shell=$("timelinePreviewShell"),placeholder=$("timelinePreviewPlaceholder"),frame=$("timelinePreviewFrame");shell.classList.remove("ready");frame.removeAttribute("src");placeholder.innerHTML='<div class="timeline-preview-glyph">…</div><b>Starting preview</b><span>Launching a fresh preview server for the selected timeline.</span>';
+  try{
+    const job=await api("/api/gui/jobs",{method:"POST",body:JSON.stringify({kind:"preview",...projectBase(),options:{port:0,host:"127.0.0.1",codec_materialize:checked("codecPreviewMaterialize")}})});
+    timelinePreviewJobId=job.id;studioForegroundJobId=job.id;renderGlobalActivity({...job,stage:"Starting preview"});
+    void waitForTimelinePreview(job.id,job.preview_url,{profile:value("previewMode")||"responsive",quality:value("previewQuality")||"auto",gpu:value("previewGpu")||"auto",decode:value("previewDecode")||"auto"});
+  }catch(e){timelineSetStatus(`Preview error: ${e.message}`,"error");showActivityError("Preview",e.message);}
+}
+async function waitForTimelinePreview(jobId,url,previewOptions={}){
+  const deadline=Date.now()+20000;
+  while(Date.now()<deadline){
+    try{
+      const job=await api(`/api/gui/jobs/${jobId}?tail=100`),log=(job.log||[]).join("\n");
+      if(job.status==="failed"||job.status==="complete"){
+        timelinePreviewJobId=null;const tail=log.split("\n").slice(-4).join(" | ");timelineSetStatus(`Preview failed: ${tail||job.status}`,"error");$("timelinePreviewPlaceholder").innerHTML=`<div class="timeline-preview-glyph">!</div><b>Preview failed</b><span>${escapeHtml(tail||job.status)}</span>`;showActivityError("Preview",tail||job.status);return false;
+      }
+      if(log.includes("Uvicorn running on")||log.includes("Application startup complete")){
+        timelinePreviewUrl=timelinePreviewLaunchUrl(url,jobId,previewOptions,"embedded");const frame=$("timelinePreviewFrame");frame.src=timelinePreviewUrl;$("timelinePreviewShell").classList.add("ready");$("timelinePopout").disabled=false;$("timelinePlayPause").disabled=false;$("previewBtn").textContent="Restart Preview";timelineSetStatus(`Preview ready · ${job.preview_timeline||value("timelinePath")}`,"ok");
+        renderGlobalActivity({...job,status:"complete",progress_percent:100,stage:"Preview ready"},{message:"Embedded renderer connected"});if(studioForegroundJobId===jobId)studioForegroundJobId=null;scheduleActivityHide(2600);return true;
+      }
+    }catch(_){}
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+  timelinePreviewJobId=null;timelineSetStatus("Preview server did not become ready within 20 seconds. Open Jobs for details.","error");showActivityError("Preview","Server did not become ready · open Jobs for details");return false;
+}
+
+function configureStudioCleanup(){
+  $("projectContextEdit")?.addEventListener("click",()=>switchStudioTab("project"));
+  document.querySelectorAll("[data-jump-tab]").forEach(button=>button.addEventListener("click",()=>switchStudioTab(button.dataset.jumpTab)));
+  for(const id of ["libraryPath","audioPath","timelinePath","outputPath"]){const el=$(id);if(!el)continue;el.addEventListener("input",updateProjectContext);el.addEventListener("change",updateProjectContext);}
+  configureIngestWorkspace();
+  const ingestHandler=$("ingestBtn")?.onclick;if(ingestHandler)$("ingestBtn").onclick=event=>{const brief=$("visualBrief"),terms=$("termsPath"),savedBrief=brief?.value??"",savedTerms=terms?.value??"";if(ingestWorkspaceMode==="ai"&&terms)terms.value="";if(ingestWorkspaceMode==="search"&&brief)brief.value="";try{return ingestHandler.call($("ingestBtn"),event);}finally{if(brief)brief.value=savedBrief;if(terms)terms.value=savedTerms;}};
+  const manualHandler=$("manualIngestBtn")?.onclick;if(manualHandler)$("manualIngestBtn").onclick=event=>{if(!String($("manualUrls")?.value||"").trim()){showActivityError("Ingest URLs","Enter at least one YouTube URL.");return;}return manualHandler.call($("manualIngestBtn"),event);};
+  $("jobsList")?.addEventListener("click",event=>{const item=event.target.closest("[data-job-id]");if(item)void loadJobDetail(item.dataset.jobId);});
+  document.querySelectorAll(".tab").forEach(button=>button.addEventListener("click",()=>{if(button.dataset.tab==="jobs")void pollJobsWorkspace();else stopJobsWorkspacePoll();}));
+  $("activityCancel")?.addEventListener("click",cancelForegroundJob);$("activityJobs")?.addEventListener("click",()=>{const id=activeJob||studioForegroundJobId||selectedJobDetailId;if(id)selectedJobDetailId=id;switchStudioTab("jobs");void refreshJobs();});$("activityDismiss")?.addEventListener("click",hideGlobalActivity);
+  const legacyCancel=$("cancelJob");if(legacyCancel)legacyCancel.onclick=cancelForegroundJob;
+  const legacyCommandCancel=$("cancelCommandJob");if(legacyCommandCancel)legacyCommandCancel.onclick=cancelForegroundJob;
+  updateProjectContext();
+}
+configureStudioCleanup();
+
+// Tubeviz Studio advanced workspace cleanup — studio-workflow-cleanup-v2

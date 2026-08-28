@@ -18,157 +18,76 @@
 </header>
 
 <nav>
-  <button class="tab active" data-tab="create">Create</button>
+  <button class="tab active" data-tab="project">Project</button>
+  <button class="tab" data-tab="ingest">Ingest</button>
   <button class="tab" data-tab="library">Library</button>
-  <button class="tab" data-tab="ai">AI Settings</button>
-  <button class="tab" data-tab="command">Command Center</button>
+  <button class="tab" data-tab="timeline">Timeline</button>
+  <button class="tab" data-tab="render">Render</button>
   <button class="tab" data-tab="jobs">Jobs</button>
+  <button class="tab" data-tab="settings">Settings</button>
+  <button class="tab" data-tab="advanced">Advanced</button>
 </nav>
+<!-- Studio workflow cleanup — studio-workflow-cleanup-v1 -->
+<div id="projectContextBar" class="project-context-bar" aria-label="Current project">
+  <div class="project-context-title"><span class="project-context-dot"></span><b>Current project</b></div>
+  <div class="project-context-item"><span>Audio</span><b id="projectContextAudio">not selected</b></div>
+  <div class="project-context-item"><span>Library</span><b id="projectContextLibrary">loading…</b></div>
+  <div class="project-context-item"><span>Timeline</span><b id="projectContextTimeline">not selected</b></div>
+  <div class="project-context-item"><span>Output</span><b id="projectContextOutput">not selected</b></div>
+  <button id="projectContextEdit" class="quiet-button" type="button">Edit Project</button>
+</div>
 
 <main>
-<section id="create" class="panel active">
-  <div class="create-layout">
-    <article class="card">
+<section id="project" class="panel active">
+  <div class="project-home-grid">
+    <article class="card project-card">
       <h2>Project</h2>
       <label>Library <input id="libraryPath" value="./library"></label>
       <label>Audio <input id="audioPath" placeholder="audio/connected.mp3"></label>
       <label>Timeline <input id="timelinePath" placeholder="timelines/connected.json"></label>
       <label>Output video <input id="outputPath" placeholder="connected-native.mp4"></label>
-      <div class="grid three tight">
-        <label>Preview mode
-          <select id="previewMode"><option value="responsive">responsive · optimized live FX</option><option value="full">full fidelity · slower</option></select>
-        </label>
-        <label>Preview quality
-          <select id="previewQuality"><option value="auto">auto · adaptive 360p–720p</option><option value="360p">360p</option><option value="540p">540p</option><option value="720p">720p</option><option value="1080p">1080p</option><option value="native">native display density</option></select>
-        </label>
-        <label>Preview GPU
-          <select id="previewGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">prefer WebGPU · safe fallback</option><option value="off">Canvas2D only</option></select>
-        </label>
-        <label>Preview decode
-          <select id="previewDecode"><option value="auto">auto · direct video / worker fallback</option><option value="video">video · GPU external texture</option><option value="webcodecs">WebCodecs · worker decoded frames</option></select>
-        </label>
-      </div>
       <div class="actions">
-        <button id="refreshLibrary">Refresh library</button>
-        <button id="previewBtn">Start Preview</button>
+        <button id="refreshLibrary">Refresh Project</button>
       </div>
       <div id="projectStats" class="stats"></div>
       <input id="hfToken" type="hidden"><span id="hfTokenStatus" hidden></span><button id="toggleHfToken" hidden>Show typed token</button>
     </article>
-
-    <article class="card workflow-card analyze-card">
-      <div class="card-kicker">02 · DIRECT</div><h2>Analyze & Cut</h2>
-      <div class="analysis-preset-panel">
-        <label>Analysis preset
-          <select id="analysisPreset"><option value="balanced">Balanced</option><option value="custom">Custom / current settings</option></select>
-        </label>
-        <div class="analysis-preset-copy">
-          <div><b id="analysisPresetTitle">Balanced</b><span id="analysisPresetState" class="preset-state">preset</span></div>
-          <p id="analysisPresetDescription">General-purpose musical edit with moderate motion, layering, variety, and phrase-aware pacing.</p>
-        </div>
-        <button id="reapplyAnalysisPreset" class="quiet-button" type="button">Reapply preset</button>
+    <article class="card project-workflow-card">
+      <div class="card-kicker">WORKFLOW</div>
+      <h2>Build a music video</h2>
+      <p class="card-note">Project holds paths and identity only. Acquisition, curation, direction, and output each have a focused workspace.</p>
+      <div class="project-workflow-steps">
+        <button type="button" data-jump-tab="ingest"><span>01</span><b>Ingest</b><small>Discover or add footage</small></button>
+        <button type="button" data-jump-tab="library"><span>02</span><b>Library</b><small>Curate, tag, and trim</small></button>
+        <button type="button" data-jump-tab="timeline"><span>03</span><b>Timeline</b><small>Analyze, direct, and preview</small></button>
+        <button type="button" data-jump-tab="render"><span>04</span><b>Render</b><small>Encode the final video</small></button>
       </div>
-      <div class="grid two tight">
-        <label>Section bars <input id="sectionBars" type="number" value="8"></label>
-        <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
-        <label class="slider-field">Transform <span class="slider-value" data-for="transformIntensity"></span><input id="transformIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>subtle 0</span><b>balanced 0.8–1.3</b><span>extreme 2</span></span></label>
-        <label class="slider-field">Creative FX <span class="slider-value" data-for="creativeIntensity"></span><input id="creativeIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>restrained 0</span><b>cinematic .7–1.2</b><span>surreal 2</span></span></label>
-        <label class="slider-field">Effect density <span class="slider-value" data-for="effectDensity"></span><input id="effectDensity" type="range" min="0" max="2.5" step=".05" value="0.55"><span class="slider-scale"><span>sparse 0</span><b>source-first .4–.9</b><span>relentless 2.5</span></span></label>
-        <label class="slider-field">Temporal persistence <span class="slider-value" data-for="temporalPersistence"></span><input id="temporalPersistence" type="range" min="0" max="2.5" step=".05" value="0.70"><span class="slider-scale"><span>reset 0</span><b>subtle .5–1.1</b><span>long memory 2.5</span></span></label>
-        <label class="slider-field">Hero frequency <span class="slider-value" data-for="heroFrequency"></span><input id="heroFrequency" type="range" min="0" max="2.5" step=".05" value="0.90"><span class="slider-scale"><span>none 0</span><b>punctuation .8–1.5</b><span>frequent 2.5</span></span></label>
-        <label class="slider-field">Composition <span class="slider-value" data-for="compositionIntensity"></span><input id="compositionIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>single-source 0</span><b>balanced 0.7–1.3</b><span>layered 2</span></span></label>
-        <label class="slider-field">Composition diversity <span class="slider-value" data-for="compositionDiversity"></span><input id="compositionDiversity" type="range" min="0" max="2.5" step=".05" value="0.65"><span class="slider-scale"><span>consistent 0</span><b>varied .6–1.2</b><span>restless 2.5</span></span></label>
-        <label>Target unique <input id="targetUnique" type="number" value="0"></label>
-        <label class="slider-field">Novelty <span class="slider-value" data-for="noveltyWeight"></span><input id="noveltyWeight" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>coherent 0</span><b>recommended .45–.80</b><span>varied 1.5</span></span></label>
-        <label class="slider-field">Visual match <span class="slider-value" data-for="visualMatchWeight"></span><input id="visualMatchWeight" type="range" min="0" max="2" step=".05" value="1.25"><span class="slider-scale"><span>loose 0</span><b>recommended 1.0–1.5</b><span>strict 2</span></span></label>
-        <label class="slider-field">Transition intelligence <span class="slider-value" data-for="transitionWeight"></span><input id="transitionWeight" type="range" min="0" max="1.5" step=".05" value=".70"><span class="slider-scale"><span>independent 0</span><b>recommended .5–.9</b><span>strong 1.5</span></span></label>
-        <label class="slider-field">Trajectory strength <span class="slider-value" data-for="trajectoryStrength"></span><input id="trajectoryStrength" type="range" min="0" max="1.5" step=".05" value=".85"><span class="slider-scale"><span>flat 0</span><b>recommended .65–1.0</b><span>dramatic 1.5</span></span></label>
-        <label>Anticipation <input id="anticipationSeconds" type="number" step="1" value="12"></label>
-        <label>Shot lookahead <input id="sequenceLookahead" type="number" min="1" max="12" value="5"></label>
-        <label>Beam width <input id="sequenceBeamWidth" type="number" min="1" max="20" value="6"></label>
-        <label class="slider-field">FX compatibility <span class="slider-value" data-for="effectCompatibilityWeight"></span><input id="effectCompatibilityWeight" type="range" min="0" max="1.5" step=".05" value=".60"><span class="slider-scale"><span>ignore 0</span><b>recommended .4–.8</b><span>strict 1.5</span></span></label>
-        <label class="slider-field">Preference weight <span class="slider-value" data-for="preferenceWeight"></span><input id="preferenceWeight" type="range" min="0" max="1" step=".05" value=".35"><span class="slider-scale"><span>off 0</span><b>recommended .2–.5</b><span>strong 1</span></span></label>
-        <label class="slider-field">Vector intensity <span class="slider-value" data-for="vectorIntensity"></span><input id="vectorIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>off 0</span><b>recommended .5–1.1</b><span>extreme 2</span></span></label>
-        <label>Codec glitch
-          <select id="codecGlitch"><option value="off">off</option><option value="subtle">subtle</option><option value="musical">musical</option><option value="aggressive">aggressive</option></select>
-        </label>
-        <label class="slider-field">Codec intensity <span class="slider-value" data-for="codecGlitchIntensity"></span><input id="codecGlitchIntensity" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>subtle 0</span><b>recommended .35–.8</b><span>destructive 1.5</span></span></label>
-        <label>Min shot <input id="minShot" type="number" step=".05" value=".65"></label>
-        <label>Max shot <input id="maxShot" type="number" step=".25" value="6"></label>
-        <label>Max excerpt <input id="maxExcerpt" type="number" step=".25" value="5"></label>
-        <label>Semantic device <input id="semanticDevice" value="auto"></label>
-        <label>Audio AI device <input id="audioAiDevice" value="auto"></label>
-        <label>Music AI device <input id="musicAiDevice" value="auto"></label>
-        <label>MERT model <input id="musicAiModel" value="m-a-p/MERT-v1-95M"></label>
-        <label class="slider-field">Audio↔visual weight <span class="slider-value" data-for="audioVisualWeight"></span><input id="audioVisualWeight" type="range" min="0" max="2" step=".05" value="1.10"><span class="slider-scale"><span>ignore 0</span><b>recommended .8–1.3</b><span>dominant 2</span></span></label>
-        <label>CLAP window <input id="audioAiWindow" type="number" step="1" value="8"></label>
-        <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
-        <label class="slider-field">AI director strength <span class="slider-value" data-for="aiDirectorStrength"></span><input id="aiDirectorStrength" type="range" min="0" max="1" step=".05" value=".95"><span class="slider-scale"><span>subtle 0</span><b>director-led .8–1.0</b><span>full 1</span></span></label>
-        <label>AI candidate slate <input id="aiConsultantCandidates" type="number" min="4" max="32" step="1" value="12"></label>
-        <label class="slider-field">AI edit influence <span class="slider-value" data-for="aiConsultantWeight"></span><input id="aiConsultantWeight" type="range" min="0" max="2" step=".05" value=".85"><span class="slider-scale"><span>off 0</span><b>recommended .6–1.0</b><span>strong 2</span></span></label>
-      </div>
-      <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
-      <label class="check"><input id="audioAi" type="checkbox" checked> CLAP audio-semantic director</label>
-      <label class="check"><input id="musicAi" type="checkbox"> MERT music-structure embeddings (optional)</label>
-      <label class="check"><input id="aiDirector" type="checkbox"> Whole-song LLM visual director</label>
-      <label class="check"><input id="aiEditConsultant" type="checkbox" checked> Bounded AI edit consultant: rank valid scene candidates per section</label>
-      <p class="card-note ai-inherit-note">Whole-song directing receives a compact manifest of the actual output-pool clips and renderer capabilities, then authors a section strategy plus a few visible shot-level creative moments. The bounded edit consultant ranks only valid scene candidates to execute that plan. Both use the OpenAI base URL, model, and API key saved in <b>AI Settings</b>; deterministic timing and hard media constraints remain authoritative.</p>
-      <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
-      <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
-      <label class="check"><input id="choreography" type="checkbox" checked> Build/drop trajectory choreography and multi-shot lookahead</label>
-      <label class="check"><input id="preferenceLearning" type="checkbox" checked> Learn soft visual preferences from manually rejected clips</label>
-      <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
-      <label class="check"><input id="creativeEffects" type="checkbox" checked> Semantic creative renderer: optical flow, temporal memory, virtual camera, depth, feedback and hero effects</label>
-      <label class="check"><input id="vectorEffects" type="checkbox" checked> Vector scene graph: contours, flow, fracture, portals and glyphs</label>
-      <label class="check"><input id="codecPreviewMaterialize" type="checkbox"> Materialize true FFglitch effects for browser preview</label>
-      <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button id="musicAiDoctorBtn">Music AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
-    </article>
-
-    <article class="card workflow-card render-card">
-      <div class="card-kicker">03 · OUTPUT</div><h2>Render</h2>
-      <div class="grid three tight">
-        <label>Backend
-          <select id="backend"><option value="native">native</option><option value="auto">auto</option><option value="browser">browser</option></select>
-        </label>
-        <label>Width <input id="width" type="number" value="1920"></label>
-        <label>Height <input id="height" type="number" value="1080"></label>
-        <label>FPS <input id="fps" type="number" value="30"></label>
-        <label>CRF/CQ <input id="crf" type="number" value="20"></label>
-        <label>Codec
-          <select id="codec"><option>libx264</option><option>h264_nvenc</option><option>hevc_nvenc</option><option>libx265</option></select>
-        </label>
-        <label>Native preset <select id="nativePreset"><option>veryfast</option><option>fast</option><option>medium</option><option>slow</option></select></label>
-        <label>Decoder cache <input id="decoderCache" type="number" value="16"></label>
-        <label>Threads <input id="nativeThreads" type="number" value="0"></label>
-        <label>Native GPU
-          <select id="nativeGpu"><option value="auto">auto</option><option value="vulkan">Vulkan / libplacebo</option><option value="off">off</option></select>
-        </label>
-        <label>Hardware decode
-          <select id="nativeHwdecode"><option value="auto">auto</option><option value="cuda">CUDA / NVDEC</option><option value="off">off</option></select>
-        </label>
-        <label>Browser transport
-          <select id="browserTransport"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">WebCodecs H.264</option><option value="raw">raw RGBA fallback</option></select>
-        </label>
-        <label>Browser GPU
-          <select id="browserGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">require WebGPU</option><option value="off">Canvas2D only</option></select>
-        </label>
-        <label>Browser source decode
-          <select id="browserSourceDecode"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">require WebCodecs</option><option value="video">HTML video fallback</option></select>
-        </label>
-        <label>WebCodecs bitrate <input id="webcodecsBitrate" type="number" min="0" step="1000000" value="0" title="0 = derive from resolution, FPS and CRF"></label>
-      </div>
-      <label class="check"><input id="buildMissing" type="checkbox" checked> Build native renderer if missing</label>
-      <label class="check"><input id="codecRenderMaterialize" type="checkbox"> Materialize scheduled FFglitch effects before final render</label>
-      <div class="actions">
-        <button id="nativeBuildBtn">Rebuild Native</button>
-        <button id="codecDoctorBtn">FFglitch Doctor</button>
-        <button id="codecMaterializeBtn">Materialize Codec FX</button>
-        <button class="primary" id="renderBtn">Render Video</button>
+      <div class="project-next-action">
+        <span>Tubeviz keeps the current project context visible above every workspace.</span>
       </div>
     </article>
+  </div>
+</section>
 
-    <article class="card workflow-card ingest-card">
-      <div class="card-kicker">01 · SOURCE</div><h2>AI Ingest</h2>
+<section id="ingest" class="panel">
+  <article class="card workspace-intro-card">
+    <div class="workspace-intro-row">
+      <div>
+        <div class="card-kicker">ACQUIRE</div>
+        <h2>Add footage</h2>
+        <p class="card-note">Choose one acquisition path. Shared download, quality, filtering, and media-preparation controls remain available without mixing unrelated workflows on Project.</p>
+      </div>
+      <div class="ingest-mode-switch" role="tablist" aria-label="Ingest mode">
+        <button type="button" class="ingest-mode-button active" data-ingest-mode="ai">AI Discovery</button>
+        <button type="button" class="ingest-mode-button" data-ingest-mode="search">Search Terms</button>
+        <button type="button" class="ingest-mode-button" data-ingest-mode="urls">YouTube URLs</button>
+      </div>
+    </div>
+    <div id="ingestModeDescription" class="workspace-mode-description">Describe the visual world you want; Tubeviz generates and ranks YouTube-native searches before ingesting the strongest candidates.</div>
+  </article>
+  <div id="ingestWorkspace" class="ingest-workspace" data-mode="ai">
+    <article class="card workflow-card ingest-card ingest-source-card">
+      <div class="card-kicker">SOURCE</div><h2>AI Ingest</h2>
       <label>Visual brief <textarea id="visualBrief" rows="4" placeholder="Dark futuristic techno; neon tunnels, liquid chrome, rhythmic machinery, euphoric high-motion drops. Avoid text, talking heads and static footage."></textarea></label>
       <label>Search terms file <input id="termsPath" placeholder="Optional legacy mode: search_terms.txt"></label>
       <div class="grid two tight">
@@ -204,13 +123,12 @@
       <label class="check"><input id="previewGate" type="checkbox" checked> Preview candidates before full download</label>
       <label class="check"><input id="sampleLongVideos" type="checkbox" checked> Sample long videos and download only the strongest bounded segment</label>
       <label class="check"><input id="autoTrim" type="checkbox" checked> AI auto-trim weak intro/outro scene runs</label>
-      <p class="card-note ai-inherit-note">AI acquisition planning uses the OpenAI base URL, model, and API key saved in <b>AI Settings</b>. If AI is disabled or no usable endpoint/model is configured, Tubeviz falls back to its deterministic short-query planner.</p>
+      <p class="card-note ai-inherit-note">AI acquisition planning uses the OpenAI base URL, model, and API key saved in <b>Settings</b>. If AI is disabled or no usable endpoint/model is configured, Tubeviz falls back to its deterministic short-query planner.</p>
       <button class="primary" id="ingestBtn">Ingest Clips</button>
       <p class="card-note">This streamlined panel exposes common ingest settings. Every ingest option is available in Command Center.</p>
     </article>
-
-    <article class="card workflow-card manual-card">
-      <div class="card-kicker">01B · CURATE</div>
+    <article class="card workflow-card manual-card ingest-url-card">
+      <div class="card-kicker">CURATE</div>
       <div class="card-heading-row"><div><h2>Manual YouTube URL Ingest</h2><p class="card-note">Paste hand-picked YouTube URLs. By default Tubeviz reuses browser-compatible source media directly, creates a compatibility proxy only when needed, then detects scene cuts, creates thumbnails, measures temporal visual features, embeds every scene with OpenCLIP, and assigns semantic scene labels automatically.</p></div><span id="manualUrlCount" class="badge compact-badge">0 URLs</span></div>
       <div class="url-editor">
         <label class="field-label" for="manualUrls">YouTube URLs</label>
@@ -262,45 +180,6 @@ https://youtu.be/..."></textarea>
       <div class="actions manual-actions"><button class="primary" id="manualIngestBtn">Ingest URL(s)</button></div>
     </article>
   </div>
-
-  <article class="card terminal-card">
-    <div class="row"><h2>Active Job</h2><button id="cancelJob" class="danger" disabled>Cancel</button></div>
-    <div id="jobProgress" class="job-progress idle">
-      <div class="job-progress-heading"><b id="jobStage">Idle</b><span id="jobProgressText">No active job</span></div>
-      <div class="job-progress-track"><div id="jobProgressBar"></div></div>
-      <div id="jobTiming" class="job-progress-timing"></div>
-    </div>
-    <pre id="jobLog">No active job.</pre>
-  </article>
-</section>
-
-<section id="ai" class="panel">
-  <article class="card ai-settings-card">
-    <div class="card-kicker">CENTRAL CONFIGURATION</div><h2>AI Settings</h2>
-    <p class="card-note">These settings apply to ingest, OpenAI clip understanding, library enhancement, analysis, and OpenAI-backed planning/directing. They persist in your user home directory; the server-side <code>HF_TOKEN</code> value is never sent to the browser, and neither is the saved OpenAI key.</p>
-    <label class="check master-toggle"><input id="masterAiEnabled" type="checkbox" checked> Enable AI features throughout Tubeviz</label>
-    <label class="check"><input id="visionAiEnabled" type="checkbox"> Describe video storyboards with OpenAI during ingest</label>
-    <div class="grid two">
-      <label>OpenAI API key <input id="openaiApiKey" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
-      <label>Hugging Face token <input id="persistentHfToken" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
-      <label>OpenAI base URL <input id="openaiBaseUrl" value="https://api.openai.com/v1"></label>
-      <label>OpenAI model <input id="openaiModel" value="gpt-5.1"></label>
-      <label>Image detail <select id="visionDetail"><option value="low">low (faster/cheaper)</option><option value="high">high</option><option value="auto">auto</option></select></label>
-      <label>Storyboard frames per clip <input id="visionMaxFrames" type="number" min="2" max="50" value="12"></label>
-      <label>Request timeout (seconds) <input id="visionTimeout" type="number" min="10" max="900" value="180"></label>
-    </div>
-    <div id="aiCredentialStatus" class="credential-row"></div>
-    <div class="actions">
-      <button id="clearOpenAiKey">Clear OpenAI key</button><button id="clearPersistentHf">Clear HF token</button>
-      <button class="primary" id="saveAiSettings">Save AI Settings</button>
-    </div>
-  </article>
-  <article class="card">
-    <h2>Enhance Existing Library</h2>
-    <p>Analyze every ready clip that has no current cached description. Each request uses scene thumbnails sampled across the full clip. Existing media is not re-downloaded or rewritten.</p>
-    <label class="check"><input id="forceAiDescribe" type="checkbox"> Re-analyze clips even when the cached description is current</label>
-    <div class="actions"><button class="primary" id="enhanceLibraryAi">Enhance Existing Library</button></div>
-  </article>
 </section>
 
 <section id="library" class="panel">
@@ -335,45 +214,302 @@ https://youtu.be/..."></textarea>
   </article>
 </section>
 
-<section id="command" class="panel">
-  <article class="card command-card">
-    <div class="toolbar">
-      <div>
-        <h2>Advanced Command Center</h2>
-        <p class="card-note">Generated from tubeviz's current argparse tree. This is the GUI parity layer: every non-GUI CLI command and option is exposed here and launched as an argument vector, never through a shell.</p>
-      </div>
-      <button id="reloadCliSchema">Reload CLI schema</button>
-    </div>
-    <div class="command-layout">
-      <aside class="command-sidebar">
-        <label>Command
-          <select id="cliCommand"></select>
-        </label>
-        <input id="cliCommandFilter" placeholder="filter commands…">
-        <div id="cliCommandDescription" class="card-note"></div>
-        <div class="actions stack-actions">
-          <button id="syncCliProject">Use current Project paths</button>
-          <button class="primary" id="runCliCommand">Run Command</button>
+<section id="timeline" class="panel">
+  <div class="timeline-workspace">
+    <article class="card timeline-preview-card">
+      <div class="timeline-heading-row">
+        <div>
+          <div class="card-kicker">DIRECT</div>
+          <h2>Timeline</h2>
+          <p class="card-note">Inspect the generated edit against the live browser preview. Click clips, transitions, effects, musical sections, or AI-directed moments to seek and explain what Tubeviz applied.</p>
         </div>
-      </aside>
-      <div>
-        <div id="cliArguments" class="cli-arguments"></div>
-        <h3 class="subhead">Argument-vector preview</h3>
-        <pre id="cliPreview" class="command-preview"></pre>
+        <div class="actions timeline-heading-actions">
+          <button id="refreshTimeline" type="button">Refresh Timeline</button>
+          <button id="timelineAnalysisToggle" type="button">Analysis Settings</button>
+          <button class="primary" id="previewBtn" type="button">Start Preview</button>
+          <button id="timelinePopout" type="button" disabled>Pop Out</button>
+        </div>
       </div>
+
+      <div class="grid four tight timeline-preview-settings">
+        <label>Preview mode
+          <select id="previewMode"><option value="responsive">responsive · optimized live FX</option><option value="full">full fidelity · slower</option></select>
+        </label>
+        <label>Preview quality
+          <select id="previewQuality"><option value="auto">auto · adaptive 360p–720p</option><option value="360p">360p</option><option value="540p">540p</option><option value="720p">720p</option><option value="1080p">1080p</option><option value="native">native display density</option></select>
+        </label>
+        <label>Preview GPU
+          <select id="previewGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">prefer WebGPU · safe fallback</option><option value="off">Canvas2D only</option></select>
+        </label>
+        <label>Preview decode
+          <select id="previewDecode"><option value="auto">auto · direct video / worker fallback</option><option value="video">video · GPU external texture</option><option value="webcodecs">WebCodecs · worker decoded frames</option></select>
+        </label>
+      </div>
+
+      <div id="timelinePreviewShell" class="timeline-preview-shell" aria-live="polite">
+        <div id="timelinePreviewPlaceholder" class="timeline-preview-placeholder">
+          <div class="timeline-preview-glyph">▶</div>
+          <b>Preview is stopped</b>
+          <span>Start Preview to render the selected timeline here.</span>
+        </div>
+        <iframe id="timelinePreviewFrame" title="Tubeviz timeline preview" allow="autoplay" loading="eager"></iframe>
+      </div>
+
+      <div class="timeline-transport" aria-label="Timeline playback controls">
+        <button id="timelinePlayPause" type="button" disabled aria-label="Play preview">▶</button>
+        <span id="timelineTime" class="timeline-time">0:00.000 / 0:00.000</span>
+        <label class="timeline-scrub-label" aria-label="Seek timeline">
+          <input id="timelineScrub" type="range" min="0" max="1000" step="1" value="0" disabled>
+        </label>
+        <label class="timeline-zoom-label">Zoom
+          <input id="timelineZoom" type="range" min="1" max="8" step="0.25" value="1">
+          <span id="timelineZoomValue">1.00×</span>
+        </label>
+      </div>
+
+      <div class="timeline-status-row">
+        <div id="timelineStatus" class="timeline-status">Choose a timeline in Project, then refresh or start preview.</div>
+        <div id="timelineSummary" class="stats timeline-summary"></div>
+      </div>
+
+      <div class="timeline-content-grid">
+        <div id="timelineScroll" class="timeline-scroll" tabindex="0" aria-label="Generated edit timeline">
+          <div id="timelineLanes" class="timeline-lanes">
+            <div class="timeline-empty">No timeline loaded.</div>
+          </div>
+        </div>
+        <aside id="timelineInspector" class="timeline-inspector" aria-live="polite">
+          <div class="timeline-inspector-kicker">INSPECTOR</div>
+          <h3>Generated edit</h3>
+          <p>Select an item on the timeline to inspect its source, timing, effects, transition, musical context, and AI direction.</p>
+        </aside>
+      </div>
+    </article>
+
+    <details id="timelineAnalysisDetails" class="timeline-analysis-drawer">
+      <summary><span>Analysis & direction settings</span><small>Rebuild the timeline with presets, semantic/audio AI, choreography, composition, effects, and director controls.</small></summary>
+      <div class="timeline-analysis-content">
+        <article class="card workflow-card analyze-card">
+              <div class="card-kicker">DIRECT</div><h2>Analyze & Cut</h2>
+              <div class="analysis-preset-panel">
+                <label>Analysis preset
+                  <select id="analysisPreset"><option value="balanced">Balanced</option><option value="custom">Custom / current settings</option></select>
+                </label>
+                <div class="analysis-preset-copy">
+                  <div><b id="analysisPresetTitle">Balanced</b><span id="analysisPresetState" class="preset-state">preset</span></div>
+                  <p id="analysisPresetDescription">General-purpose musical edit with moderate motion, layering, variety, and phrase-aware pacing.</p>
+                </div>
+                <button id="reapplyAnalysisPreset" class="quiet-button" type="button">Reapply preset</button>
+              </div>
+              <div class="grid two tight">
+                <label>Section bars <input id="sectionBars" type="number" value="8"></label>
+                <label>Layers <input id="maxLayers" type="number" value="3" min="1" max="4"></label>
+                <label class="slider-field">Transform <span class="slider-value" data-for="transformIntensity"></span><input id="transformIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>subtle 0</span><b>balanced 0.8–1.3</b><span>extreme 2</span></span></label>
+                <label class="slider-field">Creative FX <span class="slider-value" data-for="creativeIntensity"></span><input id="creativeIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>restrained 0</span><b>cinematic .7–1.2</b><span>surreal 2</span></span></label>
+                <label class="slider-field">Effect density <span class="slider-value" data-for="effectDensity"></span><input id="effectDensity" type="range" min="0" max="2.5" step=".05" value="0.55"><span class="slider-scale"><span>sparse 0</span><b>source-first .4–.9</b><span>relentless 2.5</span></span></label>
+                <label class="slider-field">Temporal persistence <span class="slider-value" data-for="temporalPersistence"></span><input id="temporalPersistence" type="range" min="0" max="2.5" step=".05" value="0.70"><span class="slider-scale"><span>reset 0</span><b>subtle .5–1.1</b><span>long memory 2.5</span></span></label>
+                <label class="slider-field">Hero frequency <span class="slider-value" data-for="heroFrequency"></span><input id="heroFrequency" type="range" min="0" max="2.5" step=".05" value="0.90"><span class="slider-scale"><span>none 0</span><b>punctuation .8–1.5</b><span>frequent 2.5</span></span></label>
+                <label class="slider-field">Composition <span class="slider-value" data-for="compositionIntensity"></span><input id="compositionIntensity" type="range" min="0" max="2" step=".05" value="1.2"><span class="slider-scale"><span>single-source 0</span><b>balanced 0.7–1.3</b><span>layered 2</span></span></label>
+                <label class="slider-field">Composition diversity <span class="slider-value" data-for="compositionDiversity"></span><input id="compositionDiversity" type="range" min="0" max="2.5" step=".05" value="0.65"><span class="slider-scale"><span>consistent 0</span><b>varied .6–1.2</b><span>restless 2.5</span></span></label>
+                <label>Target unique <input id="targetUnique" type="number" value="0"></label>
+                <label class="slider-field">Novelty <span class="slider-value" data-for="noveltyWeight"></span><input id="noveltyWeight" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>coherent 0</span><b>recommended .45–.80</b><span>varied 1.5</span></span></label>
+                <label class="slider-field">Visual match <span class="slider-value" data-for="visualMatchWeight"></span><input id="visualMatchWeight" type="range" min="0" max="2" step=".05" value="1.25"><span class="slider-scale"><span>loose 0</span><b>recommended 1.0–1.5</b><span>strict 2</span></span></label>
+                <label class="slider-field">Transition intelligence <span class="slider-value" data-for="transitionWeight"></span><input id="transitionWeight" type="range" min="0" max="1.5" step=".05" value=".70"><span class="slider-scale"><span>independent 0</span><b>recommended .5–.9</b><span>strong 1.5</span></span></label>
+                <label class="slider-field">Trajectory strength <span class="slider-value" data-for="trajectoryStrength"></span><input id="trajectoryStrength" type="range" min="0" max="1.5" step=".05" value=".85"><span class="slider-scale"><span>flat 0</span><b>recommended .65–1.0</b><span>dramatic 1.5</span></span></label>
+                <label>Anticipation <input id="anticipationSeconds" type="number" step="1" value="12"></label>
+                <label>Shot lookahead <input id="sequenceLookahead" type="number" min="1" max="12" value="5"></label>
+                <label>Beam width <input id="sequenceBeamWidth" type="number" min="1" max="20" value="6"></label>
+                <label class="slider-field">FX compatibility <span class="slider-value" data-for="effectCompatibilityWeight"></span><input id="effectCompatibilityWeight" type="range" min="0" max="1.5" step=".05" value=".60"><span class="slider-scale"><span>ignore 0</span><b>recommended .4–.8</b><span>strict 1.5</span></span></label>
+                <label class="slider-field">Preference weight <span class="slider-value" data-for="preferenceWeight"></span><input id="preferenceWeight" type="range" min="0" max="1" step=".05" value=".35"><span class="slider-scale"><span>off 0</span><b>recommended .2–.5</b><span>strong 1</span></span></label>
+                <label class="slider-field">Vector intensity <span class="slider-value" data-for="vectorIntensity"></span><input id="vectorIntensity" type="range" min="0" max="2" step=".05" value="1.0"><span class="slider-scale"><span>off 0</span><b>recommended .5–1.1</b><span>extreme 2</span></span></label>
+                <label>Codec glitch
+                  <select id="codecGlitch"><option value="off">off</option><option value="subtle">subtle</option><option value="musical">musical</option><option value="aggressive">aggressive</option></select>
+                </label>
+                <label class="slider-field">Codec intensity <span class="slider-value" data-for="codecGlitchIntensity"></span><input id="codecGlitchIntensity" type="range" min="0" max="1.5" step=".05" value=".65"><span class="slider-scale"><span>subtle 0</span><b>recommended .35–.8</b><span>destructive 1.5</span></span></label>
+                <label>Min shot <input id="minShot" type="number" step=".05" value=".65"></label>
+                <label>Max shot <input id="maxShot" type="number" step=".25" value="6"></label>
+                <label>Max excerpt <input id="maxExcerpt" type="number" step=".25" value="5"></label>
+                <label>Semantic device <input id="semanticDevice" value="auto"></label>
+                <label>Audio AI device <input id="audioAiDevice" value="auto"></label>
+                <label>Music AI device <input id="musicAiDevice" value="auto"></label>
+                <label>MERT model <input id="musicAiModel" value="m-a-p/MERT-v1-95M"></label>
+                <label class="slider-field">Audio↔visual weight <span class="slider-value" data-for="audioVisualWeight"></span><input id="audioVisualWeight" type="range" min="0" max="2" step=".05" value="1.10"><span class="slider-scale"><span>ignore 0</span><b>recommended .8–1.3</b><span>dominant 2</span></span></label>
+                <label>CLAP window <input id="audioAiWindow" type="number" step="1" value="8"></label>
+                <label>CLAP hop <input id="audioAiHop" type="number" step="1" value="4"></label>
+                <label class="slider-field">AI director strength <span class="slider-value" data-for="aiDirectorStrength"></span><input id="aiDirectorStrength" type="range" min="0" max="1" step=".05" value=".95"><span class="slider-scale"><span>subtle 0</span><b>director-led .8–1.0</b><span>full 1</span></span></label>
+                <label>AI candidate slate <input id="aiConsultantCandidates" type="number" min="4" max="32" step="1" value="12"></label>
+                <label class="slider-field">AI edit influence <span class="slider-value" data-for="aiConsultantWeight"></span><input id="aiConsultantWeight" type="range" min="0" max="2" step=".05" value=".85"><span class="slider-scale"><span>off 0</span><b>recommended .6–1.0</b><span>strong 2</span></span></label>
+              </div>
+              <label class="check"><input id="semantic" type="checkbox" checked> OpenCLIP semantic selection</label>
+              <label class="check"><input id="audioAi" type="checkbox" checked> CLAP audio-semantic director</label>
+              <label class="check"><input id="musicAi" type="checkbox"> MERT music-structure embeddings (optional)</label>
+              <label class="check"><input id="aiDirector" type="checkbox"> Whole-song LLM visual director</label>
+              <label class="check"><input id="aiEditConsultant" type="checkbox" checked> Bounded AI edit consultant: rank valid scene candidates per section</label>
+              <p class="card-note ai-inherit-note">Whole-song directing receives a compact manifest of the actual output-pool clips and renderer capabilities, then authors a section strategy plus a few visible shot-level creative moments. The bounded edit consultant ranks only valid scene candidates to execute that plan. Both use the OpenAI base URL, model, and API key saved in <b>Settings</b>; deterministic timing and hard media constraints remain authoritative.</p>
+              <label class="check"><input id="reshuffle" type="checkbox" checked> Fresh reshuffle</label>
+              <label class="check"><input id="dynamicShots" type="checkbox" checked> Beat-aligned dynamic shots</label>
+              <label class="check"><input id="choreography" type="checkbox" checked> Build/drop trajectory choreography and multi-shot lookahead</label>
+              <label class="check"><input id="preferenceLearning" type="checkbox" checked> Learn soft visual preferences from manually rejected clips</label>
+              <label class="check"><input id="rhythmAlignment" type="checkbox" checked> Align natural video motion accents to beats</label>
+              <label class="check"><input id="creativeEffects" type="checkbox" checked> Semantic creative renderer: optical flow, temporal memory, virtual camera, depth, feedback and hero effects</label>
+              <label class="check"><input id="vectorEffects" type="checkbox" checked> Vector scene graph: contours, flow, fracture, portals and glyphs</label>
+              <label class="check"><input id="codecPreviewMaterialize" type="checkbox"> Materialize true FFglitch effects for browser preview</label>
+              <div class="actions"><button id="audioAiDoctorBtn">Audio AI Doctor</button><button id="musicAiDoctorBtn">Music AI Doctor</button><button class="primary" id="analyzeBtn">Analyze + Build Timeline</button></div>
+            </article>
+      </div>
+    </details>
+  </div>
+</section>
+
+<section id="render" class="panel">
+  <article class="card workspace-intro-card render-intro-card">
+    <div class="workspace-intro-row">
+      <div>
+        <div class="card-kicker">OUTPUT</div>
+        <h2>Render</h2>
+        <p class="card-note">Encode the selected directed timeline. Common quality and backend controls stay visible; renderer-specific tuning remains in the existing advanced controls below.</p>
+      </div>
+      <div id="renderProjectSummary" class="render-project-summary">Select a timeline in Project.</div>
     </div>
   </article>
-  <article class="card terminal-card">
-    <div class="row"><h2>Command Job Log</h2><button id="cancelCommandJob" class="danger" disabled>Cancel</button></div>
-    <pre id="commandJobLog">No command job.</pre>
-  </article>
+  <div class="render-workspace">
+    <article class="card workflow-card render-card render-workspace-card">
+      <div class="card-kicker">OUTPUT</div><h2>Render</h2>
+      <div class="grid three tight">
+        <label>Backend
+          <select id="backend"><option value="native">native</option><option value="auto">auto</option><option value="browser">browser</option></select>
+        </label>
+        <label>Width <input id="width" type="number" value="1920"></label>
+        <label>Height <input id="height" type="number" value="1080"></label>
+        <label>FPS <input id="fps" type="number" value="30"></label>
+        <label>CRF/CQ <input id="crf" type="number" value="20"></label>
+        <label>Codec
+          <select id="codec"><option>libx264</option><option>h264_nvenc</option><option>hevc_nvenc</option><option>libx265</option></select>
+        </label>
+        <label>Native preset <select id="nativePreset"><option>veryfast</option><option>fast</option><option>medium</option><option>slow</option></select></label>
+        <label>Decoder cache <input id="decoderCache" type="number" value="16"></label>
+        <label>Threads <input id="nativeThreads" type="number" value="0"></label>
+        <label>Native GPU
+          <select id="nativeGpu"><option value="auto">auto</option><option value="vulkan">Vulkan / libplacebo</option><option value="off">off</option></select>
+        </label>
+        <label>Hardware decode
+          <select id="nativeHwdecode"><option value="auto">auto</option><option value="cuda">CUDA / NVDEC</option><option value="off">off</option></select>
+        </label>
+        <label>Browser transport
+          <select id="browserTransport"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">WebCodecs H.264</option><option value="raw">raw RGBA fallback</option></select>
+        </label>
+        <label>Browser GPU
+          <select id="browserGpu"><option value="auto">auto · WebGPU if available</option><option value="webgpu">require WebGPU</option><option value="off">Canvas2D only</option></select>
+        </label>
+        <label>Browser source decode
+          <select id="browserSourceDecode"><option value="auto">auto · WebCodecs preferred</option><option value="webcodecs">require WebCodecs</option><option value="video">HTML video fallback</option></select>
+        </label>
+        <label>WebCodecs bitrate <input id="webcodecsBitrate" type="number" min="0" step="1000000" value="0" title="0 = derive from resolution, FPS and CRF"></label>
+      </div>
+      <label class="check"><input id="buildMissing" type="checkbox" checked> Build native renderer if missing</label>
+      <label class="check"><input id="codecRenderMaterialize" type="checkbox"> Materialize scheduled FFglitch effects before final render</label>
+      <div class="actions">
+        <button id="nativeBuildBtn">Rebuild Native</button>
+        <button id="codecDoctorBtn">FFglitch Doctor</button>
+        <button id="codecMaterializeBtn">Materialize Codec FX</button>
+        <button class="primary" id="renderBtn">Render Video</button>
+      </div>
+    </article>
+  </div>
 </section>
 
 <section id="jobs" class="panel">
-  <article class="card">
-    <div class="toolbar"><h2>Jobs</h2><button id="refreshJobs">Refresh</button></div>
-    <div id="jobsList"></div>
+  <div class="jobs-workspace">
+    <article class="card jobs-list-card">
+      <div class="toolbar">
+        <div>
+          <h2>Jobs</h2>
+          <p class="card-note">All background work and command output lives here. The global activity strip shows only the current foreground task.</p>
+        </div>
+        <button id="refreshJobs" type="button">Refresh</button>
+      </div>
+      <div id="jobsList" class="jobs-list"></div>
+    </article>
+    <article class="card job-detail-card">
+      <div id="jobDetail" class="job-detail-empty">
+        <div class="card-kicker">JOB DETAILS</div>
+        <h2>Select a job</h2>
+        <p>Choose a job on the left to inspect progress, its argument vector, timing, and complete captured output.</p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="settings" class="panel">
+  <article class="card ai-settings-card">
+    <div class="card-kicker">CENTRAL CONFIGURATION</div><h2>AI Settings</h2>
+    <p class="card-note">These settings apply to ingest, OpenAI clip understanding, library enhancement, analysis, and OpenAI-backed planning/directing. They persist in your user home directory; the server-side <code>HF_TOKEN</code> value is never sent to the browser, and neither is the saved OpenAI key.</p>
+    <label class="check master-toggle"><input id="masterAiEnabled" type="checkbox" checked> Enable AI features throughout Tubeviz</label>
+    <label class="check"><input id="visionAiEnabled" type="checkbox"> Describe video storyboards with OpenAI during ingest</label>
+    <div class="grid two">
+      <label>OpenAI API key <input id="openaiApiKey" type="password" autocomplete="off" placeholder="Leave blank to keep saved key"></label>
+      <label>Hugging Face token <input id="persistentHfToken" type="password" autocomplete="off" placeholder="Leave blank to keep saved token"></label>
+      <label>OpenAI base URL <input id="openaiBaseUrl" value="https://api.openai.com/v1"></label>
+      <label>OpenAI model <input id="openaiModel" value="gpt-5.1"></label>
+      <label>Image detail <select id="visionDetail"><option value="low">low (faster/cheaper)</option><option value="high">high</option><option value="auto">auto</option></select></label>
+      <label>Storyboard frames per clip <input id="visionMaxFrames" type="number" min="2" max="50" value="12"></label>
+      <label>Request timeout (seconds) <input id="visionTimeout" type="number" min="10" max="900" value="180"></label>
+    </div>
+    <div id="aiCredentialStatus" class="credential-row"></div>
+    <div class="actions">
+      <button id="clearOpenAiKey">Clear OpenAI key</button><button id="clearPersistentHf">Clear HF token</button>
+      <button class="primary" id="saveAiSettings">Save AI Settings</button>
+    </div>
   </article>
+  <article class="card">
+    <h2>Enhance Existing Library</h2>
+    <p>Analyze every ready clip that has no current cached description. Each request uses scene thumbnails sampled across the full clip. Existing media is not re-downloaded or rewritten.</p>
+    <label class="check"><input id="forceAiDescribe" type="checkbox"> Re-analyze clips even when the cached description is current</label>
+    <div class="actions"><button class="primary" id="enhanceLibraryAi">Enhance Existing Library</button></div>
+  </article>
+
+</section>
+
+<section id="advanced" class="panel">
+  <!-- Tubeviz Studio advanced workspace cleanup — studio-workflow-cleanup-v2 -->
+  <article class="card workspace-intro-card advanced-intro-card">
+    <div class="workspace-intro-row">
+      <div>
+        <div class="card-kicker">DEVELOPER</div>
+        <h2>Advanced</h2>
+        <p class="card-note">Direct CLI access and lower-level developer controls live here, separate from ordinary project configuration.</p>
+      </div>
+    </div>
+  </article>
+  <div class="advanced-workspace">
+<article class="card command-card">
+      <div class="toolbar">
+        <div>
+          <h2>Advanced Command Center</h2>
+          <p class="card-note">Generated from tubeviz's current argparse tree. This is the GUI parity layer: every non-GUI CLI command and option is exposed here and launched as an argument vector, never through a shell.</p>
+        </div>
+        <button id="reloadCliSchema">Reload CLI schema</button>
+      </div>
+      <div class="command-layout">
+        <aside class="command-sidebar">
+          <label>Command
+            <select id="cliCommand"></select>
+          </label>
+          <input id="cliCommandFilter" placeholder="filter commands…">
+          <div id="cliCommandDescription" class="card-note"></div>
+          <div class="actions stack-actions">
+            <button id="syncCliProject">Use current Project paths</button>
+            <button class="primary" id="runCliCommand">Run Command</button>
+          </div>
+        </aside>
+        <div>
+          <div id="cliArguments" class="cli-arguments"></div>
+          <h3 class="subhead">Argument-vector preview</h3>
+          <pre id="cliPreview" class="command-preview"></pre>
+        </div>
+      </div>
+    </article>
+  </div>
 </section>
 </main>
 
@@ -419,6 +555,28 @@ https://youtu.be/..."></textarea>
 
     <section id="clipAiMetadata" class="clip-ai-panel hidden" aria-live="polite"></section>
   </div>
+</div>
+
+<div id="legacyJobHooks" hidden aria-hidden="true">
+  <button id="cancelJob" type="button"></button>
+  <button id="cancelCommandJob" type="button"></button>
+  <div id="jobProgress"><b id="jobStage"></b><span id="jobProgressText"></span><div><div id="jobProgressBar"></div></div><div id="jobTiming"></div></div>
+  <pre id="jobLog"></pre>
+  <pre id="commandJobLog"></pre>
+</div>
+<div id="globalActivity" class="global-activity hidden" aria-live="polite">
+  <div class="global-activity-icon" id="activityIcon">●</div>
+  <div class="global-activity-main">
+    <div class="global-activity-heading">
+      <b id="activityTitle">Working</b>
+      <span id="activityText"></span>
+    </div>
+    <div class="global-activity-track"><div id="activityBar"></div></div>
+  </div>
+  <div id="activityTiming" class="global-activity-timing"></div>
+  <button id="activityCancel" class="danger" type="button">Cancel</button>
+  <button id="activityJobs" type="button">View Jobs</button>
+  <button id="activityDismiss" class="activity-dismiss" type="button" aria-label="Dismiss activity">×</button>
 </div>
 
 <script src="/static/gui.js?v=0.43.0"></script>

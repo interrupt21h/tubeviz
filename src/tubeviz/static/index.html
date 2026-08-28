@@ -14,6 +14,9 @@
     #gpu-fx { z-index:1; background:#000; display:none; }
     #canvas { z-index:2; }
     #hud { position:fixed; z-index:4; left:16px; bottom:16px; color:white; background:rgba(0,0,0,.48); padding:10px 12px; border-radius:8px; backdrop-filter:blur(10px); }
+    body.studio-embedded #hud { display:none; }
+    body.studio-embedded #stage { cursor:pointer; }
+    body.studio-embedded.studio-popout #stage { cursor:default; }
     #meta,#clip-meta,#director-meta { font-size:12px; opacity:.82; margin-top:6px; max-width:min(920px,84vw); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     #clip-meta { opacity:.68; }
     #director-meta { opacity:.90; color:#b9dcff; display:none; }
@@ -54,6 +57,6 @@
     <label for="fx-strobe">Strobe</label><input id="fx-strobe" type="range" min="0" max="2" step="0.05" value="1"><span id="fx-strobe-v" class="fx-value">1.00</span>
   </div>
 </div>
-<script type="module" src="/static/visualizer.js?v=0.43.0-previewfix1"></script>
+<script type="module" src="/static/visualizer.js?v=0.43.0-timeline1"></script>
 </body>
 </html>

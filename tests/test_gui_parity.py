@@ -129,14 +129,14 @@ def test_gui_manual_url_ingest_exposes_complete_specialized_workflow():
         assert expected in joined
 
 
-def test_gui_schema_endpoint_and_command_center_markup(tmp_path: Path):
+def test_gui_schema_endpoint_and_advanced_command_markup(tmp_path: Path):
     app = create_gui_app(default_library=tmp_path / "library", project_root=tmp_path)
     client = TestClient(app)
     response = client.get("/api/gui/cli-schema")
     assert response.status_code == 200
     assert any(item["name"] == "ingest-url" for item in response.json()["commands"])
     html = client.get("/").text
-    assert 'data-tab="command"' in html
+    assert 'data-tab="advanced"' in html
     assert 'id="manualIngestBtn"' in html
     assert 'id="cliArguments"' in html
     assert 'id="runCliCommand"' in html
