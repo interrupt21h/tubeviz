@@ -331,7 +331,8 @@ function updateLiveSourceFrames(){
         if(st.webCodecsFailed||bankState[bankIndex]?.[layerIndex]!==st)return;
         st.webCodecsFailed=true;console.warn('live WebCodecs source failed; switching this preview to HTMLVideoElement',error);
         try{st.source?.close();}catch(_){}st.source=null;st.frame=null;
-        liveSourceDecodeMode='video';liveSourceDecodeReason=`WebCodecs fallback: ${String(error?.message||error)}`;updateRendererStatus(liveSourceDecodeReason);
+        // Keep WebCodecs active for healthy layers; only this failed layer falls back to HTML video.
+        liveSourceDecodeReason=`WebCodecs layer fallback: ${String(error?.message||error)}`;updateRendererStatus(liveSourceDecodeReason);
         const scene=timeline.scene_plan[st.sceneIndex],layer=scene?allLayers(scene)[st.layerIndex]:null,video=banks[bankIndex]?.[st.layerIndex];
         if(!scene||!layer||!video||bankState[bankIndex]?.[layerIndex]!==st)return;
         try{

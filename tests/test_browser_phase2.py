@@ -130,7 +130,9 @@ def test_webgpu_wgsl_mutation_and_webcodecs_lifecycle_regressions():
     assert "bankState[bankIndex]=[]" in visualizer
     assert "st.source.closed" in visualizer
     assert "live WebCodecs source failed; switching this preview to HTMLVideoElement" in visualizer
-    assert "liveSourceDecodeMode='video'" in visualizer
+    assert "WebCodecs layer fallback:" in visualizer
+    assert "liveSourceDecodeMode='video';liveSourceDecodeReason=`WebCodecs fallback:" not in visualizer
+    assert "if(offlineMode||liveSourceDecodeMode!=='webcodecs'||audio.paused)return;" in visualizer
 
 
 def test_preview_module_graph_is_release_cache_busted():
