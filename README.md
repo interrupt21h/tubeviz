@@ -4,7 +4,7 @@
 
 > AI-directed, beat-synchronized music video generation from a curated video library.
 
-![tubeviz demo — Dream](dream.webp)
+![tubeviz demo — Dream](media/tubeviz-sample.webp)
 
 **tubeviz** turns a music track and a library of source footage into a beat-aligned,
 AI-directed music video. It can acquire and curate footage, detect scenes, analyze music,
