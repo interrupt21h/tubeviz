@@ -11,5 +11,13 @@ old = '''regex_once(
 '''
 if text.count(old) != 1:
     raise SystemExit(f"expected one obsolete gui.py harness edit, found {text.count(old)}")
-path.write_text(text.replace(old, "", 1))
-print("AI director patch harness adjusted for current GUI command builder")
+text = text.replace(old, "", 1)
+start_marker = 'changelog = read("CHANGELOG.md")\n'
+end_marker = '# ---------------------------------------------------------------------------\n# Regression coverage.\n'
+start = text.find(start_marker)
+end = text.find(end_marker, start)
+if start < 0 or end < 0:
+    raise SystemExit("expected obsolete CHANGELOG staging block was not found")
+text = text[:start] + text[end:]
+path.write_text(text)
+print("AI director patch harness adjusted for current GUI and changelog layout")
