@@ -39,6 +39,21 @@ fn hueRotate(c:vec3f,a:f32)->vec3f{
   let ca=cos(a);let sa=sin(a);let ni=ii*ca-q*sa;let nq=ii*sa+q*ca;
   return vec3f(y+.956*ni+.621*nq,y-.272*ni-.647*nq,y-1.106*ni+1.703*nq);
 }
+fn radialRippleUv(uv0:vec2f,center0:vec2f,amount0:f32,time:f32)->vec2f{
+  let amount=clamp(amount0,0.0,1.0);
+  if(amount<=.001){return uv0;}
+  let center=clamp(center0,vec2f(.08),vec2f(.92));
+  let aspect=max(.35,params.p1.y/max(1.0,params.p1.z));
+  var p=uv0-center;p.x*=aspect;
+  let r=length(p);let radialDir=p/max(r,.0001);
+  let ring=sin(r*34.0-time*4.6);
+  let falloff=1.0-smoothstep(.03,1.05,r);
+  // Radial UV displacement bends the existing image only. It does not draw
+  // dark rings or add/multiply color, so a bass hit reads as a pressure wave.
+  p+=radialDir*ring*amount*.0105*falloff;
+  p.x/=aspect;
+  return satUv(center+p);
+}
 fn beatWarpUv(uv0:vec2f)->vec2f{
   let amount=clamp(params.p11.x,0.0,1.0);
   if(amount<=.001){return uv0;}
@@ -99,14 +114,17 @@ fn beatWarpUv(uv0:vec2f)->vec2f{
     let cell=floor(uv*vec2f(14.0,9.0));let h=fract(sin(dot(cell,vec2f(12.9898,78.233))+floor(time*11.0))*43758.5453);
     let gate=step(1.0-clamp(params.p8.y,0.0,1.0)*.22,h);uv+=vec2f(h-.5,.5-h)*gate*params.p8.y*.035;
   }
-  // Continuous scene flow remains separate from beat-local topology. Each musical
-  // hit first applies its own deterministic deformation event, then the slower
-  // shot-level flow/ripple/tempo field is layered underneath it.
+  // Continuous scene flow remains separate from beat-local topology. Ripple is
+  // radial around the semantic/creative target; it is no longer a pair of
+  // perpendicular sine fields that visually collapsed into a dark swirl.
   uv=beatWarpUv(uv);
+  uv=radialRippleUv(uv,focalTarget,params.p8.w,time);
   let wave=vec2f(sin(uv.y*13.0+time*1.7),cos(uv.x*11.0-time*1.3));
-  let ripple=vec2f(sin(uv.y*24.0-time*3.1),cos(uv.x*21.0+time*2.4))*params.p8.w*.0045;
   let tempo=vec2f(sin((uv.y+time*.08)*18.0),cos((uv.x-time*.06)*16.0))*params.p9.x*.0035;
-  uv=satUv(uv+wave*(warp*.010+flow*.006)+ripple+tempo);
+  // visualizer.js historically folded ripple*0.42 into generic warp. Remove that
+  // known contribution here so the new radial displacement is not applied twice.
+  let continuousWarp=max(0.0,warp-params.p8.w*.42);
+  uv=satUv(uv+wave*(continuousWarp*.010+flow*.006)+tempo);
   if(params.p2.y>.001){
     let src0=textureSample(sourceTex,samp,uv).rgb;let z=(luma(src0)-.5)*params.p2.y*.030;
     uv=satUv(uv+(uv-focalTarget)*z);
