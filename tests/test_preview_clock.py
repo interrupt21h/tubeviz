@@ -8,7 +8,7 @@ def test_live_preview_clock_is_not_owned_by_a_source_decoder():
     visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
 
     clock_script = '/static/preview_clock.js?v=0.44.0-previewfix2'
-    visualizer_script = '/static/visualizer.js?v=0.44.0-timeline1'
+    visualizer_script = '/static/visualizer.js?v=0.44.0-effects1'
     assert clock_script in index
     assert index.index(clock_script) < index.index(visualizer_script)
 
