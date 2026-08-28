@@ -1,3 +1,9 @@
+# 0.42.2 — WebGPU external-texture sampling
+
+- Fix the direct WebGPU layer compositor's WGSL external-texture calls to pass the required sampler to `textureSampleBaseClampToEdge`, resolving Chrome's `no matching call` compilation failure for `texture_external`.
+- Align the layer bind-group contract with the shader by binding the shared linear clamp-to-edge sampler at binding 4 and moving the layer uniform buffer to binding 5.
+- Cache-bust the browser preview module graph for 0.42.2 and add regression assertions covering the external-texture sampler signature and bind-group layout.
+
 # 0.42.1 — WebGPU and WebCodecs preview reliability
 
 - Fix the WebGPU compositor WGSL regression that declared the final beat-warp `angle` as immutable and then mutated it, causing shader-module compilation to fail and forcing affected previews back to Canvas2D.
