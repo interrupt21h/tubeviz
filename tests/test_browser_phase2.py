@@ -118,6 +118,12 @@ def test_webgpu_wgsl_mutation_and_webcodecs_lifecycle_regressions():
     assert "var angle=a*.24*polarity" in core
     assert "let angle=a*.24*polarity" not in core
     assert "angle+=sin(r*34.0*frequency" in core
+    assert "@group(0) @binding(4) var layerSampler: sampler;" in core
+    assert "@group(0) @binding(5) var<uniform> layers: LayerUniforms;" in core
+    for i in range(4):
+        assert f"textureSampleBaseClampToEdge(video{i},layerSampler,layerUv(" in core
+        assert f"textureSampleBaseClampToEdge(video{i},layerUv(" not in core
+    assert "{binding:4,resource:this.sampler},{binding:5,resource:{buffer:this.layerUniformBuffer}}" in core
     assert "avc1.64002a" in source
     assert "avc1.4d002a" not in source
     assert "avc1.42002a" not in source
@@ -140,8 +146,8 @@ def test_preview_module_graph_is_release_cache_busted():
     visualizer = Path("src/tubeviz/static/visualizer.js").read_text()
     gpu = Path("src/tubeviz/static/browser_gpu.js").read_text()
     source = Path("src/tubeviz/static/browser_source.js").read_text()
-    assert "/static/visualizer.js?v=0.42.1" in index
-    assert "/static/browser_gpu.js?v=0.42.1" in visualizer
-    assert "/static/browser_source.js?v=0.42.1" in visualizer
-    assert "/static/browser_gpu_core.js?v=0.42.1" in gpu
-    assert "/static/browser_source_worker.js?v=0.42.1" in source
+    assert "/static/visualizer.js?v=0.42.2" in index
+    assert "/static/browser_gpu.js?v=0.42.2" in visualizer
+    assert "/static/browser_source.js?v=0.42.2" in visualizer
+    assert "/static/browser_gpu_core.js?v=0.42.2" in gpu
+    assert "/static/browser_source_worker.js?v=0.42.2" in source

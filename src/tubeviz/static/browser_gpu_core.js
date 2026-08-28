@@ -197,7 +197,8 @@ struct LayerUniforms {
 @group(0) @binding(1) var video1: texture_external;
 @group(0) @binding(2) var video2: texture_external;
 @group(0) @binding(3) var video3: texture_external;
-@group(0) @binding(4) var<uniform> layers: LayerUniforms;
+@group(0) @binding(4) var layerSampler: sampler;
+@group(0) @binding(5) var<uniform> layers: LayerUniforms;
 
 struct LayerVSOut {@builtin(position) pos: vec4f,@location(0) uv: vec2f};
 @vertex fn layer_vs(@builtin(vertex_index) i:u32)->LayerVSOut{
@@ -225,10 +226,10 @@ fn layerGrade(c0:vec4f,a:vec4f,b:vec4f)->vec4f{
   var c=layerHueRotate(c0.rgb,b.x);let y=layerLuma(c);c=mix(vec3f(y),c,max(0.0,a.w));
   c=(c-vec3f(.5))*a.z+vec3f(.5);c*=a.y;return vec4f(clamp(c,vec3f(0),vec3f(1)),clamp(a.x,0.0,1.0));
 }
-fn sample0(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video0,layerUv(uv,layers.l0b,layers.l0c,layers.l0d)),layers.l0a,layers.l0b);}
-fn sample1(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video1,layerUv(uv,layers.l1b,layers.l1c,layers.l1d)),layers.l1a,layers.l1b);}
-fn sample2(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video2,layerUv(uv,layers.l2b,layers.l2c,layers.l2d)),layers.l2a,layers.l2b);}
-fn sample3(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video3,layerUv(uv,layers.l3b,layers.l3c,layers.l3d)),layers.l3a,layers.l3b);}
+fn sample0(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video0,layerSampler,layerUv(uv,layers.l0b,layers.l0c,layers.l0d)),layers.l0a,layers.l0b);}
+fn sample1(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video1,layerSampler,layerUv(uv,layers.l1b,layers.l1c,layers.l1d)),layers.l1a,layers.l1b);}
+fn sample2(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video2,layerSampler,layerUv(uv,layers.l2b,layers.l2c,layers.l2d)),layers.l2a,layers.l2b);}
+fn sample3(uv:vec2f)->vec4f{return layerGrade(textureSampleBaseClampToEdge(video3,layerSampler,layerUv(uv,layers.l3b,layers.l3c,layers.l3d)),layers.l3a,layers.l3b);}
 fn sampleLayer(i:i32,uv:vec2f)->vec4f{if(i==1){return sample1(uv);}if(i==2){return sample2(uv);}if(i==3){return sample3(uv);}return sample0(uv);}
 fn layerBlend(base:vec3f,over:vec3f,alpha:f32,mode:f32)->vec3f{
   var mixed=over;
@@ -369,7 +370,7 @@ export class BrowserGpuRendererCore{
       const external=usable.map(item=>this.device.importExternalTexture({source:item.source}));
       this.device.queue.writeBuffer(this.layerUniformBuffer,0,layerUniforms(usable,{...composition,count:actualCount},width,height));
       const layerBindGroup=this.device.createBindGroup({layout:this.layerPipeline.getBindGroupLayout(0),entries:[
-        {binding:0,resource:external[0]},{binding:1,resource:external[1]},{binding:2,resource:external[2]},{binding:3,resource:external[3]},{binding:4,resource:{buffer:this.layerUniformBuffer}},
+        {binding:0,resource:external[0]},{binding:1,resource:external[1]},{binding:2,resource:external[2]},{binding:3,resource:external[3]},{binding:4,resource:this.sampler},{binding:5,resource:{buffer:this.layerUniformBuffer}},
       ]});
       const adjusted={...params};if(!this.historyReady){adjusted.feedback=0;adjusted.temporal=0;adjusted.temporalRgb=0;}
       this.device.queue.writeBuffer(this.uniformBuffer,0,gpuParams(adjusted,width,height));
