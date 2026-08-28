@@ -1,0 +1,95 @@
+name: v0.42 release cleanup
+
+on:
+  push:
+    branches: [v042-release-cleanup]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Clean release tree and metadata
+        run: |
+          git rm -r build/native-off build/native-on
+          grep -qxF 'build/' .gitignore || printf '\nbuild/\n' >> .gitignore
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path('src/tubeviz/native_src/src/main.cpp')
+          text = main.read_text()
+          text = text.replace('tubeviz-native-render 0.41.0 ffmpeg', 'tubeviz-native-render 0.42.0 ffmpeg')
+          main.write_text(text)
+
+          resident = Path('src/tubeviz/native_src/src/resident_gpu.cpp')
+          text = resident.read_text()
+          needle = '#include <libplacebo/utils/libav.h>'
+          if '#define PL_LIBAV_IMPLEMENTATION 0' not in text:
+              if needle not in text:
+                  raise SystemExit('libplacebo libav include not found')
+              text = text.replace(needle, '#define PL_LIBAV_IMPLEMENTATION 0\n' + needle, 1)
+          resident.write_text(text)
+
+          bridge = Path('src/tubeviz/native_src/src/libav_bridge.c')
+          text = bridge.read_text()
+          old = '#ifdef TUBEVIZ_HAVE_PLACEBO\n#define PL_LIBAV_IMPLEMENTATION 1\n#include <libplacebo/utils/libav.h>\n#endif\n'
+          new = '#ifdef TUBEVIZ_HAVE_PLACEBO\n#define PL_LIBAV_IMPLEMENTATION 1\n#include <libplacebo/utils/libav.h>\n#else\ntypedef int tubeviz_libav_bridge_disabled;\n#endif\n'
+          if old not in text:
+              raise SystemExit('unexpected libav bridge source')
+          bridge.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential pkg-config ffmpeg libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libplacebo-dev libvulkan-dev
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Validate application suite
+        run: |
+          pytest -q
+          python -m compileall -q src/tubeviz
+          node --check src/tubeviz/static/gui.js
+          node --check src/tubeviz/static/visualizer.js
+
+      - name: Validate CPU native build outside repository
+        run: |
+          rm -rf /tmp/tubeviz-native-off
+          cmake -S src/tubeviz/native_src -B /tmp/tubeviz-native-off -DTUBEVIZ_WITH_PLACEBO=OFF -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/tubeviz-native-off --parallel 2
+          /tmp/tubeviz-native-off/tubeviz-native-render --version | tee /tmp/native-off-version.txt
+          grep -F 'tubeviz-native-render 0.42.0 ffmpeg' /tmp/native-off-version.txt
+
+      - name: Validate resident Vulkan native build outside repository
+        run: |
+          rm -rf /tmp/tubeviz-native-on
+          cmake -S src/tubeviz/native_src -B /tmp/tubeviz-native-on -DTUBEVIZ_WITH_PLACEBO=ON -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/tubeviz-native-on --parallel 2
+          /tmp/tubeviz-native-on/tubeviz-native-render --version | tee /tmp/native-on-version.txt
+          grep -F 'tubeviz-native-render 0.42.0 ffmpeg+vulkan/libplacebo' /tmp/native-on-version.txt
+
+      - name: Commit clean release tree
+        run: |
+          git rm .github/workflows/v042-release-cleanup.yml
+          git add -A
+          if git ls-files 'build/native-*' | grep -q .; then
+            echo 'tracked native build artifacts remain' >&2
+            exit 1
+          fi
+          git config user.name "Scott Muller"
+          git config user.email "scott@21h.io"
+          git commit -m "Clean v0.42 release artifacts"
+
+      - name: Fast-forward main and remove cleanup branch
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin HEAD:main
+          git push origin --delete v042-release-cleanup
