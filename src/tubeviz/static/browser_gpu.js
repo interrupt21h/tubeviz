@@ -4,6 +4,7 @@ import {createGpuRendererCore} from '/static/browser_gpu_core.js?v=0.44.0-previe
 const WORKER_PROBE_TIMEOUT_MS=4000;
 const WORKER_INIT_TIMEOUT_MS=5000;
 const WORKER_FRAME_TIMEOUT_MS=3500;
+const REALTIME_MAX_INFLIGHT=1;
 
 function waitForWorkerMessage(worker,predicate,timeoutMs,label){
   return new Promise((resolve,reject)=>{
@@ -42,7 +43,7 @@ class WorkerGpuFinalizer{
   }
   render(effectSource,sourceColorSource,params={}){
     if(this.failed)return false;
-    // Live preview may drop a GPU submission if the worker is already behind.
+    // Worker preview is allowed a tiny queue, but never an unbounded one.
     if(this.inflight>=2)return true;
     let effect=null,source=null;
     try{
@@ -67,6 +68,74 @@ class WorkerGpuFinalizer{
   resetHistory(){if(!this.failed)this.worker.postMessage({type:'reset-history'});}
   async sync(){if(!this.lastPromise)return !this.failed;try{return await this.lastPromise;}catch(_){return false;}}
   close(){try{this.worker.terminate();}catch(_){}this._failAll('WebGPU worker closed');}
+}
+
+// Main-thread WebGPU submission is intentionally lossy in live preview.  Audio/video
+// playback is the clock; stale GPU frames are disposable.  Without backpressure the
+// browser accepts queue.submit() calls much faster than a saturated GPU can finish them,
+// building seconds of latency that only disappears when playback is paused.  Keep at
+// most one submitted frame outstanding and render the newest state when the GPU becomes
+// available again.
+class RealtimeGpuFinalizer{
+  constructor(core){
+    this.core=core;
+    this.inflight=0;
+    this.submitted=0;
+    this.completed=0;
+    this.dropped=0;
+    this.gpuMs=0;
+    this.lastPromise=null;
+    this.pendingResize=null;
+    this.pendingHistoryReset=false;
+    this.failureReason='';
+  }
+  get failed(){return !!this.core?.failed;}
+  _applyDeferred(){
+    if(this.inflight)return;
+    if(this.pendingResize){
+      const {width,height}=this.pendingResize;this.pendingResize=null;this.core.resize(width,height);
+    }
+    if(this.pendingHistoryReset){this.pendingHistoryReset=false;this.core.resetHistory();}
+  }
+  resize(width,height){
+    width=Math.max(1,Math.floor(width));height=Math.max(1,Math.floor(height));
+    if(this.inflight){this.pendingResize={width,height};return;}
+    this.core.resize(width,height);
+  }
+  _submit(method,args){
+    if(this.failed)return false;
+    if(this.inflight>=REALTIME_MAX_INFLIGHT){this.dropped++;return true;}
+    this._applyDeferred();
+    const started=performance.now();
+    let ok=false;
+    try{ok=!!this.core[method](...args);}catch(error){this.failureReason=String(error?.message||error);return false;}
+    if(!ok){this.failureReason=String(this.core.failureReason||`${method} failed`);return false;}
+    this.inflight=1;this.submitted++;
+    const completion=this.core.sync().then(done=>{
+      const elapsed=Math.max(.01,performance.now()-started);
+      this.gpuMs=this.gpuMs?this.gpuMs*.85+elapsed*.15:elapsed;
+      this.inflight=0;this.completed++;
+      if(!done)this.failureReason=String(this.core.failureReason||'WebGPU queue synchronization failed');
+      this._applyDeferred();
+      return !!done;
+    }).catch(error=>{
+      this.inflight=0;this.failureReason=String(error?.message||error);this._applyDeferred();return false;
+    });
+    completion.catch(()=>{});this.lastPromise=completion;
+    return true;
+  }
+  render(effectSource,sourceColorSource,params={}){return this._submit('render',[effectSource,sourceColorSource,params]);}
+  renderLayers(layerList,params={},composition={}){return this._submit('renderLayers',[layerList,params,composition]);}
+  resetHistory(){if(this.inflight){this.pendingHistoryReset=true;return;}this.core.resetHistory();}
+  stats(){
+    const total=this.submitted+this.dropped;
+    return{inflight:this.inflight,submitted:this.submitted,completed:this.completed,dropped:this.dropped,dropRatio:total?this.dropped/total:0,gpuMs:this.gpuMs};
+  }
+  async sync(){
+    if(this.lastPromise){const ok=await this.lastPromise;if(!ok)return false;}
+    return this.core.sync();
+  }
+  close(){try{this.core?.close?.();}catch(_){}this.inflight=0;}
 }
 
 async function probeWorkerWebGpu(worker){
@@ -95,13 +164,13 @@ async function createWorkerGpuFinalizer(canvas){
 }
 
 async function createMainThreadGpuFinalizer(canvas){
-  const finalizer=await createGpuRendererCore(canvas);
+  const core=await createGpuRendererCore(canvas);
   // Force a tiny real render before declaring success. This catches shader/pipeline or
   // external-image-copy failures during initialization instead of on the first song frame.
   const a=document.createElement('canvas'),b=document.createElement('canvas');a.width=b.width=2;a.height=b.height=2;
   const ac=a.getContext('2d'),bc=b.getContext('2d');ac.fillStyle='#123';ac.fillRect(0,0,2,2);bc.fillStyle='#456';bc.fillRect(0,0,2,2);
-  finalizer.resize(2,2);if(!finalizer.render(a,b,{fidelity:.9,time:0})||!await finalizer.sync())throw new Error('main-thread WebGPU self-test failed');
-  return finalizer;
+  core.resize(2,2);if(!core.render(a,b,{fidelity:.9,time:0})||!await core.sync())throw new Error('main-thread WebGPU self-test failed');
+  return new RealtimeGpuFinalizer(core);
 }
 
 export async function createBrowserGpuFinalizer(canvas,mode='auto',{preferWorker=true}={}){
@@ -114,11 +183,11 @@ export async function createBrowserGpuFinalizer(canvas,mode='auto',{preferWorker
     try{return{finalizer:await createWorkerGpuFinalizer(canvas),reason:'webgpu-worker'};}catch(error){workerError=error;}
   }
 
-  // Live preview intentionally prefers main-thread WebGPU. Canvas2D composition is
-  // already on the main thread, and direct GPU submission avoids two VideoFrame
-  // transfers plus worker synchronization on every displayed preview frame.
+  // Live preview intentionally prefers main-thread WebGPU. Direct GPU submission avoids
+  // VideoFrame transfers, while RealtimeGpuFinalizer supplies the missing backpressure:
+  // when the GPU is busy, stale preview submissions are dropped instead of queued.
   try{
-    const suffix=preferWorker&&workerError?` (worker unavailable: ${String(workerError?.message||workerError)})`:' (live preview)';
+    const suffix=preferWorker&&workerError?` (worker unavailable: ${String(workerError?.message||workerError)})`:' (live preview, backpressure)';
     return{finalizer:await createMainThreadGpuFinalizer(canvas),reason:`webgpu-main${suffix}`};
   }catch(mainError){
     const workerText=preferWorker?String(workerError?.message||workerError):'not requested';
