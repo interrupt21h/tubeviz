@@ -24,6 +24,9 @@ public:
     Decoder& operator=(const Decoder&) = delete;
 
     void seek(double seconds);
+    // Resident GPU rendering consumes the decoder-owned AVFrame directly. The
+    // returned frame remains valid until the next frame_at/avframe_at/seek call.
+    const AVFrame* avframe_at(double seconds);
     const std::vector<std::uint8_t>& frame_at(double seconds);
     const std::string& path() const noexcept { return path_; }
     bool hardware_decode() const noexcept { return hardware_decode_; }
@@ -32,7 +35,8 @@ public:
 private:
     static AVPixelFormat select_hw_format(AVCodecContext* context, const AVPixelFormat* formats);
     bool decode_until(double target_seconds);
-    void convert_frame(AVFrame* frame);
+    void convert_held_frame();
+    void hold_frame(AVFrame* frame);
     double frame_seconds(const AVFrame* frame) const;
 
     std::string path_;
@@ -42,6 +46,7 @@ private:
     AVFormatContext* format_{nullptr};
     AVCodecContext* codec_{nullptr};
     AVFrame* frame_{nullptr};
+    AVFrame* held_frame_{nullptr};
     AVFrame* software_frame_{nullptr};
     AVPacket* packet_{nullptr};
     AVBufferRef* hw_device_ctx_{nullptr};
@@ -53,6 +58,7 @@ private:
     AVRational time_base_{};
     double current_seconds_{-1.0};
     bool eof_{false};
+    bool rgb_valid_{false};
 
     std::vector<std::uint8_t> rgb_;
 };
