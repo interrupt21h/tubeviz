@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 from urllib.parse import quote, unquote
@@ -26,7 +26,7 @@ class NativeRenderConfig:
     fps: float = 60.0
     crf: int = 18
     preset: str = "veryfast"
-    video_codec: str = "libx264"
+    video_codec: str = "auto"
     pixel_format: str = "yuv420p"
     audio_codec: str = "aac"
     audio_bitrate: str = "320k"
@@ -651,6 +651,7 @@ def native_doctor(
         result = subprocess.run([ffmpeg, "-hide_banner", "-hwaccels"], text=True, capture_output=True)
         if result.returncode == 0:
             hwaccels = [line.strip() for line in result.stdout.splitlines()[1:] if line.strip()]
+    nvenc_usable = _ffmpeg_encoder_usable("h264_nvenc") if ffmpeg else False
     return {
         "renderer": str(renderer) if renderer else None,
         "renderer_version": renderer_version,
@@ -661,11 +662,53 @@ def native_doctor(
         "ffmpeg": ffmpeg,
         "ffmpeg_hwaccels": hwaccels,
         "cuda_decode_advertised": "cuda" in hwaccels,
+        "nvenc_encode_usable": nvenc_usable,
+        "default_video_encoder": "h264_nvenc" if nvenc_usable else "libx264",
         "vulkan_effects_buildable": libraries.get("libplacebo") is not None,
         "nvidia_smi": shutil.which("nvidia-smi"),
         "build_dir": str(Path(build_dir or default_native_build_dir()).expanduser()),
         "source_dir": str(native_source_dir()),
     }
+
+
+def _ffmpeg_encoder_usable(encoder: str, *, timeout: float = 8.0) -> bool:
+    """Return True only when FFmpeg can actually initialize the encoder.
+
+    Listing an encoder is not sufficient on NVIDIA/WSL systems: FFmpeg may be
+    compiled with NVENC while the runtime driver/device is unavailable.  Encode
+    one tiny raw frame so auto-selection reflects the machine that will render.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return False
+    frame = bytes(64 * 64 * 3)
+    command = [
+        ffmpeg,
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "rawvideo", "-pixel_format", "rgb24",
+        "-video_size", "64x64", "-framerate", "1", "-i", "pipe:0",
+        "-frames:v", "1", "-an", "-c:v", encoder,
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=frame,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=max(1.0, timeout),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def _resolve_native_video_codec(requested: str | None) -> str:
+    codec = (requested or "auto").strip()
+    if codec != "auto":
+        return codec
+    return "h264_nvenc" if _ffmpeg_encoder_usable("h264_nvenc") else "libx264"
 
 
 def _raw_ffmpeg_command(
@@ -697,8 +740,9 @@ def _raw_ffmpeg_command(
     command += ["-map", "0:v:0"]
     if audio is not None:
         command += ["-map", "1:a:0"]
-    command += ["-c:v", config.video_codec]
-    if config.video_codec.endswith("_nvenc"):
+    video_codec = "libx264" if config.video_codec == "auto" else config.video_codec
+    command += ["-c:v", video_codec]
+    if video_codec.endswith("_nvenc"):
         preset_map = {
             "ultrafast": "p1",
             "superfast": "p2",
@@ -808,11 +852,13 @@ def render_timeline_native(
         "--hwdecode",
         cfg.hwdecode,
     ]
+    encoder_codec = _resolve_native_video_codec(cfg.video_codec)
+    encoder_config = replace(cfg, video_codec=encoder_codec)
     encoder_command = _raw_ffmpeg_command(
         output=output_path,
         audio=audio,
         duration=timeline.track.duration,
-        config=cfg,
+        config=encoder_config,
     )
 
     progress(
@@ -825,7 +871,8 @@ def render_timeline_native(
         f"gpu={cfg.gpu}, hwdecode={cfg.hwdecode})"
     )
     progress(
-        f"Native encoder: {cfg.video_codec} preset={cfg.preset} crf={cfg.crf}"
+        f"Native encoder: {encoder_codec} preset={cfg.preset} crf={cfg.crf}"
+        + (" (auto-selected)" if cfg.video_codec == "auto" else "")
     )
 
     native = subprocess.Popen(
@@ -844,6 +891,7 @@ def render_timeline_native(
     native.stdout.close()
 
     native_errors: list[str] = []
+    native_perf: dict[str, str] = {}
     started = time.monotonic()
 
     def read_native_stderr() -> None:
@@ -862,6 +910,22 @@ def render_timeline_native(
                         f"  native frame {done}/{total} "
                         f"({done / total * 100:5.1f}%) {rate:.1f} fps ETA {eta:.0f}s"
                     )
+            elif line.startswith("PERF\t"):
+                metrics: dict[str, str] = {}
+                for field in line.split("\t")[1:]:
+                    if "=" in field:
+                        key, value = field.split("=", 1)
+                        metrics[key] = value
+                native_perf.update(metrics)
+                ordered = ("resident", "fallback", "decode_ms", "map_ms", "compose_ms", "fx_ms", "download_ms", "cpu_ms", "pipe_ms")
+                summary = []
+                for key in ordered:
+                    if key not in metrics:
+                        continue
+                    label = key.removesuffix("_ms")
+                    suffix = "ms" if key.endswith("_ms") else ""
+                    summary.append(f"{label}={metrics[key]}{suffix}")
+                progress("  native perf: " + " ".join(summary))
             else:
                 native_errors.append(line)
                 progress("  native: " + line)
@@ -892,5 +956,10 @@ def render_timeline_native(
         tmp_context.cleanup()
 
     elapsed = time.monotonic() - started
+    if native_perf:
+        progress(
+            "Native perf final: "
+            + " ".join(f"{key}={value}" for key, value in native_perf.items())
+        )
     progress(f"Native render complete: {output_path} in {elapsed:.1f}s")
     return output_path

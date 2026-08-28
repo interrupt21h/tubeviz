@@ -1,3 +1,15 @@
+# 0.42.0 — GPU-resident native rendering
+
+- Add a native GPU-resident rendering path that keeps decoded FFmpeg `AVFrame` data in YUV/hardware form through layer transforms, multi-source composition, creative/post effects, vector treatment and temporal history instead of converting every source frame to full-resolution RGB first.
+- Map supported CUDA/NVDEC hardware frames directly into libplacebo/Vulkan with `pl_map_avframe_ex`. When CUDA-to-Vulkan mapping is unavailable in `auto` mode, reopen decoders in software mode and upload native YUV to Vulkan rather than paying a CUDA download followed by an RGB CPU conversion and Vulkan re-upload.
+- Make RGB conversion lazy in the decoder. The validated CPU/hybrid renderer still uses the existing `sws_scale` path when needed, but the resident fast path consumes the retained `AVFrame` directly.
+- Move layer geometry/color transforms, source composition, reactive/creative effects, post effects, vector approximations, crossfade/history blending and history texture preservation into the resident Vulkan path. Existing CPU/OpenMP and hybrid-libplacebo rendering remain automatic fallbacks.
+- Add native stage telemetry for decode, AVFrame mapping, GPU composition, effects/history, final GPU download, CPU fallback work and encoder-pipe blocking. Studio/CLI progress now recognizes `PERF` records as structured performance data instead of treating them as renderer errors.
+- Make native encoder selection `auto` by default. Tubeviz performs a real one-frame FFmpeg NVENC initialization probe, chooses `h264_nvenc` only when the runtime can actually encode, and otherwise falls back to `libx264`. Explicit `--video-codec` remains authoritative; browser rendering continues to default to `libx264`.
+- Extend `native doctor` with NVENC usability and the encoder that native auto-selection would choose on the current machine.
+- Compile the libplacebo FFmpeg bridge in its required C translation unit and validate both `TUBEVIZ_WITH_PLACEBO=ON` and `OFF` configurations in CI.
+- Replace stale eager-RGB implementation assertions with regression coverage for lazy AVFrame decode, resident CUDA/Vulkan mapping, software-YUV retry, GPU history, performance telemetry and encoder selection.
+
 # 0.41.0 — GPU-native responsive preview
 
 - Add a separate content-addressed preview-media cache capped at 720p/30fps. New ingest prepares it best-effort; existing libraries acquire it lazily when previewed. Final/native media remains untouched.

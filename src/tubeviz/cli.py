@@ -770,7 +770,7 @@ def _cmd_render(args: argparse.Namespace) -> None:
                     fps=args.fps,
                     crf=args.crf,
                     preset=args.native_preset,
-                    video_codec=args.video_codec,
+                    video_codec=args.video_codec or "auto",
                     pixel_format=args.pixel_format,
                     audio_codec=args.audio_codec,
                     audio_bitrate=args.audio_bitrate,
@@ -796,7 +796,7 @@ def _cmd_render(args: argparse.Namespace) -> None:
                     fps=args.fps,
                     crf=args.crf,
                     preset=args.preset,
-                    video_codec=args.video_codec,
+                    video_codec=args.video_codec or "libx264",
                     pixel_format=args.pixel_format,
                     audio_codec=args.audio_codec,
                     audio_bitrate=args.audio_bitrate,
@@ -1464,7 +1464,11 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--width", type=int, default=1920)
     render.add_argument("--height", type=int, default=1080)
     render.add_argument("--fps", type=float, default=60.0)
-    render.add_argument("--video-codec", default="libx264")
+    render.add_argument(
+        "--video-codec",
+        default=None,
+        help="Explicit encoder override; native defaults to auto/NVENC when usable, browser defaults to libx264",
+    )
     render.add_argument("--crf", type=int, default=18)
     render.add_argument("--preset", default="medium")
     render.add_argument("--pixel-format", default="yuv420p")

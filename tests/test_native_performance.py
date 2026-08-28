@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
+import tubeviz.native_render as native_render
 from tubeviz.cli import build_parser
-from tubeviz.native_render import NativeRenderConfig, _raw_ffmpeg_command
+from tubeviz.native_render import NativeRenderConfig, _raw_ffmpeg_command, _resolve_native_video_codec
 
 
 def test_native_defaults_use_fast_encoder_and_cache():
     cfg = NativeRenderConfig()
     assert cfg.preset == "veryfast"
+    assert cfg.video_codec == "auto"
     assert cfg.decoder_cache == 16
     assert cfg.threads == 0
     assert cfg.gpu == "auto"
@@ -24,6 +26,7 @@ def test_native_render_cli_exposes_performance_controls():
         "--native-gpu", "vulkan",
         "--native-hwdecode", "cuda",
     ])
+    assert args.video_codec is None
     assert args.native_preset == "superfast"
     assert args.native_decoder_cache == 24
     assert args.native_threads == 8
@@ -31,15 +34,16 @@ def test_native_render_cli_exposes_performance_controls():
     assert args.native_hwdecode == "cuda"
 
 
-def test_native_source_has_cached_frame_fast_path_and_lru():
+def test_native_source_has_lazy_avframe_fast_path_and_lru():
     root = Path("src/tubeviz/native_src")
     decoder = (root / "src/decoder.cpp").read_text()
     renderer = (root / "src/renderer.cpp").read_text()
     cmake = (root / "CMakeLists.txt").read_text()
     effects = (root / "src/effects.cpp").read_text()
 
-    assert "already-decoded frame covers this requested time" in decoder
-    assert "return rgb_;" in decoder
+    assert "const AVFrame* Decoder::avframe_at" in decoder
+    assert "return held_frame_;" in decoder
+    assert "if (!rgb_valid_) convert_held_frame();" in decoder
     assert "SWS_FAST_BILINEAR" in decoder
     assert "decoder_cache_limit_" in renderer
     assert "warm_shot" in renderer
@@ -47,7 +51,7 @@ def test_native_source_has_cached_frame_fast_path_and_lru():
     assert "#pragma omp parallel for" in effects
 
 
-def test_native_ffmpeg_default_uses_veryfast():
+def test_native_ffmpeg_default_command_has_safe_unresolved_auto_fallback():
     command = _raw_ffmpeg_command(
         output=Path("/tmp/out.mp4"),
         audio=None,
@@ -55,7 +59,20 @@ def test_native_ffmpeg_default_uses_veryfast():
         config=NativeRenderConfig(),
     )
     joined = " ".join(command)
+    assert "-c:v libx264" in joined
     assert "-preset veryfast" in joined
+
+
+def test_native_auto_encoder_prefers_usable_nvenc(monkeypatch):
+    monkeypatch.setattr(native_render, "_ffmpeg_encoder_usable", lambda encoder: encoder == "h264_nvenc")
+    assert _resolve_native_video_codec("auto") == "h264_nvenc"
+    assert _resolve_native_video_codec(None) == "h264_nvenc"
+    assert _resolve_native_video_codec("libx264") == "libx264"
+
+
+def test_native_auto_encoder_falls_back_to_x264(monkeypatch):
+    monkeypatch.setattr(native_render, "_ffmpeg_encoder_usable", lambda encoder: False)
+    assert _resolve_native_video_codec("auto") == "libx264"
 
 
 def test_native_nvenc_uses_cq_instead_of_crf():
@@ -72,12 +89,14 @@ def test_native_nvenc_uses_cq_instead_of_crf():
     assert "-crf" not in command
 
 
-def test_native_source_contains_vulkan_and_cuda_acceleration_paths():
+def test_native_source_contains_resident_vulkan_cuda_and_perf_paths():
     root = Path("src/tubeviz/native_src")
     decoder = (root / "src/decoder.cpp").read_text()
     renderer = (root / "src/renderer.cpp").read_text()
     gpu = (root / "src/gpu.cpp").read_text()
+    resident = (root / "src/resident_gpu.cpp").read_text()
     cmake = (root / "CMakeLists.txt").read_text()
+    native_py = Path("src/tubeviz/native_render.py").read_text()
 
     assert "avcodec_get_hw_config" in decoder
     assert "AV_HWDEVICE_TYPE_CUDA" in decoder
@@ -87,19 +106,31 @@ def test_native_source_contains_vulkan_and_cuda_acceleration_paths():
     assert "av_buffer_ref(shared)" in decoder
     assert "AV_PIX_FMT_FLAG_HWACCEL" in decoder
     assert "av_hwframe_transfer_data" in decoder
+
+    assert "ResidentGpuPipeline" in renderer
+    assert "render_shot_resident" in renderer
+    assert "resident_->last_hardware_map_failed()" in renderer
+    assert "software decode + GPU YUV upload" in renderer
+    assert 'PERF\\tframes=' in renderer
+
+    assert "pl_map_avframe_ex" in resident
+    assert "pl_unmap_avframe" in resident
+    assert "pl_tex_download" in resident
+    assert "history_mix" in resident
+    assert "pl_tex_blit" in resident
+
     assert "GpuPostProcessor" in renderer
     assert "apply_creative_temporal_effects" in renderer
     assert "previous_output_.swap(output)" in renderer
     assert "pl_vulkan_create" in gpu
     assert "pl_vulkan_create(impl_->log, nullptr)" in gpu
-    assert "pl_log_params(" not in gpu
-    assert "pl_vulkan_params(" not in gpu
     assert "pl_mpv_user_shader_parse" in gpu
     assert "pl_render_image" in gpu
     assert "params.dynamic_constants = false" in gpu
-    assert "pl_find_fmt(impl_->gpu, PL_FMT_UNORM, 3" in gpu
-    assert "rgb.swap(impl_->rgb_out)" in gpu
     assert "src/gpu.cpp" in cmake
+    assert "src/resident_gpu.cpp" in cmake
+    assert "src/libav_bridge.c" in cmake
+    assert 'line.startswith("PERF\\t")' in native_py
 
 
 def test_studio_render_forwards_native_acceleration_controls():
