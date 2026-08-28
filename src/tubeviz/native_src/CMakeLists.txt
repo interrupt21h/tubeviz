@@ -25,6 +25,7 @@ add_executable(tubeviz-native-render
     src/decoder.cpp
     src/effects.cpp
     src/gpu.cpp
+    src/resident_gpu.cpp
     src/renderer.cpp
 )
 
@@ -33,9 +34,9 @@ target_link_libraries(tubeviz-native-render PRIVATE PkgConfig::FFMPEG)
 if(OpenMP_CXX_FOUND)
     target_link_libraries(tubeviz-native-render PRIVATE OpenMP::OpenMP_CXX)
     target_compile_definitions(tubeviz-native-render PRIVATE TUBEVIZ_HAVE_OPENMP=1)
-    message(STATUS "OpenMP found: native pixel/effect loops will run in parallel")
+    message(STATUS "OpenMP found: native CPU fallback loops will run in parallel")
 else()
-    message(STATUS "OpenMP not found; native pixel/effect loops will be single-threaded")
+    message(STATUS "OpenMP not found; native CPU fallback loops will be single-threaded")
 endif()
 
 target_compile_options(tubeviz-native-render PRIVATE
@@ -45,9 +46,9 @@ target_compile_options(tubeviz-native-render PRIVATE
 if(PLACEBO_FOUND)
     target_link_libraries(tubeviz-native-render PRIVATE PkgConfig::PLACEBO)
     target_compile_definitions(tubeviz-native-render PRIVATE TUBEVIZ_HAVE_PLACEBO=1)
-    message(STATUS "libplacebo found: ${PLACEBO_VERSION}; Vulkan creative-FX acceleration enabled")
+    message(STATUS "libplacebo found: ${PLACEBO_VERSION}; resident Vulkan frame pipeline enabled")
 else()
-    message(STATUS "libplacebo not found; building Phase-1 native FFmpeg renderer")
+    message(STATUS "libplacebo not found; building native FFmpeg CPU fallback renderer")
 endif()
 
 install(TARGETS tubeviz-native-render RUNTIME DESTINATION bin)
