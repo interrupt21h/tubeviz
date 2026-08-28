@@ -34,7 +34,7 @@ jobs:
 
       - name: Run focused regression tests
         run: |
-          python -m pip install -e '.[test]' >/dev/null
+          python -m pip install -e . pytest >/dev/null
           pytest -q tests/test_effect_alignment.py tests/test_editing.py tests/test_render_optimization.py
 
       - name: Commit aligned effects
