@@ -20,7 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply final release patch
-        run: python .github/scripts/finalize_v042_release.py
+        run: |
+          python .github/scripts/finalize_v042_release.py
+          sed -i 's/?v=0\.41\.0/?v=0.42.0/g' src/tubeviz/static/gui.html
 
       - name: Install validation dependencies
         run: |
