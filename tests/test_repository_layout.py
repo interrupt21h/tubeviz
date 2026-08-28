@@ -21,7 +21,7 @@ def test_repository_has_apache_license_metadata():
 def test_readme_uses_render_output_as_hero():
     text = Path("README.md").read_text()
     assert text.startswith("# tubeviz\n")
-    assert "![tubeviz demo — Dream](dream.webp)" in text.split("## Sample videos", 1)[0]
+    assert "![tubeviz demo — Dream](media/tubeviz-sample.webp)" in text.split("## Sample videos", 1)[0]
     assert "![tubeviz Studio — Project](screenshots/screenshot-project.png)" in text
 
 
