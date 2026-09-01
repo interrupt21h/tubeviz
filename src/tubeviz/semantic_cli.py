@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 from .library import ClipLibrary
 from .semantic_compositing import SemanticAnalysisConfig, SemanticAssetStore, analyze_library_scene, iter_scene_ids
 from .semantic_director import SemanticDirectionInput, direct_semantic_effects
 from .semantic_materialize import SemanticEffect, materialize_scene
+from .semantic_pipeline import semanticize_timeline_file
 
 
 def _config(args: argparse.Namespace) -> SemanticAnalysisConfig:
@@ -103,6 +103,18 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_timeline(args: argparse.Namespace) -> int:
+    stats = semanticize_timeline_file(
+        args.timeline,
+        args.library,
+        args.output,
+        auto_index=args.auto_index,
+        force=args.force,
+    )
+    print(json.dumps({"output": args.output, **stats}, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tubeviz-semantic", description="Semantic object/depth analysis and materialization for Tubeviz")
     parser.add_argument("--library", default="./library")
@@ -135,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
     materialize.add_argument("--drop", type=float, default=0.0)
     materialize.add_argument("--build", type=float, default=0.0)
     materialize.set_defaults(func=_cmd_materialize)
+
+    timeline = sub.add_parser("timeline", help="Rewrite a directed timeline to use cached semantic materializations")
+    timeline.add_argument("timeline")
+    timeline.add_argument("--output", required=True)
+    timeline.add_argument("--auto-index", action="store_true")
+    timeline.add_argument("--force", action="store_true")
+    timeline.set_defaults(func=_cmd_timeline)
     return parser
 
 
