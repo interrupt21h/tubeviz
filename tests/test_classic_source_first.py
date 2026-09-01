@@ -169,3 +169,17 @@ def test_preview_filter_controller_loads_before_visualizer_and_exposes_effect_fa
     assert "window.fetch = async function tubevizPreviewFilteredFetch" in js
     assert "new Proxy" in js
     assert "originalTimeline" in js
+
+    # Keep the actual Response object standards-compatible; proxy only decoded
+    # timeline data. This avoids browser internal-slot failures during startup.
+    assert "response.clone().json()" in js
+    assert "Object.defineProperty(response, 'json'" in js
+    assert "new Proxy(response" not in js
+
+    # Timeline transport commands may arrive as soon as the preview server is
+    # reachable, before the module renderer has finished initializing. They must
+    # survive that startup window so the Studio Play button cannot lose a click.
+    assert "queuedTransportCommand" in js
+    assert "replayTransportCommand" in js
+    assert "tubeviz-preview-command" in js
+    assert "window.addEventListener('load'" in js
