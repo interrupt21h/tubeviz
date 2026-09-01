@@ -52,8 +52,14 @@ audio-ai = [
   "nnaudio==0.3.4",
 ]
 
+semantic-compositing = [
+  "torch>=2.5",
+  "huggingface-hub>=0.34,<2",
+]
+
 [project.scripts]
 tubeviz = "tubeviz.cli:main"
+tubeviz-semantic = "tubeviz.semantic_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tubeviz"]
