@@ -54,6 +54,8 @@ audio-ai = [
 
 semantic-compositing = [
   "torch>=2.5",
+  "transformers>=4.57,<6",
+  "Pillow>=10,<12",
   "huggingface-hub>=0.34,<2",
 ]
 
