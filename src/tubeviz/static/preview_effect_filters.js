@@ -81,6 +81,57 @@
   const proxyCache = new WeakMap();
   const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(channelName) : null;
 
+  // The Studio transport can become clickable as soon as the preview server is
+  // reachable, while the module renderer may still be evaluating WebGPU/source
+  // decoder setup. Capture commands arriving during that small startup window
+  // and replay the latest transport intent after window.load, when visualizer.js
+  // has installed its audio/WebSocket listeners. This keeps the Timeline Play
+  // button reliable without coupling the effect-filter controller to renderer
+  // internals.
+  let previewBridgeLoaded = document.readyState === 'complete';
+  let queuedTransportCommand = null;
+
+  function allowedStudioSource(event) {
+    if (!studioPreview || event.data?.type !== 'tubeviz-preview-command') return false;
+    const fromParent = window.parent && window.parent !== window && event.source === window.parent;
+    const fromOpener = window.opener && !window.opener.closed && event.source === window.opener;
+    return !!(fromParent || fromOpener);
+  }
+
+  async function replayTransportCommand(data) {
+    const audio = document.getElementById('audio');
+    if (!audio || !data) return;
+    const command = String(data.command || '');
+    if (command === 'seek' || command === 'sync') {
+      const duration = Math.max(0, Number(audio.duration || 0));
+      const requested = Number(data.position);
+      if (Number.isFinite(requested)) {
+        const position = Math.max(0, Math.min(duration || Number.MAX_SAFE_INTEGER, requested));
+        if (Math.abs(Number(audio.currentTime || 0) - position) > 0.06) audio.currentTime = position;
+      }
+    }
+    if (command === 'play' || (command === 'sync' && data.playing === true)) {
+      try { await audio.play(); }
+      catch (error) { console.warn('tubeviz Timeline preview play replay was blocked', error); }
+    } else if (command === 'pause' || (command === 'sync' && data.playing === false)) {
+      audio.pause();
+    }
+  }
+
+  if (studioPreview) {
+    window.addEventListener('message', event => {
+      if (!allowedStudioSource(event) || previewBridgeLoaded) return;
+      const command = String(event.data?.command || '');
+      if (['play', 'pause', 'seek', 'sync'].includes(command)) queuedTransportCommand = {...event.data};
+    }, true);
+    window.addEventListener('load', () => {
+      previewBridgeLoaded = true;
+      const pending = queuedTransportCommand;
+      queuedTransportCommand = null;
+      if (pending) setTimeout(() => void replayTransportCommand(pending), 0);
+    }, {once: true});
+  }
+
   function saveState() {
     try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch (_) {}
   }
@@ -259,23 +310,26 @@
     return proxy;
   }
 
+  // Keep fetch() itself standards-compatible. The first implementation returned
+  // a Proxy around the Response object; browser Response accessors use internal
+  // slots and proxy receivers can cause subtle runtime failures. Parse a clone,
+  // then override only this response instance's json() method with the dynamic
+  // timeline view. The original body/status/headers remain a genuine Response.
   window.fetch = async function tubevizPreviewFilteredFetch(input, init) {
     const response = await nativeFetch(input, init);
     if (!isTimelineRequest(input)) return response;
-
-    return new Proxy(response, {
-      get(target, property, receiver) {
-        if (property === 'json') {
-          return async () => {
-            const payload = await Response.prototype.json.call(target);
-            originalTimeline = payload;
-            return proxyFor(payload, ['timeline']);
-          };
-        }
-        const value = Reflect.get(target, property, receiver);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
+    try {
+      const payload = await response.clone().json();
+      originalTimeline = payload;
+      const timelineView = proxyFor(payload, ['timeline']);
+      Object.defineProperty(response, 'json', {
+        configurable: true,
+        value: async () => timelineView,
+      });
+    } catch (error) {
+      console.warn('tubeviz preview filters could not prepare timeline view', error);
+    }
+    return response;
   };
 
   function syncLegacySliders() {
