@@ -1,1 +1,0 @@
-Implementation note: semantic-compositing release notes are intentionally kept in this feature documentation until the feature is finalized, so the existing top-level CHANGELOG remains untouched during development.
