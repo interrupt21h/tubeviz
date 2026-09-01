@@ -1,0 +1,147 @@
+# SPDX-License-Identifier: Apache-2.0
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from .library import ClipLibrary
+from .semantic_compositing import SemanticAnalysisConfig, SemanticAssetStore, analyze_library_scene, iter_scene_ids
+from .semantic_director import SemanticDirectionInput, direct_semantic_effects
+from .semantic_materialize import SemanticEffect, materialize_scene
+
+
+def _config(args: argparse.Namespace) -> SemanticAnalysisConfig:
+    return SemanticAnalysisConfig(
+        sample_fps=args.sample_fps,
+        mask_backend=args.mask_backend,
+        depth_backend=args.depth_backend,
+        sam2_model=args.sam2_model,
+        video_depth_encoder=args.depth_encoder,
+        video_depth_checkpoint=args.depth_checkpoint,
+        device=args.device,
+    )
+
+
+def _add_analysis_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--sample-fps", type=float, default=12.0)
+    parser.add_argument("--mask-backend", choices=("auto", "sam2", "classical"), default="auto")
+    parser.add_argument("--depth-backend", choices=("auto", "video-depth-anything", "classical"), default="auto")
+    parser.add_argument("--sam2-model", default="facebook/sam2.1-hiera-small")
+    parser.add_argument("--depth-encoder", choices=("vits", "vitl"), default="vits")
+    parser.add_argument("--depth-checkpoint")
+    parser.add_argument("--device", default="auto")
+
+
+def _cmd_index(args: argparse.Namespace) -> int:
+    library = ClipLibrary(args.library)
+    library.initialize()
+    scene_ids = args.scene_id or list(iter_scene_ids(library, selected_only=args.selected_only))
+    failures = 0
+    for scene_id in scene_ids:
+        try:
+            result = analyze_library_scene(library, scene_id, _config(args), force=args.force)
+            print(json.dumps({
+                "scene_id": result.scene_id,
+                "mask_backend": result.mask_backend,
+                "depth_backend": result.depth_backend,
+                "entities": len(result.entities),
+                "frames": result.frame_count,
+            }, sort_keys=True))
+        except Exception as exc:
+            failures += 1
+            print(json.dumps({"scene_id": int(scene_id), "error": str(exc)}, sort_keys=True))
+            if args.fail_fast:
+                return 1
+    return 1 if failures and failures == len(scene_ids) else 0
+
+
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    store = SemanticAssetStore(args.library)
+    analysis = store.load(args.scene_id)
+    if analysis is None:
+        raise SystemExit(f"scene {args.scene_id} has not been semantically indexed")
+    print(json.dumps(analysis.to_json(), indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_materialize(args: argparse.Namespace) -> int:
+    store = SemanticAssetStore(args.library)
+    analysis = store.load(args.scene_id)
+    if analysis is None:
+        raise SystemExit(f"scene {args.scene_id} has not been semantically indexed")
+    if args.auto_direct:
+        effects = direct_semantic_effects(
+            analysis,
+            SemanticDirectionInput(
+                energy=args.energy,
+                bass_weight=args.bass,
+                percussive_ratio=args.percussion,
+                complexity=args.complexity,
+                drop_probability=args.drop,
+                build_probability=args.build,
+            ),
+        )
+    else:
+        effects = tuple(
+            SemanticEffect(
+                kind=kind,
+                amount=args.amount,
+                copies=args.copies,
+                parallax_px=args.parallax_px,
+            )
+            for kind in args.effect
+        )
+    if not effects:
+        raise SystemExit("no semantic effects were selected")
+    output = materialize_scene(args.library, analysis, args.output, effects)
+    print(json.dumps({
+        "output": str(output),
+        "scene_id": analysis.scene_id,
+        "effects": [effect.__dict__ for effect in effects],
+    }, indent=2, sort_keys=True))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="tubeviz-semantic", description="Semantic object/depth analysis and materialization for Tubeviz")
+    parser.add_argument("--library", default="./library")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    index = sub.add_parser("index", help="Generate cached masks and depth assets for library scenes")
+    index.add_argument("--scene-id", type=int, action="append")
+    index.add_argument("--selected-only", action="store_true")
+    index.add_argument("--force", action="store_true")
+    index.add_argument("--fail-fast", action="store_true")
+    _add_analysis_options(index)
+    index.set_defaults(func=_cmd_index)
+
+    inspect = sub.add_parser("inspect", help="Show cached semantic analysis for a scene")
+    inspect.add_argument("scene_id", type=int)
+    inspect.set_defaults(func=_cmd_inspect)
+
+    materialize = sub.add_parser("materialize", help="Render a semantic treatment to an intermediate video asset")
+    materialize.add_argument("scene_id", type=int)
+    materialize.add_argument("--output", required=True)
+    materialize.add_argument("--effect", action="append", choices=("subject_isolate", "subject_echo", "depth_parallax"), default=[])
+    materialize.add_argument("--amount", type=float, default=0.8)
+    materialize.add_argument("--copies", type=int, default=4)
+    materialize.add_argument("--parallax-px", type=float, default=44.0)
+    materialize.add_argument("--auto-direct", action="store_true")
+    materialize.add_argument("--energy", type=float, default=0.7)
+    materialize.add_argument("--bass", type=float, default=0.7)
+    materialize.add_argument("--percussion", type=float, default=0.6)
+    materialize.add_argument("--complexity", type=float, default=0.5)
+    materialize.add_argument("--drop", type=float, default=0.0)
+    materialize.add_argument("--build", type=float, default=0.0)
+    materialize.set_defaults(func=_cmd_materialize)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
