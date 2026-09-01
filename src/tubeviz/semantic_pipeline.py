@@ -9,6 +9,7 @@ from .library import ClipLibrary
 from .models import DirectedTimeline
 from .semantic_compositing import SemanticAssetStore, analyze_library_scene
 from .semantic_director import SemanticDirectionInput, direct_semantic_effects
+from .semantic_entities import EntityDecompositionConfig, decompose_scene_entities
 from .semantic_materialize import materialize_scene
 
 
@@ -20,6 +21,17 @@ def _materialization_key(selection, analysis, effects) -> str:
         "analysis_version": analysis.version,
         "mask_backend": analysis.mask_backend,
         "depth_backend": analysis.depth_backend,
+        "entities": [
+            {
+                "id": entity.entity_id,
+                "label": entity.label,
+                "role": entity.role,
+                "confidence": round(float(entity.confidence), 5),
+                "area": round(float(entity.mean_area), 5),
+                "motion": round(float(entity.motion), 5),
+            }
+            for entity in analysis.entities
+        ],
         "effects": [effect.__dict__ for effect in effects],
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:20]
@@ -31,29 +43,47 @@ def semanticize_timeline(
     *,
     auto_index: bool = False,
     force: bool = False,
+    multi_entity: bool = True,
+    entity_config: EntityDecompositionConfig | None = None,
 ) -> tuple[DirectedTimeline, dict[str, int]]:
-    """Materialize semantic treatments and return a normal renderable timeline.
-
-    The output remains a regular DirectedTimeline: renderers do not need ML runtimes,
-    mask formats, or special shader support. Semantic processing is an analysis/
-    materialization stage, matching Tubeviz's existing deterministic render contract.
-    """
+    """Materialize semantic treatments and return a normal renderable timeline."""
     store = SemanticAssetStore(library.root)
     materialized_root = library.root / "semantic_materialized"
     materialized_root.mkdir(parents=True, exist_ok=True)
     sections = {section.index: section for section in timeline.track.sections}
     updated = []
-    stats = {"shots": 0, "materialized": 0, "missing_analysis": 0, "no_effect": 0, "cached": 0}
+    stats = {
+        "shots": 0,
+        "materialized": 0,
+        "missing_analysis": 0,
+        "no_effect": 0,
+        "cached": 0,
+        "multi_entity_scenes": 0,
+    }
 
     for selection in timeline.scene_plan:
         stats["shots"] += 1
         analysis = store.load(selection.scene_id)
         if analysis is None and auto_index:
             analysis = analyze_library_scene(library, selection.scene_id, force=force)
+        if analysis is not None and multi_entity and (auto_index or len(analysis.entities) <= 1):
+            try:
+                analysis = decompose_scene_entities(
+                    library.root,
+                    analysis,
+                    entity_config or EntityDecompositionConfig(),
+                    force=force,
+                )
+            except (RuntimeError, ImportError, ModuleNotFoundError, OSError, ValueError):
+                # The original foreground/depth analysis remains valid when optional
+                # open-vocabulary detection or SAM 2 dependencies are unavailable.
+                pass
         if analysis is None:
             stats["missing_analysis"] += 1
             updated.append(selection)
             continue
+        if len(analysis.entities) > 1:
+            stats["multi_entity_scenes"] += 1
         section = sections.get(selection.section_index)
         if section is None:
             updated.append(selection)
@@ -93,7 +123,17 @@ def semanticize_timeline(
                 "analysis_version": analysis.version,
                 "mask_backend": analysis.mask_backend,
                 "depth_backend": analysis.depth_backend,
-                "entity_id": analysis.entities[0].entity_id if analysis.entities else None,
+                "entities": [
+                    {
+                        "id": entity.entity_id,
+                        "label": entity.label,
+                        "role": entity.role,
+                        "confidence": entity.confidence,
+                        "area": entity.mean_area,
+                        "motion": entity.motion,
+                    }
+                    for entity in analysis.entities
+                ],
                 "effects": [effect.__dict__ for effect in effects],
                 "cache_key": key,
             }
@@ -123,12 +163,21 @@ def semanticize_timeline_file(
     *,
     auto_index: bool = False,
     force: bool = False,
+    multi_entity: bool = True,
+    entity_config: EntityDecompositionConfig | None = None,
 ) -> dict[str, int]:
     timeline_path = Path(timeline_file)
     timeline = DirectedTimeline.model_validate_json(timeline_path.read_text(encoding="utf-8"))
     library = ClipLibrary(library_root)
     library.initialize()
-    updated, stats = semanticize_timeline(timeline, library, auto_index=auto_index, force=force)
+    updated, stats = semanticize_timeline(
+        timeline,
+        library,
+        auto_index=auto_index,
+        force=force,
+        multi_entity=multi_entity,
+        entity_config=entity_config,
+    )
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(updated.model_dump_json(indent=2) + "\n", encoding="utf-8")
