@@ -8,7 +8,7 @@ from typing import Iterable
 import cv2
 import numpy as np
 
-from .semantic_compositing import SceneSemanticAnalysis, SemanticAssetStore
+from .semantic_compositing import EntityTrack, SceneSemanticAnalysis, SemanticAssetStore
 
 
 @dataclass(frozen=True)
@@ -22,17 +22,48 @@ class SemanticEffect:
     parallax_px: float = 44.0
     background_blur: float = 0.0
     transition_softness: float = 0.08
+    target_entity: str | None = None
+    target_role: str | None = None
+    target_label: str | None = None
+    split_distance: float = 0.08
+    rotation_step: float = 5.0
 
 
-def _load_assets(library_root: str | Path, analysis: SceneSemanticAnalysis) -> tuple[np.ndarray, np.ndarray]:
+def _load_depth(library_root: str | Path, analysis: SceneSemanticAnalysis) -> np.ndarray:
     scene_dir = SemanticAssetStore(library_root).scene_dir(analysis.scene_id)
-    if not analysis.entities:
-        raise RuntimeError(f"scene {analysis.scene_id} has no semantic entities")
-    masks = np.load(scene_dir / analysis.entities[0].mask_file)["mask"].astype(np.float32) / 255.0
     if not analysis.depth_file:
         raise RuntimeError(f"scene {analysis.scene_id} has no depth asset")
-    depth = np.load(scene_dir / analysis.depth_file)["depth"].astype(np.float32)
-    return masks, depth
+    return np.load(scene_dir / analysis.depth_file)["depth"].astype(np.float32)
+
+
+def _matching_entities(analysis: SceneSemanticAnalysis, effect: SemanticEffect) -> tuple[EntityTrack, ...]:
+    entities = tuple(analysis.entities)
+    if effect.target_entity:
+        entities = tuple(item for item in entities if item.entity_id == effect.target_entity)
+    if effect.target_role:
+        entities = tuple(item for item in entities if item.role == effect.target_role)
+    if effect.target_label:
+        wanted = effect.target_label.lower().strip()
+        entities = tuple(item for item in entities if item.label.lower().strip() == wanted)
+    if entities:
+        return entities
+    return tuple(analysis.entities[:1])
+
+
+def _load_entity_masks(
+    library_root: str | Path,
+    analysis: SceneSemanticAnalysis,
+    effect: SemanticEffect,
+) -> list[tuple[EntityTrack, np.ndarray]]:
+    scene_dir = SemanticAssetStore(library_root).scene_dir(analysis.scene_id)
+    result: list[tuple[EntityTrack, np.ndarray]] = []
+    for entity in _matching_entities(analysis, effect):
+        path = scene_dir / entity.mask_file
+        if path.exists():
+            result.append((entity, np.load(path)["mask"].astype(np.float32) / 255.0))
+    if not result:
+        raise RuntimeError(f"scene {analysis.scene_id} has no matching semantic entity masks")
+    return result
 
 
 def _sample_asset(stack: np.ndarray, progress: float, size: tuple[int, int]) -> np.ndarray:
@@ -41,6 +72,16 @@ def _sample_asset(stack: np.ndarray, progress: float, size: tuple[int, int]) -> 
     if asset.shape[::-1] != size:
         asset = cv2.resize(asset, size, interpolation=cv2.INTER_LINEAR)
     return np.clip(asset, 0.0, 1.0)
+
+
+def _combined_mask(entity_assets: list[tuple[EntityTrack, np.ndarray]], progress: float, size: tuple[int, int]) -> np.ndarray:
+    masks = [_sample_asset(stack, progress, size) for _, stack in entity_assets]
+    if not masks:
+        return np.zeros((size[1], size[0]), dtype=np.float32)
+    result = masks[0].copy()
+    for mask in masks[1:]:
+        result = np.maximum(result, mask)
+    return np.clip(result, 0.0, 1.0)
 
 
 def _alpha_blend(base: np.ndarray, layer: np.ndarray, alpha: np.ndarray) -> np.ndarray:
@@ -84,7 +125,6 @@ def subject_echo(
     amount = float(np.clip(amount, 0.0, 1.0))
     h, w = frame.shape[:2]
     result = frame.copy()
-    subject = frame.copy()
     center = (w * 0.5, h * 0.5)
     for copy_index in range(max(1, copies), 0, -1):
         phase = copy_index / max(1, copies)
@@ -94,11 +134,56 @@ def subject_echo(
         dy = int(round(h * offset * np.sin(copy_index * 1.7)))
         matrix = cv2.getRotationMatrix2D(center, 0.0, scale)
         matrix[:, 2] += (dx, dy)
-        warped_subject = cv2.warpAffine(subject, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
+        warped_subject = cv2.warpAffine(frame, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
         warped_mask = cv2.warpAffine(mask, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         warped_subject = _shift_hue(warped_subject, hue_step * copy_index * amount)
         alpha = warped_mask * amount * (0.30 * (1.0 - 0.55 * phase))
         result = _alpha_blend(result, warped_subject, alpha)
+    return result
+
+
+def entity_split(
+    frame: np.ndarray,
+    entity_masks: list[tuple[EntityTrack, np.ndarray]],
+    amount: float,
+    *,
+    split_distance: float = 0.08,
+    rotation_step: float = 5.0,
+    hue_step: float = 22.0,
+) -> np.ndarray:
+    amount = float(np.clip(amount, 0.0, 1.0))
+    if amount <= 0.0:
+        return frame
+    h, w = frame.shape[:2]
+    result = frame.copy()
+    for index, (entity, mask) in enumerate(entity_masks):
+        angle = (index * 2.399963229728653) % (2.0 * np.pi)
+        distance = split_distance * amount * (0.65 + 0.35 * min(1.0, entity.motion + entity.mean_area * 2.0))
+        dx = int(round(np.cos(angle) * distance * w))
+        dy = int(round(np.sin(angle) * distance * h))
+        rotation = rotation_step * amount * ((index % 2) * 2 - 1)
+        cx = entity.mean_center[0] * w
+        cy = entity.mean_center[1] * h
+        matrix = cv2.getRotationMatrix2D((cx, cy), rotation, 1.0 + 0.025 * amount)
+        matrix[:, 2] += (dx, dy)
+        layer = cv2.warpAffine(frame, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT101)
+        layer = _shift_hue(layer, hue_step * amount * (index + 1))
+        moved_mask = cv2.warpAffine(mask, matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+        result = _alpha_blend(result, layer, moved_mask * (0.62 + 0.30 * amount))
+    return result
+
+
+def entity_outline(frame: np.ndarray, entity_masks: list[tuple[EntityTrack, np.ndarray]], amount: float) -> np.ndarray:
+    amount = float(np.clip(amount, 0.0, 1.0))
+    if amount <= 0.0:
+        return frame
+    result = frame.copy()
+    for index, (_, mask) in enumerate(entity_masks):
+        mask8 = (np.clip(mask, 0.0, 1.0) * 255).astype(np.uint8)
+        edges = cv2.morphologyEx(mask8, cv2.MORPH_GRADIENT, np.ones((3 + 2 * (index % 2), 3 + 2 * (index % 2)), np.uint8))
+        glow = cv2.GaussianBlur(edges.astype(np.float32) / 255.0, (0, 0), 2.0 + 4.0 * amount)
+        tinted = _shift_hue(frame, 55.0 + index * 47.0)
+        result = _alpha_blend(result, tinted, glow * (0.45 + 0.45 * amount))
     return result
 
 
@@ -127,20 +212,37 @@ def mask_transition(frame_a: np.ndarray, frame_b: np.ndarray, mask: np.ndarray, 
     return _alpha_blend(frame_a, frame_b, alpha)
 
 
-def apply_effect(frame: np.ndarray, mask: np.ndarray, depth: np.ndarray, effect: SemanticEffect) -> np.ndarray:
+def _apply_effect(
+    frame: np.ndarray,
+    entity_masks: list[tuple[EntityTrack, np.ndarray]],
+    depth: np.ndarray,
+    effect: SemanticEffect,
+) -> np.ndarray:
     kind = effect.kind.replace("-", "_").lower()
+    combined = np.maximum.reduce([mask for _, mask in entity_masks])
     if kind == "subject_isolate":
-        return subject_isolate(frame, mask, effect.amount, effect.background_blur)
+        return subject_isolate(frame, combined, effect.amount, effect.background_blur)
     if kind == "subject_echo":
         return subject_echo(
             frame,
-            mask,
+            combined,
             effect.amount,
             copies=effect.copies,
             spacing=effect.spacing,
             scale_step=effect.scale_step,
             hue_step=effect.hue_step,
         )
+    if kind == "entity_split":
+        return entity_split(
+            frame,
+            entity_masks,
+            effect.amount,
+            split_distance=effect.split_distance,
+            rotation_step=effect.rotation_step,
+            hue_step=effect.hue_step,
+        )
+    if kind == "entity_outline":
+        return entity_outline(frame, entity_masks, effect.amount)
     if kind == "depth_parallax":
         return depth_parallax(frame, depth, effect.amount, effect.parallax_px)
     raise ValueError(f"unknown semantic effect: {effect.kind}")
@@ -155,7 +257,7 @@ def materialize_scene(
     fps: float | None = None,
     codec: str = "mp4v",
 ) -> Path:
-    masks, depths = _load_assets(library_root, analysis)
+    depths = _load_depth(library_root, analysis)
     cap = cv2.VideoCapture(analysis.source_file)
     if not cap.isOpened():
         raise RuntimeError(f"unable to open {analysis.source_file}")
@@ -173,6 +275,7 @@ def materialize_scene(
         cap.release()
         raise RuntimeError(f"unable to create output video: {output}")
     effects = tuple(effects)
+    assets = {effect: _load_entity_masks(library_root, analysis, effect) for effect in effects}
     frame_no = start_frame
     duration_frames = max(1, end_frame - start_frame)
     while frame_no < end_frame:
@@ -180,11 +283,14 @@ def materialize_scene(
         if not ok:
             break
         progress = (frame_no - start_frame) / max(1, duration_frames - 1)
-        mask = _sample_asset(masks, progress, (width, height))
         depth = _sample_asset(depths, progress, (width, height))
         rendered = frame
         for effect in effects:
-            rendered = apply_effect(rendered, mask, depth, effect)
+            entity_masks = [
+                (entity, _sample_asset(stack, progress, (width, height)))
+                for entity, stack in assets[effect]
+            ]
+            rendered = _apply_effect(rendered, entity_masks, depth, effect)
         writer.write(rendered)
         frame_no += 1
     writer.release()
@@ -199,9 +305,12 @@ def materialize_mask_transition(
     output: str | Path,
     *,
     softness: float = 0.08,
+    target_role: str | None = None,
+    target_label: str | None = None,
     codec: str = "mp4v",
 ) -> Path:
-    masks, _ = _load_assets(library_root, analysis)
+    selector = SemanticEffect(kind="mask_transition", target_role=target_role, target_label=target_label)
+    entity_assets = _load_entity_masks(library_root, analysis, selector)
     first = cv2.VideoCapture(analysis.source_file)
     second = cv2.VideoCapture(str(incoming_file))
     if not first.isOpened() or not second.isOpened():
@@ -229,7 +338,7 @@ def materialize_mask_transition(
         if b.shape[:2] != (height, width):
             b = cv2.resize(b, (width, height), interpolation=cv2.INTER_CUBIC)
         progress = index / max(1, count - 1)
-        mask = _sample_asset(masks, progress, (width, height))
+        mask = _combined_mask(entity_assets, progress, (width, height))
         writer.write(mask_transition(a, b, mask, progress, softness))
         index += 1
     writer.release(); first.release(); second.release()
