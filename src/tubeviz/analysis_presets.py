@@ -13,6 +13,98 @@ from typing import Any
 
 
 ANALYSIS_PRESETS: dict[str, dict[str, Any]] = {
+    "classic-032": {
+        "label": "Classic 0.32",
+        "description": (
+            "Source-faithful v0.32 editing grammar: the mature beat/semantic/beam "
+            "editor, historical Studio transform/composition levels, sparse vector "
+            "punctuation, and no post-v0.32 semantic creative renderer. Leave the "
+            "whole-song LLM director off for the strict historical baseline."
+        ),
+        "parameters": {
+            # Match the v0.32.1 Studio-facing edit controls rather than merely
+            # reducing current effects. The modern renderer and reliability fixes
+            # remain available; only the treatment grammar is restored.
+            "section_bars": 8,
+            "max_video_layers": 3,
+            "transform_intensity": 1.20,
+            "creative_intensity": 0.00,
+            "effect_density": 0.00,
+            "temporal_persistence": 0.00,
+            # <= 1.10 deliberately selects the historical flow/luma/strips
+            # composition vocabulary in the current planner.
+            "composition_diversity": 0.70,
+            "hero_frequency": 0.00,
+            "composition_intensity": 1.20,
+            "target_unique_clips": 0,
+            "novelty_weight": 0.65,
+            "visual_match_weight": 1.25,
+            "transition_weight": 0.70,
+            "trajectory_strength": 0.85,
+            "anticipation_seconds": 12.0,
+            "sequence_lookahead": 5,
+            "sequence_beam_width": 6,
+            "effect_compatibility_weight": 0.60,
+            "preference_weight": 0.35,
+            "vector_intensity": 1.00,
+            "codec_glitch": "off",
+            "codec_glitch_intensity": 0.65,
+            "min_shot_seconds": 0.65,
+            "max_shot_seconds": 6.0,
+            "source_excerpt_max_seconds": 5.0,
+            "audio_visual_match_weight": 1.10,
+            "audio_ai_window": 8.0,
+            "audio_ai_hop": 4.0,
+            "choreography": True,
+            "dynamic_shots": True,
+            "rhythm_alignment": True,
+            "creative_effects": False,
+            "vector_effects": True,
+        },
+    },
+    "source-first": {
+        "label": "Source First",
+        "description": (
+            "Modern Tubeviz intelligence with footage-first treatment: full semantic "
+            "and phrase-aware editing, restrained transforms/layers, sparse creative "
+            "punctuation, short temporal memory, and rare hero moments."
+        ),
+        "parameters": {
+            "section_bars": 8,
+            "max_video_layers": 3,
+            "transform_intensity": 0.90,
+            "creative_intensity": 0.35,
+            "effect_density": 0.15,
+            "temporal_persistence": 0.10,
+            "composition_diversity": 0.25,
+            "hero_frequency": 0.10,
+            "composition_intensity": 0.65,
+            "target_unique_clips": 0,
+            "novelty_weight": 0.65,
+            "visual_match_weight": 1.30,
+            "transition_weight": 0.80,
+            "trajectory_strength": 0.85,
+            "anticipation_seconds": 12.0,
+            "sequence_lookahead": 5,
+            "sequence_beam_width": 6,
+            "effect_compatibility_weight": 0.65,
+            "preference_weight": 0.35,
+            "vector_intensity": 0.65,
+            "codec_glitch": "off",
+            "codec_glitch_intensity": 0.45,
+            "min_shot_seconds": 0.75,
+            "max_shot_seconds": 6.0,
+            "source_excerpt_max_seconds": 5.0,
+            "audio_visual_match_weight": 1.10,
+            "audio_ai_window": 8.0,
+            "audio_ai_hop": 4.0,
+            "choreography": True,
+            "dynamic_shots": True,
+            "rhythm_alignment": True,
+            "creative_effects": True,
+            "vector_effects": True,
+        },
+    },
     "balanced": {
         "label": "Balanced",
         "description": "General-purpose musical edit with moderate motion, layering, variety, and phrase-aware pacing.",
