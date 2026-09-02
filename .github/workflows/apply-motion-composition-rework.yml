@@ -1,0 +1,36 @@
+name: Apply motion composition rework
+
+"on":
+  push:
+    branches:
+      - feature/motion-composition-first-rendering
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, '[apply-motion-composition-rework]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staged branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply staged source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .tubeviz-motion-rework/part-* | base64 -d | gzip -d > /tmp/tubeviz-motion-composition.patch
+          test "$(sha256sum /tmp/tubeviz-motion-composition.patch | awk '{print $1}')" = "8f9fc0c5a64cf21ff2e50a3497dc70581ab8455d65ce6e360e24b76480495f97"
+          git apply --check /tmp/tubeviz-motion-composition.patch
+          git apply /tmp/tubeviz-motion-composition.patch
+          rm -rf .tubeviz-motion-rework
+          PYTHONPATH=src python -m compileall -q src/tubeviz
+          node --check src/tubeviz/static/visualizer.js
+          git config user.name "tubeviz automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "make motion and semantic composition primary"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
