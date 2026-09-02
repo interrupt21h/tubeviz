@@ -2,6 +2,13 @@
 
 ## Visual direction
 
+- Make **motion and semantic composition** the default visual grammar: companion clips are ranked for motion coherence, direction, section fit, and semantic richness before they are layered through the organic subject-aware mask.
+- Remove obsolete Phase-1 creative/vector raster fallback cues now that native manifests carry the real CREATIVE and VEC plans, preventing native effects from being applied a second time as ripple/vortex/chroma pulses.
+- Stop translating ordinary `video_edit_slice` timing cues into native `slice_recursion`; this was a direct source of unintended horizontal striping.
+- Enforce one dominant creative accent family per normal shot, reserving rare two-family combinations, kaleidoscope, mosaic, datamosh, slit-scan, and related destructive treatments for explicitly high-density/experimental output.
+- Concentrate source-relative hue/saturation ramps at section entries, builds, peaks, and motif returns so color acts as a psychedelic bridge/emphasis rather than a permanent grade.
+- Make visible vector geometry sparse emphasis and reserve hidden vector deformation for high-intensity vector treatment instead of applying it underneath ordinary footage.
+
 - Restore pronounced, source-relative musical hue travel and within-shot color ramps without returning to fixed vibe LUT targets that caused track-wide purple/magenta drift.
 - Treat directed color as intentional choreography in browser and native source-fidelity paths so palette protection no longer cancels the authored hue movement.
 - Promote multi-source `flow` composition as a constructive visual treatment again, using semantic focal points, subject radius, and foreground-preservation confidence to shape organic masks around meaningful subjects.

@@ -50,7 +50,7 @@ def test_source_first_keeps_modern_renderer_but_restores_visual_dynamic_range() 
     assert p["effect_density"] <= 0.20
     assert p["temporal_persistence"] <= 0.15
     assert p["hero_frequency"] <= 0.15
-    assert 0.85 <= p["composition_intensity"] <= 1.05
+    assert 1.15 <= p["composition_intensity"] <= 1.35
     assert p["composition_diversity"] <= 0.35
     assert p["vector_intensity"] <= 0.70
     assert p["choreography"] is True

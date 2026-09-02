@@ -28,10 +28,12 @@ def test_presets_separate_density_from_intensity():
 
 
 def test_high_composition_diversity_admits_dynamic_modes():
-    modes={_composition_mode('peak',.9,i,3,'heavy',diversity=1.8) for i in range(12)}
+    modes={_composition_mode('peak',.9,i,3,'heavy',diversity=1.9) for i in range(12)}
     assert modes.intersection({'split','mosaic','swap'})
     default={_composition_mode('peak',.9,i,3,'heavy') for i in range(6)}
     assert default <= {'flow','luma','strips'}
+    source_first={_composition_mode('peak',.9,i,3,'heavy',diversity=.25) for i in range(8)}
+    assert source_first <= {'flow','luma'}
 
 
 def test_temporal_persistence_is_controlled_and_disableable():
@@ -104,8 +106,21 @@ def test_source_first_defaults_keep_destructive_post_fx_sparse():
         t = plan_transform(sec, sel, TransformConfig(intensity=1.2))
         active += sum(getattr(t, name) > .01 for name in names)
         total += len(names)
-    assert active < total * .30
+    assert active < total * .08
 
+
+
+def test_normal_density_disables_kaleidoscope_and_band_artifacts():
+    sec = _section(ai_direction=None)
+    for i in range(80):
+        sel=_selection(i).model_copy(update={'scene_id':i+700,'source_id':f'clean-{i}','motif_id':str(i)})
+        t=plan_transform(sec,sel,TransformConfig(intensity=1.4,density=.45))
+        assert t.kaleidoscope == 0
+        assert t.slit_scan == 0
+        assert t.datamosh == 0
+        assert t.block_displace == 0
+        assert t.vhs_tracking == 0
+        assert t.slice_recursion == 0
 
 def test_hero_moment_promotes_compatible_accents_without_global_enablement():
     sec = _section(ai_direction=None)
@@ -119,7 +134,9 @@ def test_hero_moment_promotes_compatible_accents_without_global_enablement():
         hero = plan_transform(sec, hero_sel, TransformConfig(intensity=1.25, density=.55))
         normal_total += sum(getattr(normal, name) for name in names)
         hero_total += sum(getattr(hero, name) for name in names)
-    assert hero_total > normal_total
+    # Hero promotion at normal density must not punch through the destructive
+    # threshold merely because an effect is compatible with the hero vocabulary.
+    assert hero_total == normal_total == 0.0
 
 
 def test_high_energy_and_experimental_raise_effect_budget_over_balanced():

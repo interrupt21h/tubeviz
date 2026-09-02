@@ -17,7 +17,7 @@ def test_browser_vectors_use_connected_contours_and_local_flow():
 def test_director_limits_visible_vector_stacking():
     source = Path("src/tubeviz/visual_director.py").read_text()
     assert "visible_budget" in source
-    assert "clean_shot" in source
+    assert "visible_probability" in source
     assert "visible + hidden" in source
     assert '"local_optical_flow"' in source
     assert '"connected_video_contours"' in source

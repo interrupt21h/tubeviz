@@ -261,6 +261,7 @@ def _vector_effects(
     family: str,
     occurrence: int,
     shot_index: int,
+    density: float = 1.0,
 ) -> list[VectorEffect]:
     """Schedule a sparse, coherent vector scene graph.
 
@@ -451,12 +452,17 @@ def _vector_effects(
         # gate can make it the one visible family for that shot.
         candidates.insert(1 if section.label == "peak" and candidates else 0, portal)
 
-    # Roughly one quarter of non-peak shots stay completely clean; low-energy
-    # passages stay clean even more often. Visual contrast makes vector moments
-    # feel intentional rather than like a permanent filter.
-    clean_period = 2 if energy < .45 else 4
-    clean_shot = section.label != "peak" and ((seed // 97 + shot_index) % clean_period == 0)
-    visible_budget = 0 if clean_shot else (2 if section.label == "peak" and energy > .76 else 1)
+    # Visible vector geometry is emphasis, not wallpaper. Vector intensity controls
+    # occurrence as well as amplitude: ordinary presets expose a vector family on
+    # only a minority of shots, while Experimental can be more assertive.
+    density = max(0.0, min(2.5, float(density)))
+    visible_probability = min(0.72, .08 + .22 * min(1.0, density) + .16 * max(0.0, density - 1.0))
+    if section.label == "peak":
+        visible_probability = min(.82, visible_probability + .14)
+    elif energy < .45:
+        visible_probability *= .60
+    visible_gate = _seed_unit(seed, 83)
+    visible_budget = 1 if visible_gate < visible_probability else 0
 
     # A motif glyph is a callback punctuation mark, not a continuously visible
     # logo. Permit it only at the first shot of a returning motif/peak.
@@ -472,7 +478,7 @@ def _vector_effects(
 
     # Invisible deformation can remain active underneath clean footage because
     # it doesn't create a forest of lines.
-    if energy > .45 and (motion > .12 or family in {"hyper", "liquid", "fracture"}):
+    if density >= 1.35 and energy > .55 and (motion > .18 or family in {"hyper", "liquid", "fracture"}):
         transplant = _clamp(.06 + .30 * energy + .20 * motion)
         hidden.append(VectorEffect(
             kind="motion_transplant",
@@ -487,7 +493,7 @@ def _vector_effects(
             automation={"amount": _curve((0, .03), (.58, .22 * transplant), (.93, transplant), (1, .07))},
         ))
 
-    if energy > .30:
+    if density >= 1.55 and energy > .45:
         disp = _clamp(.06 + .31 * energy + .16 * section.bass_weight)
         hidden.append(VectorEffect(
             kind="vector_displacement",
@@ -630,12 +636,19 @@ def build_visual_direction(
         + occurrence * 1009
     ) & 0x7FFFFFFF
 
-    # Color movement is a primary musical treatment again.  It remains relative to
-    # each source palette, so a vibe describes the *direction and size of an arc*
-    # rather than a fixed destination hue shared by unrelated clips.  Most shots
-    # participate, while occasional neutral shots create visual headroom.
+    # Color movement is a bridge/emphasis treatment, not an always-on LUT. It
+    # remains source-relative, with section entries/builds/peaks receiving the
+    # strongest probability and ordinary development shots retaining headroom.
     color_gate = _seed_unit(shot_seed, 31)
-    color_active = color_gate >= (0.32 if section.label != "peak" else 0.14)
+    color_probability = {
+        "ambient": .26, "breakdown": .28, "drive": .38,
+        "build": .70, "peak": .72,
+    }.get(section.label, .36)
+    if shot_index_in_section == 0:
+        color_probability = min(.90, color_probability + .18)
+    if occurrence > 1:
+        color_probability = min(.90, color_probability + .08)
+    color_active = color_gate < color_probability
     vibe_arc = _VIBE_HUE_ARC.get(section.vibe, _VIBE_HUE_ARC["neutral"]) if color_active else 0.0
     energy_gain = .56 + .44 * _clamp(section.energy)
     if section.label == "build":
@@ -673,7 +686,7 @@ def build_visual_direction(
         saturation_scale = 1.0
     contrast_scale = _clamp(.94 + .32 * section.energy + .10 * section.noisiness, .82, 1.46)
     brightness_scale = _clamp(.91 + .15 * section.brightness + .06 * section.energy, .82, 1.24)
-    chroma = _clamp((.008 + .065 * section.energy + .045 * section.noisiness) * (1.0 if color_active else .22), 0.0, .16)
+    chroma = _clamp((.002 + .018 * section.energy + .012 * section.noisiness) * (1.0 if color_active else .0), 0.0, .045)
     family = _EFFECT_FAMILY.get(section.vibe, "cinematic")
     if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
         if section.audio_semantic_confidence >= .18:
@@ -712,19 +725,20 @@ def build_visual_direction(
     tension = _clamp(tension * (1.0 - .30*withhold) + .22*trajectory["density"] + .18*impact)
     saturation_scale = _clamp(saturation_scale * (1.0 - .18*withhold) * (1.0 + .14*impact), .50, 2.0)
     contrast_scale = _clamp(contrast_scale * (1.0 + .18*trajectory["contrast"] + .22*impact - .16*withhold), .70, 2.0)
-    # Continuous curves rather than on/off effect selection.
+    # Continuous color curves remain first-class. The older generic raster
+    # automation (warp/flow/bloom/feedback/chroma/glitch) is now experimental
+    # only: the native/browser creative plan already owns those treatments, and
+    # driving both layers simultaneously was a major source of effect stacking.
+    directed_fx_scale = _clamp((effect_density - .85) / .80, 0.0, 1.0)
     automation = {
-        # Restore the old sense of a color *ramp*: the shot starts close to its
-        # source palette, travels decisively through the phrase, and arrives at
-        # the planned hue instead of holding a nearly-static grade.
         "hue": _curve((0, hue_shift*.22), (.38, hue_shift*.52), (.76, hue_shift*.90), (1, hue_shift)),
         "saturation": _curve((0, 1.0), (.42, 1.0 + (saturation_scale-1.0)*.55), (.78, saturation_scale), (1, saturation_scale*(1.0+.06*tension))),
-        "spectral_warp": _curve((0, .08*e), (.65, .20+.36*tension), (.92, .58*tension), (1, .12*e)),
-        "chromatic": _curve((0, .01*e), (.72, .12*chroma), (.94, .42*chroma), (1, .035*e)),
-        "feedback": _curve((0, .05), (.55, .08+.32*(1-section.percussive_ratio)), (1, .04+.18*e)),
-        "flow": _curve((0, .08+.12*e), (.5, .18+.34*e), (1, .10+.20*e)),
-        "glitch": _curve((0, .02), (.72, .08+.28*section.noisiness), (.96, .55*section.noisiness), (1, .04)),
-        "bloom": _curve((0, .02), (.75, .08+.22*e), (.96, .55*e), (1, .08)),
+        "spectral_warp": _curve((0, 0.0), (.65, (.12+.22*tension)*directed_fx_scale), (.92, .34*tension*directed_fx_scale), (1, 0.0)),
+        "chromatic": _curve((0, 0.0), (.72, .10*chroma*directed_fx_scale), (.94, .32*chroma*directed_fx_scale), (1, 0.0)),
+        "feedback": _curve((0, 0.0), (.55, (.05+.18*(1-section.percussive_ratio))*directed_fx_scale), (1, 0.0)),
+        "flow": _curve((0, 0.0), (.5, (.10+.22*e)*directed_fx_scale), (1, 0.0)),
+        "glitch": _curve((0, 0.0), (.72, 0.0), (.96, .28*section.noisiness*directed_fx_scale), (1, 0.0)),
+        "bloom": _curve((0, 0.0), (.75, (.06+.16*e)*directed_fx_scale), (.96, .34*e*directed_fx_scale), (1, 0.0)),
     }
 
     if withhold > .0:
@@ -732,7 +746,7 @@ def build_visual_direction(
             automation[key] = [(p, _clamp(v * (1.0 - .62*withhold))) for p, v in automation[key]]
     if impact > .0:
         for key, gain in (("spectral_warp", .36), ("chromatic", .18), ("glitch", .34), ("bloom", .50)):
-            automation[key] = [(p, _clamp(v + gain*impact*(1.0-abs(.16-p)))) for p, v in automation[key]]
+            automation[key] = [(p, _clamp(v + gain*impact*directed_fx_scale*(1.0-abs(.16-p)))) for p, v in automation[key]]
 
     ai_vector_scale = section.ai_direction.vector_intensity if section.ai_direction is not None else 1.0
     ai_codec_scale = section.ai_direction.codec_intensity if section.ai_direction is not None else 1.0
@@ -787,6 +801,7 @@ def build_visual_direction(
                     family=family,
                     occurrence=occurrence,
                     shot_index=shot_index_in_section,
+                    density=vector_intensity,
                 )
             ]
             if vector_enabled and vector_intensity > 0
