@@ -98,9 +98,16 @@ def test_semantic_profile_protects_recognizable_subject_and_moves_saliency():
     d = direction(c, section())
     assert d.creative.subject_preserve > .5
     assert d.creative.camera_target_x == profile.saliency_x
-    assert d.creative.flow_warp > 0
-    assert d.creative.temporal_echo > 0
-    assert d.creative.depth_parallax > 0
+    families = [
+        d.creative.flow_warp > 0,
+        d.creative.temporal_echo > 0 or d.creative.flow_trails > 0,
+        d.creative.depth_parallax > 0,
+        d.creative.feedback > 0,
+        d.creative.texture_bloom > 0 or d.creative.texture_streaks > 0,
+        d.creative.palette_strength > 0,
+        d.creative.local_symmetry > 0,
+    ]
+    assert sum(families) <= 1
     assert "camera_energy" in d.creative.automation
 
 
@@ -131,11 +138,10 @@ def test_creative_effects_can_be_disabled_without_losing_semantic_metadata():
 def test_creative_intensity_scales_treatment():
     c = candidate()
     s = section()
-    low = direction(c, s, creative_intensity=.35).creative
-    high = direction(c, s, creative_intensity=1.6).creative
-    assert high.flow_warp > low.flow_warp
+    low = direction(c, s, creative_intensity=.35, effect_density=2.0, preferred_effects=["optical-flow warp"]).creative
+    high = direction(c, s, creative_intensity=1.6, effect_density=2.0, preferred_effects=["optical-flow warp"]).creative
+    assert high.flow_warp > low.flow_warp > 0
     assert high.camera_energy > low.camera_energy
-    assert high.feedback > low.feedback
     assert high.source_fidelity < low.source_fidelity
     assert .66 <= high.source_fidelity <= .985
     assert high.automation["flow_warp"][1][1] > low.automation["flow_warp"][1][1]
@@ -261,9 +267,8 @@ def test_most_shots_use_visible_source_relative_color_ramps_with_neutral_headroo
     assert pronounced >= int(active * .60)
 
 
-def test_local_symmetry_and_palette_treatment_are_sparse():
-    symmetry = 0
-    palette = 0
+def test_local_symmetry_is_experimental_and_palette_treatment_stays_sparse():
+    normal_symmetry = experimental_symmetry = palette = 0
     from dataclasses import replace
     for scene_id in range(1, 101):
         c = replace(
@@ -271,11 +276,14 @@ def test_local_symmetry_and_palette_treatment_are_sparse():
             title="abstract architecture",
             ai_description={"summary": "abstract architecture and geometric light", "semantic_tags": ["abstract", "architecture"]},
         )
-        creative = direction(c, section(index=2), creative_intensity=1.0).creative
-        symmetry += creative.local_symmetry > 0
-        palette += creative.palette_strength > 0
-    assert 0 < symmetry < 18
-    assert 10 < palette < 45
+        normal = direction(c, section(index=2), creative_intensity=1.0, effect_density=.35).creative
+        experimental = direction(c, section(index=2), creative_intensity=1.0, effect_density=1.8).creative
+        normal_symmetry += normal.local_symmetry > 0
+        experimental_symmetry += experimental.local_symmetry > 0
+        palette += normal.palette_strength > 0
+    assert normal_symmetry == 0
+    assert 0 < experimental_symmetry < 25
+    assert palette < 45
 
 
 def test_browser_mask_and_symmetry_grammars_are_not_universal_circles():
@@ -337,5 +345,26 @@ def test_color_choreography_keeps_some_neutral_shots_for_headroom():
             assert d.color.saturation_scale == 1.0
         else:
             active += 1
-    assert active > clean
-    assert 15 <= clean <= 55
+    assert clean > active * .35
+    assert 30 <= clean <= 95
+
+
+def test_color_ramps_are_concentrated_on_builds_peaks_and_section_entries():
+    def count(label, shot_index):
+        total = 0
+        for scene_id in range(1, 121):
+            d = build_visual_direction(
+                candidate(scene_id), section(index=5, label=label),
+                rhythm_alignment=.8, source_playback_rate=1.0, transition=.5,
+                occurrence=1, shot_index_in_section=shot_index,
+            )
+            total += abs(d.color.hue_shift_degrees) > 1e-9
+        return total
+
+    drive = count("drive", 2)
+    build = count("build", 2)
+    peak = count("peak", 2)
+    entry = count("drive", 0)
+    assert build > drive
+    assert peak > drive
+    assert entry > drive

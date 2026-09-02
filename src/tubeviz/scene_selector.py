@@ -51,16 +51,16 @@ class SceneSelectorConfig:
     transforms: bool = True
     transform_intensity: float = 1.0
     creative_effects: bool = True
-    creative_intensity: float = 1.0
+    creative_intensity: float = 0.70
     # Intensity controls amplitude; density controls how often punctuation is
     # scheduled.  The latter deliberately restores dynamic range without making
     # every active effect stronger.
-    effect_density: float = 0.65
-    temporal_persistence: float = 0.75
-    hero_frequency: float = 0.90
+    effect_density: float = 0.30
+    temporal_persistence: float = 0.25
+    hero_frequency: float = 0.35
     max_video_layers: int = 3
-    composition_intensity: float = 1.0
-    composition_diversity: float = 0.70
+    composition_intensity: float = 1.35
+    composition_diversity: float = 0.35
     selection_seed: int = 0
     selection_variation: float = 0.30
     # Novelty-aware editing. target_unique_clips=0 means auto.
@@ -79,7 +79,7 @@ class SceneSelectorConfig:
     rhythm_alignment: bool = True
     visual_auto_index: bool = True
     vector_effects: bool = True
-    vector_intensity: float = 1.0
+    vector_intensity: float = 0.65
     codec_glitch_mode: str = "off"
     codec_glitch_intensity: float = 0.65
     audio_visual_match_weight: float = 1.10
@@ -485,10 +485,23 @@ def _composition_mode(
         "split_reveal": "split", "flowing_mosaic": "mosaic", "source_swap": "swap",
     }
     preferred = aliases.get(preferred, preferred)
+    # Flow/luma are the normal constructive vocabulary. Mosaic/swap and strip
+    # grammars are intentionally experimental because they can overpower source
+    # motion and, in native output, visually resemble corruption.
+    diversity = max(0.0, min(2.5, float(diversity)))
+    if preferred == "mosaic" and diversity < 1.65:
+        preferred = "flow"
+    if preferred == "swap" and diversity < 1.35:
+        preferred = "flow"
+    if preferred == "strips" and diversity < 0.70:
+        preferred = "flow"
     if preferred in {"flow", "luma", "strips", "split", "mosaic", "swap"}:
         return preferred
 
-    diversity = max(0.0, min(2.5, float(diversity)))
+    if diversity < 0.55:
+        if label in {"ambient", "breakdown", "build"}:
+            return "flow"
+        return "luma" if section_index % 3 == 1 else "flow"
     if diversity <= 1.10:
         if label in {"ambient", "breakdown"} or vibe in {"ambient", "hypnotic", "dark"}:
             return "flow"
@@ -502,25 +515,60 @@ def _composition_mode(
 
     # Dynamic modes are deterministic and phrase-sensitive rather than random.
     if label in {"ambient", "breakdown"}:
-        choices = ("flow", "luma", "mosaic") if diversity >= 1.45 else ("flow", "luma")
+        choices = ("flow", "luma", "mosaic") if diversity >= 1.75 else ("flow", "luma")
     elif label == "build":
         choices = ("strips", "split", "flow", "swap")
     elif label == "peak":
-        choices = ("split", "mosaic", "swap", "strips", "luma", "flow")
+        choices = ("split", "swap", "strips", "luma", "flow") + (("mosaic",) if diversity >= 1.75 else ())
     elif label == "drive":
         choices = ("swap", "strips", "luma", "split", "flow")
     else:
         choices = ("flow", "luma", "strips", "split")
-    if diversity < 1.45:
+    if diversity < 1.65:
         choices = tuple(mode for mode in choices if mode not in {"mosaic", "swap"}) or ("flow",)
     index = int(section_index + round(energy * 7.0) + round(diversity * 3.0)) % len(choices)
     return choices[index]
+
+
+def _composition_affinity(primary: SceneCandidate, candidate: SceneCandidate, section) -> float:
+    """Score whether two semantically valid scenes will move well together."""
+    pf = primary.visual_features or {}
+    cf = candidate.visual_features or {}
+    pm = max(0.0, min(1.0, float(pf.get("motion", 0.0))))
+    cm = max(0.0, min(1.0, float(cf.get("motion", 0.0))))
+    motion_coherence = 1.0 - abs(pm - cm)
+    px, py = float(pf.get("motion_direction_x", 0.0)), float(pf.get("motion_direction_y", 0.0))
+    cx, cy = float(cf.get("motion_direction_x", 0.0)), float(cf.get("motion_direction_y", 0.0))
+    plen, clen = (px * px + py * py) ** .5, (cx * cx + cy * cy) ** .5
+    direction_coherence = .5
+    if plen > .08 and clen > .08:
+        direction_coherence = .5 + .5 * max(
+            -1.0, min(1.0, (px * cx + py * cy) / (plen * clen))
+        )
+
+    ai = candidate.ai_description or {}
+    richness_items = 0
+    for key in ("semantic_tags", "foreground", "background", "moods"):
+        value = ai.get(key)
+        if isinstance(value, list):
+            richness_items += min(5, len(value))
+    richness = min(
+        1.0,
+        richness_items / 10.0 + (0.18 if str(ai.get("summary") or "").strip() else 0.0),
+    )
+    return (
+        0.95 * visual_match_score(candidate, section)
+        + 0.52 * motion_coherence
+        + 0.28 * direction_coherence
+        + 0.34 * richness
+    )
 
 
 def _choose_companions(
     candidates: list[SceneCandidate],
     *,
     selected: SceneCandidate,
+    section,
     target_duration: float,
     salt: str,
     semantic_scores: dict[int, float],
@@ -542,6 +590,7 @@ def _choose_companions(
         c.clip_id == selected.clip_id,
         c.clip_id in recent_clips,
         c.scene_id in recent_scene_ids,
+        -_composition_affinity(selected, c, section),
         *_scene_rank(
             c, target_duration, f"{salt}:layer", semantic_scores.get(c.scene_id, 0.0),
             selection_seed=selection_seed,
@@ -1105,6 +1154,7 @@ def build_scene_plan(
             companions = _choose_companions(
                 candidates,
                 selected=selected,
+                section=section,
                 target_duration=shot_duration,
                 salt=f"composite:{salt}",
                 semantic_scores=semantic_scores,
@@ -1119,7 +1169,7 @@ def build_scene_plan(
             )
 
             composite_layers = []
-            blend_modes = ("screen", "multiply", "overlay", "lighten")
+            blend_modes = ("normal", "screen", "overlay")
             for layer_index, companion in enumerate(companions):
                 recent_scenes.append(companion.scene_id)
                 recent_clips.append(companion.clip_id)
@@ -1145,10 +1195,10 @@ def build_scene_plan(
                         end=companion_end,
                         duration=companion_end - companion_start,
                         opacity=min(
-                            0.88,
-                            0.40
-                            + section.energy * 0.34
-                            + layer_index * 0.05,
+                            0.72,
+                            0.34
+                            + section.energy * 0.28
+                            + layer_index * 0.04,
                         ),
                         blend_mode=blend_modes[
                             (shot_ordinal + layer_index) % len(blend_modes)
@@ -1275,75 +1325,12 @@ def attach_scene_plan(
                 parameters=selection.model_dump(mode="json"),
             )
         )
-        # Export the most important continuous-director curves as timed pulses
-        # too. The browser consumes the full curves directly; the native
-        # renderer consumes these cue-compatible approximations.
-        shot_end = (
-            plan[index + 1].time
-            if index + 1 < len(plan)
-            else timeline.track.duration
-        )
+        # Creative envelopes and vector scene-graph primitives are native
+        # manifest data now (CREATIVE/VEC). Do not also emit the old Phase-1
+        # raster fallback cues: doing so double-applied the same idea as extra
+        # ripple/vortex/chroma pulses after the real treatment was rendered.
+        shot_end = plan[index + 1].time if index + 1 < len(plan) else timeline.track.duration
         span = max(0.05, shot_end - selection.time)
-        cue_map = {
-            "spectral_warp": "video_edit_ripple",
-            "chromatic": "video_edit_chroma_delay",
-            "flow": "video_edit_vortex",
-            "bloom": "energy_bloom",
-        }
-        for curve_name, action in cue_map.items():
-            points = selection.direction.automation.get(curve_name, [])
-            if not points:
-                continue
-            peak_progress, peak_amount = max(points, key=lambda point: point[1])
-            if peak_amount <= 0.025:
-                continue
-            non_scene_cues.append(
-                VisualCue(
-                    time=min(shot_end - 1e-4, selection.time + span * peak_progress),
-                    action=action,
-                    parameters={"amount": float(peak_amount), "directed": True},
-                )
-            )
-        # Native Phase-1 fallback for vector scene-graph effects. Browser
-        # rendering consumes the full vector primitives; native rendering gets
-        # musically equivalent raster deformation pulses until the GPU/vector
-        # native path reaches feature parity.
-        vector_fallback = {
-            "contours": "harmonic_warp",
-            "semantic_outline": "harmonic_warp",
-            "flow_ribbons": "video_edit_vortex",
-            "flow_particles": "video_edit_vortex",
-            "vector_echo": "video_edit_chroma_delay",
-            "perspective_grid": "video_edit_ripple",
-            "delaunay_fracture": "video_edit_ripple",
-            "voronoi": "video_edit_chroma_delay",
-            "portal": "energy_bloom",
-            "motif_glyph": "harmonic_warp",
-            "motion_transplant": "video_edit_vortex",
-            "vector_displacement": "video_edit_ripple",
-        }
-        for effect in selection.direction.vector_effects:
-            action = vector_fallback.get(effect.kind)
-            if not action:
-                continue
-            points = effect.automation.get("amount", [])
-            if points:
-                peak_progress, peak_amount = max(points, key=lambda point: point[1])
-            else:
-                peak_progress, peak_amount = 0.75, effect.amount
-            if peak_amount <= 0.025:
-                continue
-            non_scene_cues.append(
-                VisualCue(
-                    time=min(shot_end - 1e-4, selection.time + span * peak_progress),
-                    action=action,
-                    parameters={
-                        "amount": float(min(1.0, peak_amount * 0.65)),
-                        "directed": True,
-                        "vector_fallback": effect.kind,
-                    },
-                )
-            )
         codec_fallback = {
             "datamosh": "video_edit_datamosh",
             "mv_feedback": "video_edit_datamosh",
@@ -1409,5 +1396,5 @@ def attach_scene_plan(
     )
     return attach_edit_plan(
         result,
-        EditConfig(enabled=cfg.transforms, intensity=cfg.transform_intensity),
+        EditConfig(enabled=cfg.transforms, intensity=cfg.transform_intensity, density=cfg.effect_density),
     )

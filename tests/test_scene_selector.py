@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from pathlib import Path
 
-from tubeviz.library import ClipLibrary, sha256_file
+from tubeviz.library import ClipLibrary, SceneCandidate, sha256_file
 from tubeviz.models import (
     DirectedTimeline,
     MotifOccurrence,
@@ -9,7 +9,7 @@ from tubeviz.models import (
     Section,
     TrackAnalysis,
 )
-from tubeviz.scene_selector import SceneSelectorConfig, attach_scene_plan, build_scene_plan
+from tubeviz.scene_selector import SceneSelectorConfig, _choose_companions, attach_scene_plan, build_scene_plan
 
 
 def _ready_clip(library: ClipLibrary, source_id: str, term: str, durations: list[float]) -> int:
@@ -100,6 +100,34 @@ def test_scene_plan_adds_distinct_composite_video_layers(tmp_path: Path):
     )
     assert len(plan) == 3
     build = plan[1]
-    assert build.composition_mode in {"flow", "luma", "strips"}
+    assert build.composition_mode in {"flow", "luma"}
     assert len(build.layers) >= 1
     assert len({build.clip_id, *(layer.clip_id for layer in build.layers)}) >= 2
+
+
+def test_companion_selection_prefers_motion_coherence_and_semantic_richness():
+    def scene(scene_id, clip_id, motion, dx, tags):
+        return SceneCandidate(
+            scene_id=scene_id, clip_id=clip_id, scene_index=0,
+            start_time=0, end_time=8, duration=8, thumbnail_path=None,
+            source_id=f"s{scene_id}", title="rich footage", description="",
+            channel=None, normalized_path=f"normalized/{scene_id}.mp4", term="x", term_rank=1,
+            visual_features={"motion":motion,"motion_direction_x":dx,"motion_direction_y":0,"complexity":.55,"visual_entropy":.5},
+            ai_description={"summary":"semantic subject in motion","semantic_tags":tags,"foreground":["person"],"background":["city"]},
+        )
+    primary=scene(1,1,.72,.8,["person","city"])
+    coherent=scene(2,2,.68,.75,["person","vehicle","city","night"])
+    static=scene(3,3,.05,-.8,[])
+    section=Section(index=0,start=0,end=8,energy=.75,label="drive",brightness=.5,onset_density=.5)
+    chosen=_choose_companions(
+        [primary,static,coherent],selected=primary,section=section,target_duration=4,
+        salt="motion-composite",semantic_scores={2:1.0,3:1.0},recent_scene_ids=set(),count=1,
+    )
+    assert [item.scene_id for item in chosen] == [2]
+
+
+def test_direct_creative_and_vector_plans_are_not_duplicated_as_raster_cues():
+    source=Path("src/tubeviz/scene_selector.py").read_text()
+    assert "vector_fallback =" not in source
+    assert '"spectral_warp": "video_edit_ripple"' not in source
+    assert "Creative envelopes and vector scene-graph primitives are native" in source

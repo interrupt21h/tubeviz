@@ -208,7 +208,7 @@ def _cue_fields(cue) -> tuple[float, str, float, float, float, float, int, int, 
         "video_edit_edge", "video_edit_slitscan", "video_edit_echo",
         "video_edit_corridor", "video_edit_mask", "video_edit_solarize",
         "video_edit_datamosh", "video_edit_motion_trails", "video_edit_slice_recursion",
-        "video_edit_slice", "video_edit_freeze", "video_edit_switch",
+        "video_edit_freeze", "video_edit_switch",
         "energy_bloom",
         "harmonic_warp",
     }

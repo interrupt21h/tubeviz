@@ -93,7 +93,11 @@ void ReactiveState::apply(const Cue& cue) {
     else if (cue.action == "video_edit_solarize") solarize = std::max(solarize, cue.amount);
     else if (cue.action == "video_edit_datamosh") datamosh = std::max(datamosh, cue.amount);
     else if (cue.action == "video_edit_motion_trails") motion_trails = std::max(motion_trails, cue.amount);
-    else if (cue.action == "video_edit_slice_recursion" || cue.action == "video_edit_slice") slice_recursion = std::max(slice_recursion, cue.amount);
+    // video_edit_slice is an editorial/source-time operation in the browser.
+    // Mapping it to slice_recursion here turned ordinary onset edits into
+    // horizontal striping in final MP4 renders. Only the explicitly destructive
+    // recursion cue is allowed to drive the raster band effect.
+    else if (cue.action == "video_edit_slice_recursion") slice_recursion = std::max(slice_recursion, cue.amount);
     else if (cue.action == "video_edit_freeze") freeze = std::max(freeze, cue.amount > 0.0 ? cue.amount : 0.65);
     else if (cue.action == "video_edit_switch") switcher = std::max(switcher, cue.amount > 0.0 ? cue.amount : 0.65);
 }
