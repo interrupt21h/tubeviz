@@ -40,6 +40,13 @@ double curve4(const double (&values)[4], double p) {
     return std::clamp(values[i] * (1.0 - f) + values[i + 1] * f, 0.0, 1.0);
 }
 
+double directed_color_ramp(double p) {
+    p = std::clamp(p, 0.0, 1.0);
+    if (p <= .38) return .22 + (p/.38) * (.52-.22);
+    if (p <= .76) return .52 + ((p-.38)/.38) * (.90-.52);
+    return .90 + ((p-.76)/.24) * .10;
+}
+
 double hero_env(const CreativeEffect& c, double p) {
     if (c.hero_kind.empty() || c.hero_amount <= 0.0 || p < c.hero_start || p > c.hero_end) return 0.0;
     const double q = (p - c.hero_start) / std::max(1e-6, c.hero_end - c.hero_start);
@@ -138,8 +145,8 @@ constexpr std::string_view kLayerShader = R"SHADER(
 0.0
 //!PARAM hue
 //!TYPE DYNAMIC float
-//!MINIMUM -0.5
-//!MAXIMUM 0.5
+//!MINIMUM -1.75
+//!MAXIMUM 1.75
 0.0
 //!PARAM scanlines
 //!TYPE DYNAMIC float
@@ -208,6 +215,26 @@ constexpr std::string_view kLayerShader = R"SHADER(
 //!TYPE DYNAMIC float
 //!MINIMUM 0.0
 //!MAXIMUM 3.0
+0.0
+//!PARAM target_x
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.5
+//!PARAM target_y
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
+0.5
+//!PARAM subject_radius
+//!TYPE DYNAMIC float
+//!MINIMUM 0.05
+//!MAXIMUM 0.6
+0.28
+//!PARAM subject_preserve
+//!TYPE DYNAMIC float
+//!MINIMUM 0.0
+//!MAXIMUM 1.0
 0.0
 
 //!HOOK MAIN
@@ -287,8 +314,17 @@ vec4 hook() {
     if (layer_index>.5) {
         if (comp_mode<.5) mask=0.0;
         else if (comp_mode<1.5) {
-            float w=.5+.5*sin(HOOKED_pos.y*17.0+HOOKED_pos.x*6.0+phase*3.0+layer_index*2.1);
-            mask=smoothstep(.46,.58,w);
+            vec2 target=clamp(vec2(target_x,target_y),vec2(.08),vec2(.92));
+            float preserve=clamp(subject_preserve,0.0,1.0);
+            vec2 orbit=vec2(.15+.025*layer_index,.13+.018*layer_index)*(1.0-.42*preserve);
+            vec2 center=clamp(target+vec2(sin(phase*.40+layer_index*1.71),cos(phase*.34-layer_index*1.19))*orbit,vec2(.06),vec2(.94));
+            vec2 radii=vec2(.24+.030*layer_index,.27+.026*layer_index);
+            vec2 p=(HOOKED_pos-center)/radii;float angle=atan(p.y,p.x),r=length(p);
+            float boundary=.90+.14*sin(angle*3.0+phase*.37+layer_index)+.09*sin(angle*5.0-phase*.29+layer_index*1.7)+.055*sin(angle*2.0+phase*.61);
+            mask=1.0-smoothstep(boundary*.80,boundary*1.10,r);
+            vec2 sp=(HOOKED_pos-target)/vec2(max(.05,subject_radius),max(.05,subject_radius)*1.18);
+            float subject=1.0-smoothstep(.72,1.14,length(sp));
+            mask*=1.0-subject*preserve*.80;
         } else if (comp_mode<2.5) {
             mask=smoothstep(.34,.66,y);
         } else if (comp_mode<3.5) {
@@ -377,8 +413,8 @@ constexpr std::string_view kFinalShader = R"SHADER(
 0.0
 //!PARAM hue
 //!TYPE DYNAMIC float
-//!MINIMUM -0.5
-//!MAXIMUM 0.5
+//!MINIMUM -1.75
+//!MAXIMUM 1.75
 0.0
 //!PARAM saturation
 //!TYPE DYNAMIC float
@@ -662,7 +698,7 @@ vec4 hook(){
     if(strobe>.03)c.rgb*=mix(1.0,.15+.85*step(.5,fract(phase*3.0)),clamp(strobe,0.0,1.0));
     if(shutter>.03)c.rgb*=mix(1.0,.55+.45*step(.35,fract(phase*1.7)),clamp(shutter,0.0,1.0));
 
-    float yo=dot(c.rgb,vec3(.299,.587,.114)),io=dot(c.rgb,vec3(.596,-.274,-.322)),qo=dot(c.rgb,vec3(.211,-.523,.312));float ir=dot(reference.rgb,vec3(.596,-.274,-.322)),qr=dot(reference.rgb,vec3(.211,-.523,.312));float f=clamp(source_fidelity*.82,0.0,.92);io=mix(io,ir,f);qo=mix(qo,qr,f);c.rgb=vec3(yo+.956*io+.621*qo,yo-.272*io-.647*qo,yo-1.106*io+1.703*qo);
+    float yo=dot(c.rgb,vec3(.299,.587,.114)),io=dot(c.rgb,vec3(.596,-.274,-.322)),qo=dot(c.rgb,vec3(.211,-.523,.312));float ir=dot(reference.rgb,vec3(.596,-.274,-.322)),qr=dot(reference.rgb,vec3(.211,-.523,.312));float hue_intent=clamp(abs(hue)/1.22,0.0,1.0);float f=clamp(source_fidelity*(.82-.64*hue_intent),0.0,.92);io=mix(io,ir,f);qo=mix(qo,qr,f);c.rgb=vec3(yo+.956*io+.621*qo,yo-.272*io-.647*qo,yo-1.106*io+1.703*qo);
     c.rgb=clamp(c.rgb,0.0,1.0);c.a=out_alpha;return c;
 }
 )SHADER";
@@ -892,6 +928,10 @@ bool ResidentGpuPipeline::render(
         set_param(impl_->layer_hook, "comp_progress", static_cast<float>(progress));
         set_param(impl_->layer_hook, "phase", static_cast<float>(phase));
         set_param(impl_->layer_hook, "blend_mode", static_cast<float>(blend_id(layers[i].blend_mode)));
+        set_param(impl_->layer_hook, "target_x", static_cast<float>(creative.target_x));
+        set_param(impl_->layer_hook, "target_y", static_cast<float>(creative.target_y));
+        set_param(impl_->layer_hook, "subject_radius", static_cast<float>(creative.subject_radius));
+        set_param(impl_->layer_hook, "subject_preserve", static_cast<float>(creative.subject_preserve));
 
         pl_render_params params = pl_render_fast_params;
         params.hooks = layer_hooks;
@@ -949,8 +989,9 @@ bool ResidentGpuPipeline::render(
     set_param(impl_->final_hook, "drift_y", static_cast<float>(creative.drift_y));
     set_param(impl_->final_hook, "progress", static_cast<float>(progress));
     set_param(impl_->final_hook, "phase", static_cast<float>(phase));
-    set_param(impl_->final_hook, "hue", static_cast<float>(creative.color_hue_shift * 3.14159265358979323846 / 180.0));
-    set_param(impl_->final_hook, "saturation", static_cast<float>(creative.color_saturation));
+    const double color_ramp = directed_color_ramp(progress);
+    set_param(impl_->final_hook, "hue", static_cast<float>(std::clamp(creative.color_hue_shift, -95.0, 95.0) * color_ramp * 3.14159265358979323846 / 180.0));
+    set_param(impl_->final_hook, "saturation", static_cast<float>(1.0 + (creative.color_saturation-1.0)*color_ramp));
     set_param(impl_->final_hook, "contrast", static_cast<float>(creative.color_contrast));
     set_param(impl_->final_hook, "brightness", static_cast<float>(creative.color_brightness));
     set_param(impl_->final_hook, "palette_r", creative.palette_r / 255.0f);

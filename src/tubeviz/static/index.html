@@ -58,6 +58,18 @@
   </div>
 </div>
 <script src="/static/preview_clock.js?v=0.44.0-previewfix2"></script>
+<!-- Loaded before the module renderer so /api/timeline can be wrapped by
+     preview-only effect filters without mutating the directed timeline JSON. -->
+<script src="/static/preview_effect_filters.js?v=0.45.0-previewfilters2"></script>
 <script type="module" src="/static/visualizer.js?v=0.44.0-effects1"></script>
+<script>
+  // Module scripts finish before window.load. Re-apply the current filter state
+  // then so persisted/popout state reaches the renderer's legacy live-FX sliders
+  // after visualizer.js has attached its input listeners.
+  window.addEventListener('load', () => {
+    const controller = window.TubevizPreviewEffects;
+    if (controller) controller.setState(controller.getState());
+  }, {once:true});
+</script>
 </body>
 </html>

@@ -218,11 +218,15 @@ def test_music_color_bias_stays_source_relative_and_bounded():
     c = candidate()
     c.visual_features["dominant_hue"] = 118
     d = direction(c, section(vibe="euphoric"))
-    assert -28.0 <= d.color.hue_shift_degrees <= 28.0
+    assert -95.0 <= d.color.hue_shift_degrees <= 95.0
     delta = ((d.color.target_hue - 118 + 180) % 360) - 180
-    assert abs(delta) <= 28.0
-    # Euphoric used to force an absolute 315-degree target regardless of source.
-    assert abs(((d.color.target_hue - 315 + 180) % 360) - 180) > 80
+    assert abs(delta - d.color.hue_shift_degrees) < 1e-6
+
+    # Euphoric is an arc relative to the source, not an absolute 315-degree LUT.
+    shifted = candidate(2)
+    shifted.visual_features["dominant_hue"] = 42
+    d2 = direction(shifted, section(vibe="euphoric"))
+    assert abs(((d2.color.target_hue - d.color.target_hue + 180) % 360) - 180) > 60
 
 
 def test_browser_rgb_fx_use_real_channels_not_fixed_hue_overlays():
@@ -239,9 +243,10 @@ def test_browser_rgb_fx_use_real_channels_not_fixed_hue_overlays():
     assert "source_fidelity" in js
 
 
-def test_most_shots_keep_source_hue_exactly_and_active_grades_are_small():
+def test_most_shots_use_visible_source_relative_color_ramps_with_neutral_headroom():
     clean = 0
     active = 0
+    pronounced = 0
     for scene_id in range(1, 81):
         c = candidate(scene_id)
         d = direction(c, section(index=3), creative_intensity=1.0)
@@ -249,9 +254,11 @@ def test_most_shots_keep_source_hue_exactly_and_active_grades_are_small():
             clean += 1
         else:
             active += 1
-            assert abs(d.color.hue_shift_degrees) <= 14.0
-    assert clean > active
-    assert active > 0
+            pronounced += abs(d.color.hue_shift_degrees) > 20.0
+            assert abs(d.color.hue_shift_degrees) <= 95.0
+            assert d.automation["hue"][-1][1] == d.color.hue_shift_degrees
+    assert active > clean > 0
+    assert pronounced >= int(active * .60)
 
 
 def test_local_symmetry_and_palette_treatment_are_sparse():
@@ -319,12 +326,16 @@ def test_bass_beat_warp_has_no_concentric_ring_mask():
     assert "state.beat_amount()" in reactive_block
 
 
-def test_clean_color_shots_are_neutral_more_than_eighty_percent_of_time():
+def test_color_choreography_keeps_some_neutral_shots_for_headroom():
     clean = 0
+    active = 0
     for scene_id in range(1, 121):
         c = candidate(scene_id)
         d = direction(c, section(index=4, label="develop"), creative_intensity=1.0)
         if abs(d.color.hue_shift_degrees) < 1e-9:
             clean += 1
             assert d.color.saturation_scale == 1.0
-    assert clean >= 90
+        else:
+            active += 1
+    assert active > clean
+    assert 15 <= clean <= 55

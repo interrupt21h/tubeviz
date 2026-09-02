@@ -121,3 +121,17 @@ def test_legacy_circular_and_color_fx_are_sparse_across_shots():
     assert kaleidos < count * .15
     assert solarized == 0  # euphoric is not an analog/fractured solarize family
     assert hue_shifted < count * .40
+
+
+def test_low_effect_density_suppresses_artifact_legacy_fx_without_disabling_optical_grammar():
+    sec = _section(energy=.9, label="peak")
+    sel = _selection(index=11, occurrence=2)
+    clean = plan_transform(sec, sel, TransformConfig(intensity=1.0, density=0.0))
+    artifact_fields = (
+        "glitch", "noise", "pixelate", "rgb_split", "scanlines", "posterize",
+        "edge", "strobe", "shutter", "slit_scan", "solarize", "datamosh",
+        "block_displace", "chroma_delay", "vhs_tracking", "slice_recursion",
+    )
+    assert all(getattr(clean, name) == 0 for name in artifact_fields)
+    # Geometric/optical treatment is intentionally controlled separately.
+    assert clean.zoom > 1.0

@@ -485,11 +485,14 @@ function rectFor(mode,index,count){
   return{x:0,y:0,w:width,h:height};
 }
 function organicMask(target,index,strength=1){
-  const t=phase*.55+index*2.13;
-  const cx=width*(.50+.27*Math.sin(t*.73+index));
-  const cy=height*(.50+.23*Math.cos(t*.61-index*.7));
-  const rx=width*(.20+.12*strength+.045*Math.sin(t*.91));
-  const ry=height*(.22+.10*strength+.055*Math.cos(t*.79));
+  const t=phase*.55+index*2.13,creative=activeScene?.direction?.creative??{},focus=creativeTarget();
+  const preserve=Math.max(0,Math.min(1,Number(creative.subject_preserve??0)));
+  const orbitX=width*(.15+.035*index)*(1-.42*preserve),orbitY=height*(.13+.025*index)*(1-.42*preserve);
+  const cx=Math.max(width*.08,Math.min(width*.92,focus.x+Math.sin(t*.73+index)*orbitX));
+  const cy=Math.max(height*.08,Math.min(height*.92,focus.y+Math.cos(t*.61-index*.7)*orbitY));
+  const semanticRadius=Math.max(1,focus.r);
+  const rx=Math.max(semanticRadius*(1.02+.24*strength),width*(.18+.11*strength+.045*Math.sin(t*.91)));
+  const ry=Math.max(semanticRadius*(1.10+.20*strength),height*(.20+.09*strength+.055*Math.cos(t*.79)));
   const wobble=.22+.08*Math.sin(t*.43);
   target.beginPath();
   target.moveTo(cx+rx,cy);
@@ -498,11 +501,19 @@ function organicMask(target,index,strength=1){
   target.bezierCurveTo(cx-rx*.92,cy+ry*.78,cx-rx*.18,cy+ry*1.08,cx,cy+ry);
   target.bezierCurveTo(cx+rx*.70,cy+ry*.88,cx+rx*1.07,cy+ry*.25,cx+rx,cy);
   target.closePath();
+  // Strongly identified foreground subjects punch a soft hole through the
+  // companion mask, so the second source blooms around people/faces/text rather
+  // than simply covering them.  With no semantic confidence this is the old
+  // organic procedural mask.
+  if(preserve>.12){
+    const holeR=semanticRadius*(.58+.30*preserve);
+    target.ellipse(focus.x,focus.y,holeR,holeR*1.18,0,0,Math.PI*2);
+  }
 }
 function drawFlowLayer(state,index,alpha){
   fx.save();
   organicMask(fx,index,.65+.2*index);
-  fx.clip();
+  fx.clip('evenodd');
   const blend=index%2?'screen':'overlay';
   drawLayer(fx,state,{x:0,y:0,w:width,h:height},alpha*(.38+.10*Math.sin(phase+index)),blend);
   fx.restore();
@@ -585,12 +596,15 @@ function sourceFidelityAlpha(){
   if(!activeScene)return 0;
   const fidelity=sourceFidelity();if(fidelity<=.60)return 0;
   const color=activeScene?.direction?.color??{},creative=activeScene?.direction?.creative??{};
-  const hue=Math.abs(Number(automationValue('hue',color.hue_shift_degrees??0)))/14;
+  const hue=Math.max(0,Math.min(1,Math.abs(Number(automationValue('hue',color.hue_shift_degrees??0)))/70));
   const palette=Math.max(0,Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)));
   const hero=(typeof heroEnvelope==='function')?heroEnvelope():0;
   const base=Math.max(0,Math.min(1,(fidelity-.60)/.40));
-  const intentional=Math.max(0,Math.min(1,.48*hue+.35*palette+.42*hero));
-  return Math.max(0,Math.min(.94,base*(.94-.48*intentional)));
+  // Source fidelity protects against accidental palette collapse, not intentional
+  // musical color.  Strong directed hue ramps therefore release most of the
+  // chroma anchor while neutral shots remain source-faithful.
+  const intentional=Math.max(0,Math.min(1,.78*hue+.25*palette+.28*hero));
+  return Math.max(0,Math.min(.92,base*(.90-.72*intentional)));
 }
 function applySourceColorFidelity(){
   const alpha=sourceFidelityAlpha();if(alpha<=.025)return;
@@ -1239,22 +1253,25 @@ function directedColorValues(){
   const dir=activeScene?.direction;if(!dir)return{hue:0,sat:1,contrast:1,brightness:1};
   const color=dir.color??{},rawHue=automationValue('hue',color.hue_shift_degrees??0);
   if(legacyTreatment()&&sceneSparseGate(31)<.70)return{hue:0,sat:1,contrast:1,brightness:1};
-  const hue=Math.max(-14,Math.min(14,Number(rawHue)));
+  const hue=Math.max(-95,Math.min(95,Number(rawHue)));
   const sat=Math.max(.65,Math.min(1.55,Number(automationValue('saturation',color.saturation_scale??1))));
   const contrast=Math.max(.72,Math.min(1.55,Number(color.contrast_scale??1))),brightness=Math.max(.72,Math.min(1.35,Number(color.brightness_scale??1)));
   return{hue,sat,contrast,brightness};
 }
+function directedColorIntent({hue,sat,contrast,brightness}){
+  return Math.max(0,Math.min(1,Math.abs(hue)/72+.42*Math.abs(sat-1)+.24*Math.abs(contrast-1)+.16*Math.abs(brightness-1)));
+}
 function applyDirectedColor(){
   if(!activeScene?.direction)return;
-  const {hue,sat,contrast,brightness}=directedColorValues();
+  const values=directedColorValues(),{hue,sat,contrast,brightness}=values;
   if(Math.abs(hue)<.2&&Math.abs(sat-1)<.01&&Math.abs(contrast-1)<.01&&Math.abs(brightness-1)<.01)return;
-  const room=Math.max(0,1-sourceFidelity());
-  if(room<.005)return;
   snapshot();
   fx.save();
   if('filter'in fx)fx.filter=`hue-rotate(${hue}deg) saturate(${sat}) contrast(${contrast}) brightness(${brightness})`;
-  const colorDelta=Math.min(1,Math.abs(hue)/14+.45*Math.abs(sat-1)+.30*Math.abs(contrast-1)+.20*Math.abs(brightness-1));
-  fx.globalAlpha=Math.min(.24,.015+room*(.34+.26*colorDelta));
+  const colorIntent=directedColorIntent(values);
+  // Directed color is constructive choreography, not destructive FX.  Give it
+  // enough opacity to read as a real ramp even when source fidelity is high.
+  fx.globalAlpha=Math.max(.22,Math.min(.86,.26+.58*colorIntent+.08*(1-sourceFidelity())));
   fx.globalCompositeOperation='source-over';
   fx.drawImage(scratch,0,0,width,height);
   fx.restore();
@@ -1855,7 +1872,7 @@ function applyPostFx(){
   let gpuFinished=false;
   if(browserGpuFinalizer?.failed)disableBrowserGpu(browserGpuFinalizer.failureReason||'GPU worker failed');
   if(browserGpuFinalizer){
-    const dc=directedColorValues(),room=Math.max(0,1-sourceFidelity()),colorMix=Math.min(.24,.015+room*.36);
+    const dc=directedColorValues(),colorMix=Math.min(1,.18+.82*directedColorIntent(dc));
     const palette=(activeScene?.direction?.color?.palette??[])[0];
     const target=creativeTarget(),heroA=heroEnvelope(),heroKind=creative.hero_kind??'';
     const heroTemporal=['subject_echo','flow_melt','time_prism'].includes(heroKind)?heroA:0;
@@ -1908,14 +1925,15 @@ function gpuDirectPostParams(){
   const slitScan=Math.min(1,((t.slit_scan??0)+slitScanFx)*motion),frameEcho=Math.min(1,((t.frame_echo??0)+echoFx)*trails),corridor=Math.min(1,((t.mirror_corridor??0)+corridorFx)*motion),datamosh=Math.min(1,((t.datamosh??0)+datamoshFx+codec.datamosh)*glitchScale),blocks=Math.min(1,((t.block_displace??0)+codec.blocks)*glitchScale),chromaDelay=Math.min(1,((t.chroma_delay??0)+chromaDelayFx+directedChroma*.24)*trails),tracking=Math.min(1,((t.vhs_tracking??0)+codec.tracking)*glitchScale),vortex=Math.min(1,((t.vortex??0)+vortexFx+codec.vortex)*motion),motionTrails=Math.min(1,((t.motion_trails??0)+motionTrailFx)*trails),sliceRecursion=Math.min(1,((t.slice_recursion??0)+sliceRecursionFx)*motion);
   const creative=activeScene?.direction?.creative??{};
   const creativeFlow=Math.min(1,creativeValue('flow_warp',creative.flow_warp??0)*motion),creativeFlowRgb=Math.min(1,creativeValue('flow_rgb',creative.flow_rgb??0)*glitchScale),creativeTemporal=Math.min(1,creativeValue('temporal_echo',creative.temporal_echo??0)*trails),creativeTemporalRgb=Math.min(1,creativeValue('temporal_rgb',creative.temporal_rgb??0)*trails),creativeSmear=Math.min(1,creativeValue('temporal_smear',creative.temporal_smear??0)*trails),creativeDepth=Math.min(1,creativeValue('depth_parallax',creative.depth_parallax??0)*motion),creativeBackground=Math.min(1,creativeValue('background_warp',creative.background_warp??0)*motion),creativeFeedback=Math.min(1,creativeValue('feedback',creative.feedback??0)*trails),creativeSymmetry=Math.min(1,creativeValue('local_symmetry',creative.local_symmetry??0)*motion),creativeBloom=Math.min(1,creativeValue('texture_bloom',creative.texture_bloom??0)*m),creativeStreaks=Math.min(1,creativeValue('texture_streaks',creative.texture_streaks??0)*motion),creativePalette=Math.min(1,creativeValue('palette_strength',creative.palette_strength??0)*m);
-  const dc=directedColorValues(),room=Math.max(0,1-sourceFidelity()),colorMix=Math.min(.24,.015+room*.36),palette=(activeScene?.direction?.color?.palette??[])[0],target=creativeTarget(),heroA=heroEnvelope(),heroKind=creative.hero_kind??'';
+  const dc=directedColorValues(),colorMix=Math.min(1,.18+.82*directedColorIntent(dc)),palette=(activeScene?.direction?.color?.palette??[])[0],target=creativeTarget(),heroA=heroEnvelope(),heroKind=creative.hero_kind??'';
   const heroTemporal=['subject_echo','flow_melt','time_prism'].includes(heroKind)?heroA:0,heroFlow=heroKind==='flow_melt'?heroA:0,heroDepth=heroKind==='depth_burst'?heroA:0,heroFeedback=['depth_burst','recursive_portal'].includes(heroKind)?heroA:0,heroChroma=heroKind==='time_prism'?heroA:0;
   const structural=Math.min(1,kaleido*.35+vortex*.45+tunnel*.35+sliceRecursion*.30+corridor*.20+creativeSymmetry*.24),beatState=currentBeatWarpState();
   return{fidelity:sourceFidelityAlpha(),vignette,scanlines:scan,strobe,time:clockSeconds(),warp:Math.min(1,directedWarp+creativeFlow*.75+ripple*.42+structural*.42),chroma:Math.min(1,directedChroma+rgb*.55+chromaDelay*.45+heroChroma*.45),depth:Math.min(1,creativeDepth+heroDepth*.82+structural*.12),bloom:Math.min(1,directedBloom+creativeBloom*.75),paletteStrength:creativePalette,palette:colorToRgb01(palette),feedback:Math.min(1,feedback+creativeFeedback*.8+heroFeedback*.62+structural*.12),temporal:Math.min(1,creativeTemporal+creativeSmear*.5+frameEcho*.45+motionTrails*.35+heroTemporal*.65+structural*.18),flow:Math.min(1,creativeFlow+heroFlow*.85+structural*.18),targetX:target.x/Math.max(1,width),targetY:target.y/Math.max(1,height),hueRadians:dc.hue*Math.PI/180*colorMix,saturation:1+(dc.sat-1)*colorMix,contrast:1+(dc.contrast-1)*colorMix,brightness:1+(dc.brightness-1)*colorMix,streaks:creativeStreaks,backgroundWarp:creativeBackground,flowRgb:creativeFlowRgb,temporalRgb:creativeTemporalRgb,pixel,posterize,solarize:Math.min(1,((t.solarize??0)+solarizeFx)*m),edge,glitch,blockDisplace:Math.min(1,blocks+(heroKind==='time_prism'?heroA*.30:0)),tracking,ripple,tempoWarp:tempoWarpFx,slitScan,datamosh,motionTrails,frameEcho,beatAmount:beatState.amount,beatLow:beatState.low,beatMid:beatState.mid,beatHigh:beatState.high,beatCenterX:beatState.centerX,beatCenterY:beatState.centerY,beatDirection:beatState.direction,beatFrequency:beatState.frequency,beatMode:beatState.mode,beatPhase:beatState.phase,beatPolarity:beatState.polarity,beatVariant:beatState.variant};
 }
 function renderDirectGpuPreview(){
   if(!responsivePreview||offlineMode||!browserGpuFinalizer?.renderLayers||activeBank<0||!activeScene)return false;
-  let descriptors=[],composition={mode:0,time:clockSeconds(),progress:directedProgress(),focus:focusLayer,width,height,transition:0};
+  const semanticCreative=activeScene?.direction?.creative??{},semanticTarget=creativeTarget();
+  let descriptors=[],composition={mode:0,time:clockSeconds(),progress:directedProgress(),focus:focusLayer,width,height,transition:0,targetX:semanticTarget.x/Math.max(1,width),targetY:semanticTarget.y/Math.max(1,height),subjectRadius:Number(semanticCreative.semantic?.subject_radius??.28),subjectPreserve:Number(semanticCreative.subject_preserve??0)};
   if(transition){
     const p=transition.duration<=0?1:Math.min(1,(clockNowMs()-transition.start)/transition.duration),from=bankState[transition.from]?.[0],to=bankState[transition.to]?.[0];
     const a=gpuLayerDescriptor(from,1),b=gpuLayerDescriptor(to,1);descriptors=[a,b].filter(Boolean);composition.mode=7;composition.transition=p;

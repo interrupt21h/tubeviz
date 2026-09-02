@@ -12,20 +12,21 @@ from .models import CodecEffect, ColorDirection, Section, VectorEffect, VisualDi
 from .choreography import shot_trajectory
 
 
-# Musical vibe is a *relative* color bias, not an absolute LUT target.  Earlier
-# versions steered common EDM states toward fixed purple/magenta hues (for example
-# euphoric -> 315 degrees), which could erase the source palette across unrelated
-# footage.  These bounded offsets keep the source hue authoritative.
-_VIBE_HUE_BIAS = {
-    "ambient": -3.0,
-    "hypnotic": 4.0,
-    "dark": -4.0,
-    "heavy": 5.0,
-    "driving": -2.5,
-    "euphoric": 5.0,
-    "fractured": -5.0,
-    "groove": 3.0,
-    "neutral": 0.0,
+# Musical color is source-relative, but deliberately *moves*.  The v0.32 visual
+# grammar used broad within-shot hue ramps; later source-fidelity fixes reduced
+# that motion to a barely-visible +/-14 degrees.  These arcs restore musical color
+# travel without returning to absolute vibe LUT targets (for example, forcing every
+# euphoric source toward the same magenta hue).
+_VIBE_HUE_ARC = {
+    "ambient": -26.0,
+    "hypnotic": 34.0,
+    "dark": -32.0,
+    "heavy": 52.0,
+    "driving": -38.0,
+    "euphoric": 58.0,
+    "fractured": -62.0,
+    "groove": 30.0,
+    "neutral": 22.0,
 }
 
 # A section keeps a coherent base family, but shots are allowed to move through a
@@ -629,37 +630,50 @@ def build_visual_direction(
         + occurrence * 1009
     ) & 0x7FFFFFFF
 
-    # Color grading is punctuation, not a mandatory LUT.  Most shots keep hue at
-    # exactly zero; the remaining shots receive a small source-relative bias.  This
-    # gives the source library's actual palette room to provide visual diversity.
+    # Color movement is a primary musical treatment again.  It remains relative to
+    # each source palette, so a vibe describes the *direction and size of an arc*
+    # rather than a fixed destination hue shared by unrelated clips.  Most shots
+    # participate, while occasional neutral shots create visual headroom.
     color_gate = _seed_unit(shot_seed, 31)
-    color_active = color_gate >= (0.90 if section.label != "peak" else 0.84)
-    vibe_bias = _VIBE_HUE_BIAS.get(section.vibe, _VIBE_HUE_BIAS["neutral"]) if color_active else 0.0
+    color_active = color_gate >= (0.32 if section.label != "peak" else 0.14)
+    vibe_arc = _VIBE_HUE_ARC.get(section.vibe, _VIBE_HUE_ARC["neutral"]) if color_active else 0.0
+    energy_gain = .56 + .44 * _clamp(section.energy)
+    if section.label == "build":
+        energy_gain *= 1.12
+    elif section.label == "peak":
+        energy_gain *= 1.30
+    elif section.label in {"ambient", "breakdown"}:
+        energy_gain *= .82
+
     ai_bias = 0.0
     if color_active and section.ai_direction is not None and section.ai_direction.target_hue is not None:
         delta = _shortest_hue_delta(source_hue, section.ai_direction.target_hue)
-        w = .025 + .055 * _clamp(section.audio_semantic_confidence)
-        ai_bias = _clamp(delta * w, -8.0, 8.0)
+        # AI may bend the source-relative arc toward an authored palette, but it
+        # cannot replace the source palette or force a single track-wide hue.
+        w = .12 + .18 * _clamp(section.audio_semantic_confidence)
+        ai_bias = _clamp(delta * w, -32.0, 32.0)
+
     structural_bias = 0.0
     if color_active:
         structural_bias = (
-            2.0 * math.sin((section.index + 1) * .83)
-            + 1.5 * math.sin((shot_index_in_section + 1) * 1.37)
-            + min(2.0, max(0, occurrence - 1) * .8)
+            7.0 * math.sin((section.index + 1) * .83)
+            + 5.0 * math.sin((shot_index_in_section + 1) * 1.37)
+            + min(8.0, max(0, occurrence - 1) * 2.6)
         )
-    hue_shift = _clamp(vibe_bias + ai_bias + structural_bias, -14.0, 14.0) if color_active else 0.0
+    cap = 48.0 if section.label in {"ambient", "breakdown"} else (76.0 if section.label == "build" else (95.0 if section.label == "peak" else 68.0))
+    hue_shift = _clamp(vibe_arc * energy_gain + ai_bias + structural_bias, -cap, cap) if color_active else 0.0
     target_hue = (source_hue + hue_shift) % 360.0
 
-    # Saturation/contrast may still breathe with the music, but clean-color shots
-    # stay very close to neutral instead of being recolored simply because the track
-    # is energetic.
+    # Saturation/contrast breathe with the same phrase trajectory, but chromatic
+    # separation remains conservative because it reads as digital damage rather
+    # than color choreography.
     if color_active:
-        saturation_scale = _clamp(.96 + .18 * section.energy + .06 * section.brightness, .86, 1.25)
+        saturation_scale = _clamp(.94 + .34 * section.energy + .10 * section.brightness, .82, 1.48)
     else:
         saturation_scale = 1.0
-    contrast_scale = _clamp(.95 + .30 * section.energy + .10 * section.noisiness, .82, 1.42)
-    brightness_scale = _clamp(.90 + .16 * section.brightness + .07 * section.energy, .80, 1.24)
-    chroma = _clamp((.01 + .10 * section.energy + .07 * section.noisiness) * (1.0 if color_active else .28), 0.0, .24)
+    contrast_scale = _clamp(.94 + .32 * section.energy + .10 * section.noisiness, .82, 1.46)
+    brightness_scale = _clamp(.91 + .15 * section.brightness + .06 * section.energy, .82, 1.24)
+    chroma = _clamp((.008 + .065 * section.energy + .045 * section.noisiness) * (1.0 if color_active else .22), 0.0, .16)
     family = _EFFECT_FAMILY.get(section.vibe, "cinematic")
     if section.ai_direction is not None and section.ai_direction.effect_family in {"dream","liquid","analog","fracture","hyper","prismatic","cinematic"}:
         if section.audio_semantic_confidence >= .18:
@@ -700,8 +714,11 @@ def build_visual_direction(
     contrast_scale = _clamp(contrast_scale * (1.0 + .18*trajectory["contrast"] + .22*impact - .16*withhold), .70, 2.0)
     # Continuous curves rather than on/off effect selection.
     automation = {
-        "hue": _curve((0, hue_shift*.20), (.55, hue_shift*.55), (1, hue_shift*.82)),
-        "saturation": _curve((0, 1.0), (.5, saturation_scale), (1, saturation_scale*(1.0+.05*tension))),
+        # Restore the old sense of a color *ramp*: the shot starts close to its
+        # source palette, travels decisively through the phrase, and arrives at
+        # the planned hue instead of holding a nearly-static grade.
+        "hue": _curve((0, hue_shift*.22), (.38, hue_shift*.52), (.76, hue_shift*.90), (1, hue_shift)),
+        "saturation": _curve((0, 1.0), (.42, 1.0 + (saturation_scale-1.0)*.55), (.78, saturation_scale), (1, saturation_scale*(1.0+.06*tension))),
         "spectral_warp": _curve((0, .08*e), (.65, .20+.36*tension), (.92, .58*tension), (1, .12*e)),
         "chromatic": _curve((0, .01*e), (.72, .12*chroma), (.94, .42*chroma), (1, .035*e)),
         "feedback": _curve((0, .05), (.55, .08+.32*(1-section.percussive_ratio)), (1, .04+.18*e)),

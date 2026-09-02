@@ -159,7 +159,7 @@ std::vector<std::uint8_t> Renderer::render_shot(const Shot& shot, double now, bo
     const std::string effective_composition = reactive_.switcher > 0.08 ? "swap" : shot.composition_mode;
     compose_layers(
         output, companion_frames, companion_opacities, companion_modes,
-        effective_composition, width_, height_, composition_progress, now * 0.24
+        effective_composition, width_, height_, composition_progress, now * 0.24, &shot.creative
     );
 
     color_reference_ = output;
