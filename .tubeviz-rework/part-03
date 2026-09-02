@@ -1,0 +1,158 @@
+rn layers.l2
+   if(mode==2&&count>1){let boundary=.18+.64*progress+sin(time*.45)*.08+(uv.y-.5)*.22;let s=sample1(uv);base=layerBlend(base,s.rgb,s.a*select(0.0,1.0,uv.x<boundary),blendMode(1));return vec4f(base,1);}
+   if(mode==1&&count>1){
+     for(var i=1;i<4;i++){
+-      if(i>=count){break;}let fi=f32(i);let cx=.50+.27*sin(time*.55*.73+fi*1.31);let cy=.50+.23*cos(time*.55*.61-fi*.70);
+-      let dx=(uv.x-cx)/(.26+.035*fi);let dy=(uv.y-cy)/(.28+.030*fi);let mask=1.0-smoothstep(.72,1.08,dx*dx+dy*dy);
+-      let s=sampleLayer(i,uv);base=layerBlend(base,s.rgb,s.a*mask*(.55+.12*sin(time+fi)),blendMode(i));
++      if(i>=count){break;}let fi=f32(i);let mask=organicFlowMask(uv,fi,time);
++      let s=sampleLayer(i,uv);base=layerBlend(base,s.rgb,s.a*mask*(.58+.12*sin(time+fi)),blendMode(i));
+     }
+     return vec4f(base,1);
+   }
+@@ -311,7 +327,7 @@ function layerBlendMode(value){
+   return mode==='screen'?1:mode==='multiply'?2:mode==='overlay'?3:mode==='lighten'?4:0;
+ }
+ function layerUniforms(layerList,composition,width,height){
+-  const out=new Float32Array(72);const count=Math.max(1,Math.min(4,Number(composition.count??layerList.length)));
++  const out=new Float32Array(76);const count=Math.max(1,Math.min(4,Number(composition.count??layerList.length)));
+   out.set([Number(composition.mode??0),Number(composition.time??0),Number(composition.progress??0),count,Number(composition.transition??0),width/Math.max(1,height),Number(composition.focus??0),0],0);
+   const first=layerList[0]||{};
+   for(let i=0;i<4;i++){
+@@ -323,6 +339,7 @@ function layerUniforms(layerList,composition,width,height){
+     out.set([Number(item.rotationRadians||0),item.mirror?1:0,layerBlendMode(item.blendMode),i<count?1:0],base+8);
+     out.set([sw/Math.max(1,sh),0,0,0],base+12);
+   }
++  out.set([Number(composition.targetX??.5),Number(composition.targetY??.5),Number(composition.subjectRadius??.28),Number(composition.subjectPreserve??0)],72);
+   return out;
+ }
+ 
+@@ -338,7 +355,7 @@ export class BrowserGpuRendererCore{
+     this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.layerPipeline=layerPipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
+     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
+     this.uniformBuffer=device.createBuffer({size:224,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+-    this.layerUniformBuffer=device.createBuffer({size:288,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
++    this.layerUniformBuffer=device.createBuffer({size:304,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+     // Device loss is asynchronous. Surface it to the facade so live preview can
+     // immediately restore the Canvas2D compositor instead of freezing on the last
+     // successfully submitted GPU frame.
+diff --git a/src/tubeviz/static/gui.html b/src/tubeviz/static/gui.html
+index 18c8ab0..dffbf30 100644
+--- a/src/tubeviz/static/gui.html
++++ b/src/tubeviz/static/gui.html
+@@ -6,6 +6,7 @@
+ <meta name="viewport" content="width=device-width,initial-scale=1">
+ <title>tubeviz studio</title>
+ <link rel="stylesheet" href="/static/gui.css?v=0.44.0">
++<link rel="stylesheet" href="/static/studio_cleanup.css?v=0.45.0-visual1">
+ <link rel="stylesheet" href="/static/ai-metadata.css?v=0.44.0">
+ </head>
+ <body>
+@@ -580,5 +581,6 @@ https://youtu.be/..."></textarea>
+ </div>
+ 
+ <script src="/static/gui.js?v=0.44.0"></script>
++<script src="/static/studio_cleanup.js?v=0.45.0-visual1"></script>
+ </body>
+ </html>
+diff --git a/src/tubeviz/static/preview_effect_filters.js b/src/tubeviz/static/preview_effect_filters.js
+index 681a93f..501e6ae 100644
+--- a/src/tubeviz/static/preview_effect_filters.js
++++ b/src/tubeviz/static/preview_effect_filters.js
+@@ -191,7 +191,7 @@
+   const creativeAllZero = new Set([
+     'flow_warp', 'flow_trails', 'flow_rgb', 'temporal_echo', 'temporal_rgb',
+     'temporal_smear', 'camera_energy', 'camera_drift_x', 'camera_drift_y',
+-    'depth_parallax', 'depth_fog', 'subject_preserve', 'background_warp',
++    'depth_parallax', 'depth_fog', 'background_warp',
+     'feedback', 'local_symmetry', 'texture_bloom', 'texture_streaks',
+     'palette_strength', 'abstraction', 'hero_amount', 'history_inherit',
+   ]);
+diff --git a/src/tubeviz/static/studio_cleanup.css b/src/tubeviz/static/studio_cleanup.css
+new file mode 100644
+index 0000000..048ee71
+--- /dev/null
++++ b/src/tubeviz/static/studio_cleanup.css
+@@ -0,0 +1,111 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++/* Progressive hierarchy cleanup layered over gui.css. */
++
++body > nav {
++  display: flex;
++  align-items: center;
++  gap: .35rem;
++  overflow-x: auto;
++  scrollbar-width: thin;
++}
++body > nav .tab { flex: 0 0 auto; }
++body > nav .utility-start { margin-left: auto; }
++body > nav .utility-tab { opacity: .78; }
++body > nav .utility-tab.active,
++body > nav .utility-tab:hover { opacity: 1; }
++
++.studio-control-heading {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 1rem;
++  margin: .2rem 0 .8rem;
++}
++.studio-control-heading b { font-size: 1rem; }
++.studio-control-heading span { color: var(--muted, #94a3b8); font-size: .78rem; text-align: right; }
++.studio-primary-controls {
++  margin-top: 1rem;
++  padding: 1rem;
++  border: 1px solid color-mix(in srgb, var(--accent, #61dafb) 18%, transparent);
++  border-radius: 12px;
++  background: color-mix(in srgb, var(--panel, #111827) 92%, var(--accent, #61dafb) 8%);
++}
++.studio-essential-grid {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: .7rem .9rem;
++}
++.studio-essential-grid > label { margin: 0; min-width: 0; }
++.studio-essential-grid .slider-field { grid-column: span 1; }
++.studio-essential-toggles {
++  display: flex;
++  flex-wrap: wrap;
++  gap: .45rem .9rem;
++  margin-top: .85rem;
++  padding-top: .75rem;
++  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
++}
++.studio-essential-toggles > label { margin: 0; }
++
++.studio-fine-controls { display: grid; gap: .55rem; margin-top: .8rem; }
++.studio-control-group {
++  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
++  border-radius: 10px;
++  background: color-mix(in srgb, var(--panel, #111827) 97%, white 3%);
++}
++.studio-control-group > summary {
++  cursor: pointer;
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 1rem;
++  padding: .75rem .9rem;
++  list-style: none;
++}
++.studio-control-group > summary::-webkit-details-marker { display: none; }
++.studio-control-group > summary::after { content: '›'; opacity: .6; transform: rotate(90deg); transition: transform .15s ease; }
++.studio-control-group[open] > summary::after { transform: rotate(-90deg); }
++.studio-control-group > summary span { font-weight: 650; }
++.studio-control-group > summary small { color: var(--muted, #94a3b8); font-size: .75rem; margin-left: auto; }
++.studio-control-group-body {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: .7rem .9rem;
++  padding: .15rem .9rem 1rem;
++}
++.studio-control-group-body > label { margin: 0; min-width: 0; }
++.studio-control-group-body > .check,
++.studio-control-group-body > p,
++.studio-control-group-body > button { align-self: end; }
++.studio-control-group-body > p { grid-column: 1 / -1; }
++.studio-experimental-group > summary span::after {
++  conte

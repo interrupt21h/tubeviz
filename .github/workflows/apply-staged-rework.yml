@@ -1,0 +1,33 @@
+name: Apply staged visual rework
+
+"on":
+  push:
+    branches:
+      - feature/classic-source-first-preview-toggles
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: contains(github.event.head_commit.message, '[apply-visual-rework]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staged branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply staged source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .tubeviz-rework/part-* > /tmp/tubeviz-visual-rework.patch
+          git apply --check /tmp/tubeviz-visual-rework.patch
+          git apply /tmp/tubeviz-visual-rework.patch
+          rm -rf .tubeviz-rework
+          git config user.name "tubeviz automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "restore dynamic color and semantic compositing"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

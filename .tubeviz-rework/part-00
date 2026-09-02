@@ -1,0 +1,138 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index d553131..857c539 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,3 +1,19 @@
++# Unreleased — Constructive visual direction and Studio simplification
++
++## Visual direction
++
++- Restore pronounced, source-relative musical hue travel and within-shot color ramps without returning to fixed vibe LUT targets that caused track-wide purple/magenta drift.
++- Treat directed color as intentional choreography in browser and native source-fidelity paths so palette protection no longer cancels the authored hue movement.
++- Promote multi-source `flow` composition as a constructive visual treatment again, using semantic focal points, subject radius, and foreground-preservation confidence to shape organic masks around meaningful subjects.
++- Align organic masked compositing across WebGPU, Canvas fallback, native resident GPU, and native CPU fallback instead of using a simplified elliptical GPU mask.
++- Increase **Source First** masked-composition strength while keeping codec glitch off and destructive creative/temporal treatments sparse.
++- Make artifact-heavy legacy transforms consume the effect-density budget aggressively, so low-density Source First / Classic edits suppress noise, pixelation, datamosh, VHS, harsh RGB separation, and related damage while retaining constructive optical motion.
++
++## Studio
++
++- Simplify Studio without removing capability: keep presets and the highest-impact creative controls visible, and collapse edit intelligence, detailed creative tuning, AI/model settings, and experimental codec controls into focused groups.
++- Reduce Ingest clutter by keeping source/quality essentials visible and moving candidate-pool/filter thresholds plus automation details into optional groups. All existing control IDs and Advanced CLI parity remain intact.
++
+ # 0.44.1 — Rendering and preview reliability
+ 
+ ## Preview and WebGPU
+diff --git a/src/tubeviz/analysis_presets.py b/src/tubeviz/analysis_presets.py
+index da68756..1761065 100644
+--- a/src/tubeviz/analysis_presets.py
++++ b/src/tubeviz/analysis_presets.py
+@@ -66,8 +66,8 @@ ANALYSIS_PRESETS: dict[str, dict[str, Any]] = {
+         "label": "Source First",
+         "description": (
+             "Modern Tubeviz intelligence with footage-first treatment: full semantic "
+-            "and phrase-aware editing, restrained transforms/layers, sparse creative "
+-            "punctuation, short temporal memory, and rare hero moments."
++            "and phrase-aware editing, dynamic source-relative color, organic masked "
++            "compositing, sparse creative punctuation, short temporal memory, and rare heroes."
+         ),
+         "parameters": {
+             "section_bars": 8,
+@@ -78,7 +78,7 @@ ANALYSIS_PRESETS: dict[str, dict[str, Any]] = {
+             "temporal_persistence": 0.10,
+             "composition_diversity": 0.25,
+             "hero_frequency": 0.10,
+-            "composition_intensity": 0.65,
++            "composition_intensity": 0.95,
+             "target_unique_clips": 0,
+             "novelty_weight": 0.65,
+             "visual_match_weight": 1.30,
+diff --git a/src/tubeviz/native_src/include/tubeviz/effects.hpp b/src/tubeviz/native_src/include/tubeviz/effects.hpp
+index 5ce2d54..4e1ceb2 100644
+--- a/src/tubeviz/native_src/include/tubeviz/effects.hpp
++++ b/src/tubeviz/native_src/include/tubeviz/effects.hpp
+@@ -93,7 +93,8 @@ void compose_layers(
+     int width,
+     int height,
+     double progress,
+-    double phase
++    double phase,
++    const CreativeEffect* creative = nullptr
+ );
+ 
+ void apply_creative_effects(
+diff --git a/src/tubeviz/native_src/src/effects.cpp b/src/tubeviz/native_src/src/effects.cpp
+index 95ef79a..958760c 100644
+--- a/src/tubeviz/native_src/src/effects.cpp
++++ b/src/tubeviz/native_src/src/effects.cpp
+@@ -811,23 +811,29 @@ double creative_legacy_gate(const CreativeEffect& c, std::uint64_t salt) {
+     return .5*(hash_noise(key)+1.0);
+ }
+ 
++double directed_color_ramp(double progress) {
++    const double p = std::clamp(progress, 0.0, 1.0);
++    if (p <= .38) return .22 + (p/.38) * (.52-.22);
++    if (p <= .76) return .52 + ((p-.38)/.38) * (.90-.52);
++    return .90 + ((p-.76)/.24) * .10;
++}
++
+ void native_directed_color(std::vector<std::uint8_t>& rgb, int width, int height,
+-                           const CreativeEffect& c, double fidelity) {
++                           const CreativeEffect& c, double fidelity, double progress) {
+     if(c.style_version<2 && creative_legacy_gate(c,31)<.70) return;
+-    const double room = std::clamp(1.0 - fidelity, 0.0, 1.0);
+-    if (room <= .005) return;
+-    const double hue_deg = std::clamp(c.color_hue_shift, -14.0, 14.0);
++    const double ramp = directed_color_ramp(progress);
++    const double hue_deg = std::clamp(c.color_hue_shift, -95.0, 95.0) * ramp;
+     const double sat = std::clamp(c.color_saturation, .5, 1.6);
+     const double contrast = std::clamp(c.color_contrast, .6, 1.6);
+     const double brightness = std::clamp(c.color_brightness, .65, 1.4);
+     const double color_delta = std::min(
+         1.0,
+-        std::abs(hue_deg) / 14.0 +
++        std::abs(hue_deg) / 72.0 +
+         .55 * std::abs(sat - 1.0) +
+         .35 * std::abs(contrast - 1.0) +
+         .25 * std::abs(brightness - 1.0)
+     );
+-    const double alpha = std::min(.24, .015 + room * (.34 + .26 * color_delta));
++    const double alpha = std::clamp(.26 + .58 * color_delta + .08 * (1.0-fidelity), .22, .86);
+     if (alpha <= .005) return;
+     const auto src = rgb;
+     const double hue = hue_deg * 3.14159265358979323846 / 180.0;
+@@ -1113,7 +1119,7 @@ void apply_creative_effects(
+     const double common_env = creative_envelope(c.envelope, progress);
+     const double hero = hero_envelope(c, progress);
+     const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
+-    native_directed_color(rgb, width, height, c, fidelity);
++    native_directed_color(rgb, width, height, c, fidelity, progress);
+ 
+     const double camera = c.camera_energy * creative_envelope(c.camera_envelope, progress);
+     const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress) * (c.style_version<2 && creative_legacy_gate(c,89)<.70 ? 0.0 : 1.0);
+@@ -1224,11 +1230,11 @@ void apply_source_color_fidelity(
+     const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
+     if (fidelity <= .60) return;
+ 
+-    const double hue_intent = std::clamp(std::abs(c.color_hue_shift) / 14.0, 0.0, 1.0);
++    const double hue_intent = std::clamp(std::abs(c.color_hue_shift) * directed_color_ramp(progress) / 70.0, 0.0, 1.0);
+     const double palette_intent = std::clamp(c.palette_strength, 0.0, 1.0);
+-    const double intentional = std::clamp(.48*hue_intent + .35*palette_intent + .42*hero, 0.0, 1.0);
++    const double intentional = std::clamp(.78*hue_intent + .25*palette_intent + .28*hero, 0.0, 1.0);
+     const double base = std::clamp((fidelity - .60) / .40, 0.0, 1.0);
+-    const double alpha = std::clamp(base * (.94 - .48*intentional), 0.0, .94);
++    const double alpha = std::clamp(base * (.90 - .72*intentional), 0.0, .92);
+     if (alpha <= .025) return;
+ 
+ #ifdef TUBEVIZ_HAVE_OPENMP
+@@ -1298,7 +1304,8 @@ void compose_layers(
+     int width,
+     int height,
+     double progress,
+-    double phase
++    double phase,
++    const CreativeEffect* creative
+ ) {
+     if(companions.empty()) return;
+     if(mode=="single") return;
+@@ -1308,16 +1315,31 @@ void compose_layers(
+             const
