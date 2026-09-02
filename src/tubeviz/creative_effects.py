@@ -296,6 +296,82 @@ def build_creative_effect_plan(
     if wants("source-derived light streaks", "light streaks"):
         texture_streaks = emphasize(texture_streaks, .14)
 
+    # One dominant creative accent per normal shot. Camera motion and semantic
+    # subject metadata are structural and remain available underneath; visible
+    # treatment families compete for a sparse budget instead of all carrying
+    # non-zero values into the renderer at once.
+    preferred_boost = {
+        "flow": 0.30 if wants("optical-flow warp", "optical flow warp", "flow warp") else 0.0,
+        "temporal": 0.30 if wants("motion trails", "flow trails", "temporal echo", "frame echo", "temporal smear") else 0.0,
+        "depth": 0.30 if wants("depth parallax", "depth burst", "background warp") else 0.0,
+        "light": 0.30 if wants("source-derived bloom", "bloom", "source-derived light streaks", "light streaks") else 0.0,
+        "feedback": 0.30 if wants("recursive feedback", "feedback") else 0.0,
+        "color": 0.26 if wants("palette propagation", "source preserving color grade", "source-preserving color grade") else 0.0,
+        "symmetry": 0.30 if wants("local symmetry", "kaleidoscope", "recursive portal") else 0.0,
+    }
+    # Explicit AI trajectory channels count as intent, but still compete for the
+    # same one-family budget rather than enabling several renderers in parallel.
+    if ai_pair("flow") is not None:
+        preferred_boost["flow"] += .18
+    if ai_pair("temporal") is not None:
+        preferred_boost["temporal"] += .18
+    if ai_pair("depth") is not None:
+        preferred_boost["depth"] += .18
+    if ai_pair("feedback") is not None:
+        preferred_boost["feedback"] += .18
+    if ai_pair("palette") is not None:
+        preferred_boost["color"] += .18
+
+    accent_scores = {
+        "flow": .48 * motion + .24 * energy + .18 * sem.water + preferred_boost["flow"],
+        "temporal": .34 * tonal + .24 * motion + .18 * (1 - percussive) + .12 * mutation + preferred_boost["temporal"],
+        "depth": .34 * depth_semantic + .22 * complexity + .16 * (1 - motion) + preferred_boost["depth"],
+        "light": .30 * section.brightness + .22 * energy + .18 * sem.night + preferred_boost["light"],
+        "feedback": .32 * tonal + .24 * build + .16 * mutation + preferred_boost["feedback"],
+        "color": .26 * contrast_target + .20 * energy + .14 * (1 - entropy) + preferred_boost["color"],
+        "symmetry": .30 * sem.abstract + .28 * tonal + .18 * payoff + preferred_boost["symmetry"],
+    }
+    allowed = ["flow", "temporal", "depth", "light", "feedback", "color"]
+    if effect_density >= 1.35:
+        allowed.append("symmetry")
+    ranked = sorted(allowed, key=lambda name: (-accent_scores[name], name))
+    accent_probability = _clamp(.10 + .30 * min(1.0, effect_density) + .12 * build + .12 * payoff)
+    accent_gate = _stable_unit(f"creative:{candidate.scene_id}:{section.index}:{shot_index}:accent")
+    selected_accents: set[str] = set()
+    if ranked and (accent_gate < accent_probability or any(preferred_boost[name] >= .30 for name in ranked)):
+        selected_accents.add(ranked[0])
+    # Two simultaneous creative families are reserved for exceptional, explicitly
+    # dense payoff moments. Even Experimental does not get this routinely.
+    if (
+        len(ranked) > 1
+        and effect_density >= 1.65
+        and payoff > .5
+        and _stable_unit(f"creative:{candidate.scene_id}:{section.index}:{shot_index}:accent2") < .16
+    ):
+        selected_accents.add(ranked[1])
+
+    if "flow" not in selected_accents:
+        flow_warp = 0.0
+        flow_rgb = 0.0
+        background_warp = 0.0
+    if "temporal" not in selected_accents:
+        flow_trails = 0.0
+        temporal_echo = 0.0
+        temporal_rgb = 0.0
+        temporal_smear = 0.0
+    if "depth" not in selected_accents:
+        depth_parallax = 0.0
+        depth_fog = 0.0
+    if "light" not in selected_accents:
+        texture_bloom = 0.0
+        texture_streaks = 0.0
+    if "feedback" not in selected_accents:
+        feedback = 0.0
+    if "color" not in selected_accents:
+        palette_strength = 0.0
+    if "symmetry" not in selected_accents:
+        local_symmetry = 0.0
+
     # Shot-progress curves.  Effects ramp and release rather than living at a
     # constant strength. Builds escalate, payoffs front-load impact, and withholding
     # deliberately creates visual headroom before a drop.

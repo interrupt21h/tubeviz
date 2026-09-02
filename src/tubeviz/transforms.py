@@ -15,7 +15,7 @@ from .models import CompositeLayer, DirectedTimeline, SceneSelection, Section, V
 class TransformConfig:
     enabled: bool = True
     intensity: float = 1.0
-    density: float = 0.65
+    density: float = 0.35
     allow_reverse: bool = True
     max_playback_rate: float = 1.65
     min_playback_rate: float = 0.65
@@ -289,7 +289,12 @@ def plan_transform(
     # than constructive motion/compositing.  This makes low-density presets such
     # as Source First and Classic genuinely clean without disabling ripple, vortex,
     # camera motion, masks, or other useful optical grammar.
-    artifact_scale = _clamp((effect_density / .65) ** 1.35 if effect_density > 0 else 0.0, 0.0, 1.0)
+    # Destructive raster treatments live behind a real threshold. Normal
+    # source-first/balanced timelines therefore cannot acquire faint glitch
+    # wallpaper simply because every formula had a small non-zero floor.
+    artifact_scale = _clamp((effect_density - .55) / 1.10, 0.0, 1.0)
+    kaleidoscope *= artifact_scale if effect_density >= 1.35 else 0.0
+    mirror_corridor *= artifact_scale if effect_density >= 1.05 else 0.0
     glitch *= artifact_scale
     noise *= artifact_scale
     pixelate *= artifact_scale
@@ -306,6 +311,7 @@ def plan_transform(
     chroma_delay *= artifact_scale
     vhs_tracking *= artifact_scale
     slice_recursion *= artifact_scale
+    feedback *= _clamp(.18 + effect_density * .55, 0.0, 1.0)
 
     return VideoTransform(
         playback_rate=rate,

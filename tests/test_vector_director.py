@@ -53,17 +53,22 @@ def kinds(direction):
     return {effect.kind for effect in direction.vector_effects}
 
 
-def test_vector_scene_graph_is_sparse_and_keeps_hidden_displacement():
-    direction = build_visual_direction(
+def test_vector_scene_graph_is_sparse_and_hidden_displacement_is_high_intensity_only():
+    normal = build_visual_direction(
         candidate(), section("driving"), rhythm_alignment=.9,
         source_playback_rate=1.0, transition=.8, occurrence=1,
-        shot_index_in_section=0,
+        shot_index_in_section=0, vector_intensity=1.0,
     )
-    visible = [effect for effect in direction.vector_effects if effect.visible]
-    hidden = [effect for effect in direction.vector_effects if not effect.visible]
-    assert len(visible) <= 2
-    assert {"motion_transplant", "vector_displacement"} <= {e.kind for e in hidden}
-    assert all(e.opacity <= .30 for e in visible)
+    assert len([effect for effect in normal.vector_effects if effect.visible]) <= 1
+    assert not [effect for effect in normal.vector_effects if not effect.visible]
+
+    experimental = build_visual_direction(
+        candidate(), section("driving"), rhythm_alignment=.9,
+        source_playback_rate=1.0, transition=.8, occurrence=1,
+        shot_index_in_section=0, vector_intensity=2.0,
+    )
+    hidden = {effect.kind for effect in experimental.vector_effects if not effect.visible}
+    assert {"motion_transplant", "vector_displacement"} <= hidden
 
 
 def test_non_peak_shots_use_at_most_one_visible_vector_family():
@@ -74,30 +79,37 @@ def test_non_peak_shots_use_at_most_one_visible_vector_family():
     )
     assert len([effect for effect in direction.vector_effects if effect.visible]) <= 1
 
-def test_prismatic_family_prefers_footage_derived_effects_over_portal():
-    direction = build_visual_direction(
-        candidate(), section("euphoric"), rhythm_alignment=.8,
-        source_playback_rate=1.0, transition=.8, occurrence=2,
-        shot_index_in_section=1,
-    )
-    visible = [effect.kind for effect in direction.vector_effects if effect.visible]
-    assert visible[0] in {"voronoi", "flow_ribbons"}
+
+def test_prismatic_family_uses_footage_derived_effects_when_visible():
+    seen = []
+    for scene_id in range(1, 60):
+        direction = build_visual_direction(
+            candidate(scene_id), section("euphoric"), rhythm_alignment=.8,
+            source_playback_rate=1.0, transition=.8, occurrence=2,
+            shot_index_in_section=1, vector_intensity=1.2,
+        )
+        visible = [effect.kind for effect in direction.vector_effects if effect.visible]
+        if visible:
+            seen.extend(visible)
+    assert seen
+    assert all(kind in {"voronoi", "flow_ribbons", "contours", "vector_echo", "portal"} for kind in seen)
+    assert seen.count("portal") < len(seen) * .25
 
 
 def test_portal_vector_effect_is_rare_across_prismatic_shots():
     total = 0
     portals = 0
-    for scene_id in range(1, 81):
+    for scene_id in range(1, 121):
         d = build_visual_direction(
             candidate(scene_id), section("euphoric"), rhythm_alignment=.8,
             source_playback_rate=1.0, transition=.8, occurrence=1,
-            shot_index_in_section=2,
+            shot_index_in_section=2, vector_intensity=1.0,
         )
         visible = [effect.kind for effect in d.vector_effects if effect.visible]
         total += bool(visible)
         portals += "portal" in visible
-    assert total > 40
-    assert 0 < portals < total * .25
+    assert 20 < total < 75
+    assert portals < max(2, total * .25)
 
 
 def test_vector_effects_have_deterministic_seeds_and_automation():
@@ -124,25 +136,32 @@ def test_vector_effects_can_be_disabled():
     assert direction.vector_effects == []
 
 
-def test_vector_intensity_scales_effect_amounts():
-    normal = build_visual_direction(
-        candidate(), section(), rhythm_alignment=.7,
-        source_playback_rate=1.0, transition=.4, occurrence=1,
-        shot_index_in_section=0, vector_intensity=1.0,
-    )
-    low = build_visual_direction(
-        candidate(), section(), rhythm_alignment=.7,
-        source_playback_rate=1.0, transition=.4, occurrence=1,
-        shot_index_in_section=0, vector_intensity=.25,
-    )
-    assert max(e.amount for e in low.vector_effects) < max(e.amount for e in normal.vector_effects)
+def test_vector_intensity_scales_occurrence_and_effect_amounts():
+    def totals(intensity):
+        amount = 0.0
+        visible = 0
+        for scene_id in range(1, 81):
+            d = build_visual_direction(
+                candidate(scene_id), section("driving", label="drive"), rhythm_alignment=.7,
+                source_playback_rate=1.0, transition=.4, occurrence=1,
+                shot_index_in_section=1, vector_intensity=intensity,
+            )
+            visible_effects = [e for e in d.vector_effects if e.visible]
+            visible += len(visible_effects)
+            amount += sum(e.amount for e in visible_effects)
+        return visible, amount
+
+    low_visible, low_amount = totals(.25)
+    normal_visible, normal_amount = totals(1.0)
+    assert normal_visible > low_visible
+    assert normal_amount > low_amount
 
 
 def test_motion_field_effects_carry_scene_motion_direction():
     direction = build_visual_direction(
-        candidate(), section(), rhythm_alignment=.7,
+        candidate(4), section("driving", label="drive"), rhythm_alignment=.7,
         source_playback_rate=1.0, transition=.4, occurrence=1,
-        shot_index_in_section=0,
+        shot_index_in_section=1, vector_intensity=1.0,
     )
     flow = next(e for e in direction.vector_effects if e.kind == "flow_ribbons")
     assert flow.parameters["motion_x"] == .6

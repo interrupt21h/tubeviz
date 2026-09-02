@@ -102,6 +102,18 @@ def test_native_manifest_contains_shot_layers_and_supported_music_cues(tmp_path:
     assert "unsupported_browser_only" not in text
 
 
+
+def test_native_manifest_does_not_translate_editorial_slice_into_raster_striping(tmp_path: Path):
+    timeline = _timeline(tmp_path)
+    timeline = timeline.model_copy(update={"cues": [
+        *timeline.cues,
+        VisualCue(time=2.0, action="video_edit_slice", parameters={"amount": .9}),
+        VisualCue(time=2.2, action="video_edit_slice_recursion", parameters={"amount": .4}),
+    ]})
+    text = write_native_manifest(timeline, tmp_path / "library", tmp_path / "render.tsv").read_text()
+    assert "\tvideo_edit_slice\t" not in text
+    assert "\tvideo_edit_slice_recursion\t" in text
+
 def test_native_ffmpeg_path_is_raw_rgb_not_image_pipe(tmp_path: Path):
     command = _raw_ffmpeg_command(
         output=tmp_path / "out.mp4",
