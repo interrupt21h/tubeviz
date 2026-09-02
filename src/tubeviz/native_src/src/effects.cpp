@@ -811,23 +811,29 @@ double creative_legacy_gate(const CreativeEffect& c, std::uint64_t salt) {
     return .5*(hash_noise(key)+1.0);
 }
 
+double directed_color_ramp(double progress) {
+    const double p = std::clamp(progress, 0.0, 1.0);
+    if (p <= .38) return .22 + (p/.38) * (.52-.22);
+    if (p <= .76) return .52 + ((p-.38)/.38) * (.90-.52);
+    return .90 + ((p-.76)/.24) * .10;
+}
+
 void native_directed_color(std::vector<std::uint8_t>& rgb, int width, int height,
-                           const CreativeEffect& c, double fidelity) {
+                           const CreativeEffect& c, double fidelity, double progress) {
     if(c.style_version<2 && creative_legacy_gate(c,31)<.70) return;
-    const double room = std::clamp(1.0 - fidelity, 0.0, 1.0);
-    if (room <= .005) return;
-    const double hue_deg = std::clamp(c.color_hue_shift, -14.0, 14.0);
+    const double ramp = directed_color_ramp(progress);
+    const double hue_deg = std::clamp(c.color_hue_shift, -95.0, 95.0) * ramp;
     const double sat = std::clamp(c.color_saturation, .5, 1.6);
     const double contrast = std::clamp(c.color_contrast, .6, 1.6);
     const double brightness = std::clamp(c.color_brightness, .65, 1.4);
     const double color_delta = std::min(
         1.0,
-        std::abs(hue_deg) / 14.0 +
+        std::abs(hue_deg) / 72.0 +
         .55 * std::abs(sat - 1.0) +
         .35 * std::abs(contrast - 1.0) +
         .25 * std::abs(brightness - 1.0)
     );
-    const double alpha = std::min(.24, .015 + room * (.34 + .26 * color_delta));
+    const double alpha = std::clamp(.26 + .58 * color_delta + .08 * (1.0-fidelity), .22, .86);
     if (alpha <= .005) return;
     const auto src = rgb;
     const double hue = hue_deg * 3.14159265358979323846 / 180.0;
@@ -1113,7 +1119,7 @@ void apply_creative_effects(
     const double common_env = creative_envelope(c.envelope, progress);
     const double hero = hero_envelope(c, progress);
     const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
-    native_directed_color(rgb, width, height, c, fidelity);
+    native_directed_color(rgb, width, height, c, fidelity, progress);
 
     const double camera = c.camera_energy * creative_envelope(c.camera_envelope, progress);
     const double palette = c.palette_strength * creative_envelope(c.palette_envelope, progress) * (c.style_version<2 && creative_legacy_gate(c,89)<.70 ? 0.0 : 1.0);
@@ -1224,11 +1230,11 @@ void apply_source_color_fidelity(
     const double fidelity = std::clamp(c.source_fidelity - .16 * hero, .58, 1.0);
     if (fidelity <= .60) return;
 
-    const double hue_intent = std::clamp(std::abs(c.color_hue_shift) / 14.0, 0.0, 1.0);
+    const double hue_intent = std::clamp(std::abs(c.color_hue_shift) * directed_color_ramp(progress) / 70.0, 0.0, 1.0);
     const double palette_intent = std::clamp(c.palette_strength, 0.0, 1.0);
-    const double intentional = std::clamp(.48*hue_intent + .35*palette_intent + .42*hero, 0.0, 1.0);
+    const double intentional = std::clamp(.78*hue_intent + .25*palette_intent + .28*hero, 0.0, 1.0);
     const double base = std::clamp((fidelity - .60) / .40, 0.0, 1.0);
-    const double alpha = std::clamp(base * (.94 - .48*intentional), 0.0, .94);
+    const double alpha = std::clamp(base * (.90 - .72*intentional), 0.0, .92);
     if (alpha <= .025) return;
 
 #ifdef TUBEVIZ_HAVE_OPENMP
@@ -1298,7 +1304,8 @@ void compose_layers(
     int width,
     int height,
     double progress,
-    double phase
+    double phase,
+    const CreativeEffect* creative
 ) {
     if(companions.empty()) return;
     if(mode=="single") return;
@@ -1308,16 +1315,31 @@ void compose_layers(
             const double a=n<opacities.size()?opacities[n]:.55;
             if(mode=="luma") blend_layer(dst,companions[n],a*.72,(n&1)?"multiply":"screen");
             else {
-                // Organic traveling mask; unlike old full-frame overlay this keeps
-                // source identity while allowing companion footage to flow through.
+                // Semantic organic mask.  The focal target and subject-protection
+                // radius come from storyboard/visual analysis when available; a
+                // deterministic moving organic mask remains the fallback.
                 const auto base=dst; const auto& src=companions[n];
-                const double cx=width*(.5+.24*std::sin(phase*.73+n*2.1));
-                const double cy=height*(.5+.19*std::cos(phase*.57+n*1.7));
-                const double rx=width*(.32+.10*std::sin(phase*.31+n));
-                const double ry=height*(.28+.08*std::cos(phase*.43+n));
+                const double tx=width*std::clamp(creative ? creative->target_x : .5, .08, .92);
+                const double ty=height*std::clamp(creative ? creative->target_y : .5, .08, .92);
+                const double preserve=std::clamp(creative ? creative->subject_preserve : 0.0, 0.0, 1.0);
+                const double subject_r=std::min(width,height)*std::clamp(creative ? creative->subject_radius : .28, .12, .44);
+                const double orbit_x=width*(.15+.025*n)*(1.0-.42*preserve);
+                const double orbit_y=height*(.13+.018*n)*(1.0-.42*preserve);
+                const double cx=std::clamp(tx+std::sin(phase*.40+n*1.71)*orbit_x,width*.06,width*.94);
+                const double cy=std::clamp(ty+std::cos(phase*.34-n*1.19)*orbit_y,height*.06,height*.94);
+                const double rx=width*(.24+.030*n), ry=height*(.27+.026*n);
                 for(int y=0;y<height;++y)for(int x=0;x<width;++x){
-                    const double q=std::sqrt(((x-cx)*(x-cx))/(rx*rx)+((y-cy)*(y-cy))/(ry*ry));
-                    const double mask=std::clamp((1.18-q)*2.5,0.0,1.0)*a;
+                    const double px=(x-cx)/std::max(1.0,rx), py=(y-cy)/std::max(1.0,ry);
+                    const double q=std::sqrt(px*px+py*py), angle=std::atan2(py,px);
+                    const double boundary=.90+.14*std::sin(angle*3.0+phase*.37+n)+.09*std::sin(angle*5.0-phase*.29+n*1.7)+.055*std::sin(angle*2.0+phase*.61);
+                    double mask=std::clamp((boundary*1.10-q)/std::max(.08,boundary*.30),0.0,1.0);
+                    if(preserve>.0){
+                        const double sx=(x-tx)/std::max(1.0,subject_r), sy=(y-ty)/std::max(1.0,subject_r*1.18);
+                        const double sd=std::sqrt(sx*sx+sy*sy);
+                        const double protected_subject=std::clamp((1.14-sd)/.42,0.0,1.0);
+                        mask*=1.0-protected_subject*preserve*.80;
+                    }
+                    mask*=a;
                     if(mask<=.001)continue; const auto i=static_cast<std::size_t>((y*width+x)*3);
                     for(int c=0;c<3;++c)dst[i+c]=clamp8(base[i+c]*(1-mask)+src[i+c]*mask);
                 }

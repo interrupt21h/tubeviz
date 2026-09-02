@@ -66,8 +66,8 @@ ANALYSIS_PRESETS: dict[str, dict[str, Any]] = {
         "label": "Source First",
         "description": (
             "Modern Tubeviz intelligence with footage-first treatment: full semantic "
-            "and phrase-aware editing, restrained transforms/layers, sparse creative "
-            "punctuation, short temporal memory, and rare hero moments."
+            "and phrase-aware editing, dynamic source-relative color, organic masked "
+            "compositing, sparse creative punctuation, short temporal memory, and rare heroes."
         ),
         "parameters": {
             "section_bars": 8,
@@ -78,7 +78,7 @@ ANALYSIS_PRESETS: dict[str, dict[str, Any]] = {
             "temporal_persistence": 0.10,
             "composition_diversity": 0.25,
             "hero_frequency": 0.10,
-            "composition_intensity": 0.65,
+            "composition_intensity": 0.95,
             "target_unique_clips": 0,
             "novelty_weight": 0.65,
             "visual_match_weight": 1.30,

@@ -28,6 +28,13 @@ double curve4(const double (&v)[4], double p) {
     return std::clamp(v[i] * (1.0 - f) + v[i + 1] * f, 0.0, 1.0);
 }
 
+double directed_color_ramp(double p) {
+    p = std::clamp(p, 0.0, 1.0);
+    if (p <= .38) return .22 + (p/.38) * (.52-.22);
+    if (p <= .76) return .52 + ((p-.38)/.38) * (.90-.52);
+    return .90 + ((p-.76)/.24) * .10;
+}
+
 double hero_env(const CreativeEffect& c, double p) {
     if (c.hero_kind.empty() || c.hero_amount <= 0.0 || p < c.hero_start || p > c.hero_end) return 0.0;
     const double q = (p - c.hero_start) / std::max(1e-6, c.hero_end - c.hero_start);
@@ -106,8 +113,8 @@ constexpr std::string_view kShader = R"SHADER(
 0.0
 //!PARAM hue
 //!TYPE DYNAMIC float
-//!MINIMUM -0.5
-//!MAXIMUM 0.5
+//!MINIMUM -1.75
+//!MAXIMUM 1.75
 0.0
 //!PARAM saturation
 //!TYPE DYNAMIC float
@@ -387,7 +394,8 @@ vec4 hook() {
     float qo = dot(c.rgb, vec3(.211,-.523,.312));
     float ir = dot(ref.rgb, vec3(.596,-.274,-.322));
     float qr = dot(ref.rgb, vec3(.211,-.523,.312));
-    float fa = clamp((source_fidelity-.55)/.45,0.0,1.0)*.78;
+    float hue_intent=clamp(abs(hue)/1.22,0.0,1.0);
+    float fa=clamp((source_fidelity-.55)/.45,0.0,1.0)*(.80-.62*hue_intent);
     float ii = mix(io,ir,fa), qq = mix(qo,qr,fa);
     c.rgb = vec3(yo + .956*ii + .621*qq,
                  yo - .272*ii - .647*qq,
@@ -553,8 +561,9 @@ bool GpuPostProcessor::apply_spatial(
     set_param(impl_->hook, "drift_y", static_cast<float>(c.drift_y));
     set_param(impl_->hook, "phase", static_cast<float>(phase));
     set_param(impl_->hook, "progress", static_cast<float>(progress));
-    set_param(impl_->hook, "hue", static_cast<float>(std::clamp(c.color_hue_shift, -14.0, 14.0) * 3.14159265358979323846 / 180.0));
-    set_param(impl_->hook, "saturation", static_cast<float>(std::clamp(c.color_saturation, .65, 1.35)));
+    const double color_ramp = directed_color_ramp(progress);
+    set_param(impl_->hook, "hue", static_cast<float>(std::clamp(c.color_hue_shift, -95.0, 95.0) * color_ramp * 3.14159265358979323846 / 180.0));
+    set_param(impl_->hook, "saturation", static_cast<float>(1.0 + (std::clamp(c.color_saturation, .65, 1.55)-1.0)*color_ramp));
     set_param(impl_->hook, "contrast", static_cast<float>(std::clamp(c.color_contrast, .75, 1.35)));
     set_param(impl_->hook, "brightness", static_cast<float>(std::clamp(c.color_brightness, .72, 1.28)));
     set_param(impl_->hook, "palette_r", c.palette_r / 255.0f);

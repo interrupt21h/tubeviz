@@ -285,6 +285,28 @@ def plan_transform(
     if section.label == "ambient" and blend == "multiply":
         blend = "normal"
 
+    # Artifact-heavy legacy effects consume the density budget more aggressively
+    # than constructive motion/compositing.  This makes low-density presets such
+    # as Source First and Classic genuinely clean without disabling ripple, vortex,
+    # camera motion, masks, or other useful optical grammar.
+    artifact_scale = _clamp((effect_density / .65) ** 1.35 if effect_density > 0 else 0.0, 0.0, 1.0)
+    glitch *= artifact_scale
+    noise *= artifact_scale
+    pixelate *= artifact_scale
+    rgb_split *= artifact_scale
+    scanlines *= artifact_scale
+    posterize *= artifact_scale
+    edge *= artifact_scale
+    strobe *= artifact_scale
+    shutter *= artifact_scale
+    slit_scan *= artifact_scale
+    solarize *= artifact_scale
+    datamosh *= artifact_scale
+    block_displace *= artifact_scale
+    chroma_delay *= artifact_scale
+    vhs_tracking *= artifact_scale
+    slice_recursion *= artifact_scale
+
     return VideoTransform(
         playback_rate=rate,
         reverse=reverse,

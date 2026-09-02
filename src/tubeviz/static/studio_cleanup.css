@@ -1,0 +1,111 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Progressive hierarchy cleanup layered over gui.css. */
+
+body > nav {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+body > nav .tab { flex: 0 0 auto; }
+body > nav .utility-start { margin-left: auto; }
+body > nav .utility-tab { opacity: .78; }
+body > nav .utility-tab.active,
+body > nav .utility-tab:hover { opacity: 1; }
+
+.studio-control-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: .2rem 0 .8rem;
+}
+.studio-control-heading b { font-size: 1rem; }
+.studio-control-heading span { color: var(--muted, #94a3b8); font-size: .78rem; text-align: right; }
+.studio-primary-controls {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent, #61dafb) 18%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel, #111827) 92%, var(--accent, #61dafb) 8%);
+}
+.studio-essential-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .7rem .9rem;
+}
+.studio-essential-grid > label { margin: 0; min-width: 0; }
+.studio-essential-grid .slider-field { grid-column: span 1; }
+.studio-essential-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem .9rem;
+  margin-top: .85rem;
+  padding-top: .75rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.studio-essential-toggles > label { margin: 0; }
+
+.studio-fine-controls { display: grid; gap: .55rem; margin-top: .8rem; }
+.studio-control-group {
+  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel, #111827) 97%, white 3%);
+}
+.studio-control-group > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .75rem .9rem;
+  list-style: none;
+}
+.studio-control-group > summary::-webkit-details-marker { display: none; }
+.studio-control-group > summary::after { content: '›'; opacity: .6; transform: rotate(90deg); transition: transform .15s ease; }
+.studio-control-group[open] > summary::after { transform: rotate(-90deg); }
+.studio-control-group > summary span { font-weight: 650; }
+.studio-control-group > summary small { color: var(--muted, #94a3b8); font-size: .75rem; margin-left: auto; }
+.studio-control-group-body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .7rem .9rem;
+  padding: .15rem .9rem 1rem;
+}
+.studio-control-group-body > label { margin: 0; min-width: 0; }
+.studio-control-group-body > .check,
+.studio-control-group-body > p,
+.studio-control-group-body > button { align-self: end; }
+.studio-control-group-body > p { grid-column: 1 / -1; }
+.studio-experimental-group > summary span::after {
+  content: ' · opt-in';
+  color: var(--muted, #94a3b8);
+  font-size: .72rem;
+  font-weight: 500;
+}
+.studio-primary-action { margin-top: 1rem; justify-content: flex-end; }
+.studio-primary-action .primary { min-width: 210px; }
+
+.ingest-essential-grid { margin: .85rem 0; }
+.ingest-primary-toggles { margin-bottom: .75rem; }
+.ingest-quality-group { margin-top: .35rem; }
+
+/* Make the persistent context useful without consuming a large strip of screen. */
+.project-context-bar { padding-top: .45rem; padding-bottom: .45rem; }
+.project-context-item span { font-size: .68rem; }
+.project-context-item b { font-size: .78rem; }
+
+@media (max-width: 1100px) {
+  body > nav .utility-start { margin-left: 1rem; }
+  .studio-essential-grid,
+  .studio-control-group-body { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .studio-essential-grid,
+  .studio-control-group-body { grid-template-columns: 1fr; }
+  .studio-control-heading,
+  .studio-control-group > summary { align-items: flex-start; flex-direction: column; gap: .25rem; }
+  .studio-control-group > summary small { margin-left: 0; }
+  body > nav .utility-start { margin-left: .65rem; }
+}

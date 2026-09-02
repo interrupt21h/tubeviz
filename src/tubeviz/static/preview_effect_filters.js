@@ -191,7 +191,7 @@
   const creativeAllZero = new Set([
     'flow_warp', 'flow_trails', 'flow_rgb', 'temporal_echo', 'temporal_rgb',
     'temporal_smear', 'camera_energy', 'camera_drift_x', 'camera_drift_y',
-    'depth_parallax', 'depth_fog', 'subject_preserve', 'background_warp',
+    'depth_parallax', 'depth_fog', 'background_warp',
     'feedback', 'local_symmetry', 'texture_bloom', 'texture_streaks',
     'palette_strength', 'abstraction', 'hero_amount', 'history_inherit',
   ]);

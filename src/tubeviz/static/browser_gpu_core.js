@@ -210,6 +210,7 @@ struct LayerUniforms {
   l1a: vec4f, l1b: vec4f, l1c: vec4f, l1d: vec4f,
   l2a: vec4f, l2b: vec4f, l2c: vec4f, l2d: vec4f,
   l3a: vec4f, l3b: vec4f, l3c: vec4f, l3d: vec4f,
+  g2: vec4f, // semantic target x/y, subject radius, subject preserve
 };
 @group(0) @binding(0) var video0: texture_external;
 @group(0) @binding(1) var video1: texture_external;
@@ -259,6 +260,22 @@ fn layerBlend(base:vec3f,over:vec3f,alpha:f32,mode:f32)->vec3f{
 }
 fn addLayer(base:vec3f,s:vec4f,mode:f32)->vec3f{return layerBlend(base,s.rgb,s.a,mode);}
 fn blendMode(i:i32)->f32{if(i==1){return layers.l1c.z;}if(i==2){return layers.l2c.z;}if(i==3){return layers.l3c.z;}return layers.l0c.z;}
+fn organicFlowMask(uv:vec2f,fi:f32,time:f32)->f32{
+  let target=clamp(layers.g2.xy,vec2f(.08),vec2f(.92));
+  let subjectRadius=clamp(layers.g2.z,.12,.44);let preserve=clamp(layers.g2.w,0.0,1.0);
+  let orbit=vec2f(.15+.025*fi,.13+.018*fi)*(1.0-.42*preserve);
+  let center=clamp(target+vec2f(sin(time*.40+fi*1.71),cos(time*.34-fi*1.19))*orbit,vec2f(.06),vec2f(.94));
+  let radii=vec2f(.24+.030*fi,.27+.026*fi);let p=(uv-center)/radii;
+  let angle=atan2(p.y,p.x);let r=length(p);
+  // Multi-lobed, breathing boundary: the GPU path now follows the same organic
+  // grammar as the Canvas fallback rather than reducing flow to a soft ellipse.
+  let boundary=.90+.14*sin(angle*3.0+time*.37+fi)+.09*sin(angle*5.0-time*.29+fi*1.7)+.055*sin(angle*2.0+time*.61);
+  var mask=1.0-smoothstep(boundary*.80,boundary*1.10,r);
+  let subjectP=(uv-target)/vec2(subjectRadius,subjectRadius*1.18);
+  let subject=1.0-smoothstep(.72,1.14,length(subjectP));
+  mask*=1.0-subject*preserve*.80;
+  return clamp(mask,0.0,1.0);
+}
 @fragment fn layer_fs(in:LayerVSOut)->@location(0) vec4f{
   let uv=layerSatUv(in.uv);let mode=i32(round(layers.g0.x));let time=layers.g0.y;let progress=clamp(layers.g0.z,0.0,1.0);let count=max(1,i32(round(layers.g0.w)));
   if(mode==7&&count>1){let a=sample0(uv);let b=sample1(uv);return vec4f(mix(a.rgb,b.rgb,clamp(layers.g1.x,0.0,1.0)),1);}
@@ -271,9 +288,8 @@ fn blendMode(i:i32)->f32{if(i==1){return layers.l1c.z;}if(i==2){return layers.l2
   if(mode==2&&count>1){let boundary=.18+.64*progress+sin(time*.45)*.08+(uv.y-.5)*.22;let s=sample1(uv);base=layerBlend(base,s.rgb,s.a*select(0.0,1.0,uv.x<boundary),blendMode(1));return vec4f(base,1);}
   if(mode==1&&count>1){
     for(var i=1;i<4;i++){
-      if(i>=count){break;}let fi=f32(i);let cx=.50+.27*sin(time*.55*.73+fi*1.31);let cy=.50+.23*cos(time*.55*.61-fi*.70);
-      let dx=(uv.x-cx)/(.26+.035*fi);let dy=(uv.y-cy)/(.28+.030*fi);let mask=1.0-smoothstep(.72,1.08,dx*dx+dy*dy);
-      let s=sampleLayer(i,uv);base=layerBlend(base,s.rgb,s.a*mask*(.55+.12*sin(time+fi)),blendMode(i));
+      if(i>=count){break;}let fi=f32(i);let mask=organicFlowMask(uv,fi,time);
+      let s=sampleLayer(i,uv);base=layerBlend(base,s.rgb,s.a*mask*(.58+.12*sin(time+fi)),blendMode(i));
     }
     return vec4f(base,1);
   }
@@ -311,7 +327,7 @@ function layerBlendMode(value){
   return mode==='screen'?1:mode==='multiply'?2:mode==='overlay'?3:mode==='lighten'?4:0;
 }
 function layerUniforms(layerList,composition,width,height){
-  const out=new Float32Array(72);const count=Math.max(1,Math.min(4,Number(composition.count??layerList.length)));
+  const out=new Float32Array(76);const count=Math.max(1,Math.min(4,Number(composition.count??layerList.length)));
   out.set([Number(composition.mode??0),Number(composition.time??0),Number(composition.progress??0),count,Number(composition.transition??0),width/Math.max(1,height),Number(composition.focus??0),0],0);
   const first=layerList[0]||{};
   for(let i=0;i<4;i++){
@@ -323,6 +339,7 @@ function layerUniforms(layerList,composition,width,height){
     out.set([Number(item.rotationRadians||0),item.mirror?1:0,layerBlendMode(item.blendMode),i<count?1:0],base+8);
     out.set([sw/Math.max(1,sh),0,0,0],base+12);
   }
+  out.set([Number(composition.targetX??.5),Number(composition.targetY??.5),Number(composition.subjectRadius??.28),Number(composition.subjectPreserve??0)],72);
   return out;
 }
 
@@ -338,7 +355,7 @@ export class BrowserGpuRendererCore{
     this.canvas=canvas;this.device=device;this.context=context;this.format=format;this.pipeline=pipeline;this.layerPipeline=layerPipeline;this.width=0;this.height=0;this.failed=false;this.failureReason='';this.historyReady=false;this.onDeviceLost=null;
     this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',addressModeU:'clamp-to-edge',addressModeV:'clamp-to-edge'});
     this.uniformBuffer=device.createBuffer({size:224,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-    this.layerUniformBuffer=device.createBuffer({size:288,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+    this.layerUniformBuffer=device.createBuffer({size:304,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
     // Device loss is asynchronous. Surface it to the facade so live preview can
     // immediately restore the Canvas2D compositor instead of freezing on the last
     // successfully submitted GPU frame.

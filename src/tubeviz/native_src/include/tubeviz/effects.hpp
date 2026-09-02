@@ -93,7 +93,8 @@ void compose_layers(
     int width,
     int height,
     double progress,
-    double phase
+    double phase,
+    const CreativeEffect* creative = nullptr
 );
 
 void apply_creative_effects(

@@ -1,3 +1,19 @@
+# Unreleased — Constructive visual direction and Studio simplification
+
+## Visual direction
+
+- Restore pronounced, source-relative musical hue travel and within-shot color ramps without returning to fixed vibe LUT targets that caused track-wide purple/magenta drift.
+- Treat directed color as intentional choreography in browser and native source-fidelity paths so palette protection no longer cancels the authored hue movement.
+- Promote multi-source `flow` composition as a constructive visual treatment again, using semantic focal points, subject radius, and foreground-preservation confidence to shape organic masks around meaningful subjects.
+- Align organic masked compositing across WebGPU, Canvas fallback, native resident GPU, and native CPU fallback instead of using a simplified elliptical GPU mask.
+- Increase **Source First** masked-composition strength while keeping codec glitch off and destructive creative/temporal treatments sparse.
+- Make artifact-heavy legacy transforms consume the effect-density budget aggressively, so low-density Source First / Classic edits suppress noise, pixelation, datamosh, VHS, harsh RGB separation, and related damage while retaining constructive optical motion.
+
+## Studio
+
+- Simplify Studio without removing capability: keep presets and the highest-impact creative controls visible, and collapse edit intelligence, detailed creative tuning, AI/model settings, and experimental codec controls into focused groups.
+- Reduce Ingest clutter by keeping source/quality essentials visible and moving candidate-pool/filter thresholds plus automation details into optional groups. All existing control IDs and Advanced CLI parity remain intact.
+
 # 0.44.1 — Rendering and preview reliability
 
 ## Preview and WebGPU
